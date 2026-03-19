@@ -166,7 +166,7 @@ function startApp() {
     ifcType:'all', storey:'all', material:'all'
   };
   var INIT = {
-    models:[], clashes:[], issues:[], activeId:null, showModal:false, tab:'clashes',
+    models:[], clashes:[], issues:[], activeId:null, showModal:false, modalElement:null, tab:'clashes',
     rules:{ modelA:'all', modelB:'all', hard:true, soft:true, clearance:50 },
     detecting:false, sectionAxis:null, sectionPos:0.5,
     filters:Object.assign({},INIT_FILTERS), floors:[]
@@ -182,7 +182,7 @@ function startApp() {
       case 'UPD_ISSUE':   return Object.assign({},s,{issues:s.issues.map(function(i){return i.id===a.id?Object.assign({},i,a.u):i})});
       case 'UPD_CLASH':   return Object.assign({},s,{clashes:s.clashes.map(function(c){return c.id===a.id?Object.assign({},c,a.u):c})});
       case 'ACTIVE':      return Object.assign({},s,{activeId:a.id});
-      case 'MODAL':       return Object.assign({},s,{showModal:a.v});
+      case 'MODAL':       return Object.assign({},s,{showModal:a.v, modalElement:a.el||null});
       case 'UPD_RULES':   return Object.assign({},s,{rules:Object.assign({},s.rules,a.u)});
       case 'UPD_FILTERS': return Object.assign({},s,{filters:Object.assign({},s.filters,a.u)});
       case 'RESET_FILTERS': return Object.assign({},s,{filters:Object.assign({},INIT_FILTERS)});
@@ -654,7 +654,7 @@ function startApp() {
 
   var _flyTo = null;
   function Viewer(props) {
-    var s = props.s;
+    var s = props.s, d = props.d;
     var ref = useRef(null);
     var state3d = useRef({scene:null,camera:null,renderer:null,orbit:null,mg:null,map:{},raf:null});
     var se = useState(null), selectedEl=se[0], setSelectedEl=se[1];
@@ -816,8 +816,12 @@ function startApp() {
       ${selectedEl && html`<div style=${{position:'absolute',bottom:'.75rem',left:'.75rem',width:280,maxHeight:'50%',overflowY:'auto',background:'rgba(15,23,42,.95)',border:'1px solid #334155',borderRadius:8,padding:'.6rem',pointerEvents:'auto',boxShadow:'0 4px 20px rgba(0,0,0,.5)'}}>
         <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.4rem'}}>
           <span style=${{fontSize:'.7rem',fontWeight:600,color:'#93c5fd'}}>Element Properties</span>
-          <button onClick=${function(){setSelectedEl(null);if(hlRef.current&&state3d.current.scene){state3d.current.scene.remove(hlRef.current);hlRef.current=null;}}}
-            style=${{...S_BTN,padding:'0 4px',background:'none',color:'#475569',fontSize:'.7rem'}}>✕</button>
+          <div style=${{display:'flex',gap:'.3rem'}}>
+            <button onClick=${function(){d({t:'MODAL',v:true,el:selectedEl});d({t:'TAB',v:'issues'});}}
+              style=${{...S_BTN,padding:'.1rem .4rem',background:'#2563eb',color:'#fff',fontSize:'.65rem',fontWeight:600,borderRadius:4}}>+ Issue</button>
+            <button onClick=${function(){setSelectedEl(null);if(hlRef.current&&state3d.current.scene){state3d.current.scene.remove(hlRef.current);hlRef.current=null;}}}
+              style=${{...S_BTN,padding:'0 4px',background:'none',color:'#475569',fontSize:'.7rem'}}>✕</button>
+          </div>
         </div>
         <div style=${{fontSize:'.65rem',color:'#f59e0b',marginBottom:'.3rem'}}>${selectedEl.modelName}</div>
         ${ep && ep.ifcType && html`<div style=${ROW}><span style=${LS}>Type</span><span style=${VS}>${ep.ifcType}</span></div>`}
@@ -1206,7 +1210,7 @@ function startApp() {
 
   function IssueRow(props) {
     var it=props.item, active=props.active, d=props.d, isClash=props.isClash;
-    var icon = it.type==='hard'?'🔴':it.type==='soft'?'🟡':'📌';
+    var icon = it.type==='hard'?'🔴':it.type==='soft'?'🟡':it.source==='element'?'🏗':'📌';
     var stBg = (STAT[it.status]||STAT.open).bg;
     return html`<div onClick=${function(){d({t:'ACTIVE',id:active?null:it.id});if(!active&&it.point&&_flyTo)_flyTo(it.point);}}
       style=${{padding:'.6rem .7rem',borderBottom:'1px solid #1e293b',cursor:'pointer',background:active?'#1e293b':'transparent',borderLeft:active?'2px solid #3b82f6':'2px solid transparent'}}>
@@ -1219,15 +1223,23 @@ function startApp() {
           </div>
           <p style=${{color:'#475569',fontSize:'.65rem',marginTop:'.1rem'}} class="lc2">${it.description}</p>
           ${it.distance!=null && html`<span style=${{fontSize:'.55rem',color:'#64748b',marginTop:'.1rem',display:'inline-block'}}>${it.distance} mm${it.selfClash?' · self':''}</span>`}
+          ${!isClash && it.elementType && html`<div style=${{display:'flex',gap:'.2rem',marginTop:'.15rem',flexWrap:'wrap'}}>
+            <span style=${{fontSize:'.5rem',background:'#1e3a5f',color:'#93c5fd',padding:'.05rem .25rem',borderRadius:3}}>${it.elementType}</span>
+            ${it.storey && html`<span style=${{fontSize:'.5rem',background:'#1e293b',color:'#94a3b8',padding:'.05rem .25rem',borderRadius:3}}>${it.storey}</span>`}
+          </div>`}
         </div>
       </div>
       ${active && html`<div style=${{marginTop:'.4rem',paddingTop:'.4rem',borderTop:'1px solid #334155'}}>
-        <div style=${{display:'flex',gap:'.25rem',marginBottom:'.4rem'}}>
+        <div style=${{display:'flex',gap:'.25rem',marginBottom:'.4rem',flexWrap:'wrap'}}>
           ${Object.keys(STAT).map(function(k){return html`<button key=${k}
             onClick=${function(e){e.stopPropagation();d({t:isClash?'UPD_CLASH':'UPD_ISSUE',id:it.id,u:{status:k}})}}
             style=${{...S_BTN,fontSize:'.6rem',padding:'.15rem .35rem',background:it.status===k?STAT[k].bg:'#1e293b',color:it.status===k?'#fff':'#475569'}}>${STAT[k].label}</button>`})}
         </div>
         ${(it.propsA||it.propsB) && html`<${ClashProps} item=${it} />`}
+        ${!isClash && it.elementProps && html`<${PropBlock} p=${it.elementProps} label=${'Linked: '+(it.elementType||'')+' '+(it.elementName||'#'+it.elementId)} />`}
+        ${!isClash && it.assignee && html`<div style=${{fontSize:'.55rem',color:'#94a3b8',marginTop:'.2rem'}}>Assigned: ${it.assignee}</div>`}
+        ${!isClash && it.dueDate && html`<div style=${{fontSize:'.55rem',color:'#94a3b8'}}>Due: ${it.dueDate}</div>`}
+        ${!isClash && it.category && html`<div style=${{fontSize:'.55rem',color:'#64748b'}}>Category: ${it.category}</div>`}
       </div>`}
     </div>`;
   }
@@ -1280,8 +1292,13 @@ function startApp() {
   // ── New Issue Modal ────────────────────────────────────────────
 
   function NewIssueModal(props) {
-    var d=props.d;
-    var f=useState({title:'',desc:'',priority:'normal'}), form=f[0], setForm=f[1];
+    var d=props.d, el=props.el;
+    var ep = el ? el.props||{} : null;
+    var hasEl = !!el;
+    var defaultTitle = hasEl ? ('Issue: '+(ep.ifcType||'Element')+' '+(ep.name||'#'+el.expressId)) : '';
+    var defaultDesc = hasEl ? ('Model: '+el.modelName+'\nType: '+(ep.ifcType||'Unknown')+'\nName: '+(ep.name||'N/A')+'\nStorey: '+(ep.storey||'N/A')+'\nMaterial: '+(ep.material||'N/A')+'\nExpress ID: #'+el.expressId) : '';
+
+    var f=useState({title:defaultTitle,desc:defaultDesc,priority:'normal',category:'design',assignee:'',dueDate:''}), form=f[0], setForm=f[1];
     useEffect(function(){
       function onKey(e){if(e.key==='Escape')d({t:'MODAL',v:false});}
       window.addEventListener('keydown',onKey);
@@ -1290,28 +1307,68 @@ function startApp() {
     function upd(k){return function(e){setForm(function(prev){var n=Object.assign({},prev);n[k]=e.target.value;return n;})}}
     function submit(e){
       e.preventDefault();
-      d({t:'ADD_ISSUE',v:{id:uid(),source:'manual',type:'manual',status:'open',title:form.title,description:form.desc,priority:form.priority,createdAt:new Date().toISOString()}});
+      var issue = {
+        id:uid(), source:hasEl?'element':'manual', type:'manual', status:'open',
+        title:form.title, description:form.desc, priority:form.priority,
+        category:form.category, assignee:form.assignee||'',
+        dueDate:form.dueDate||'', createdAt:new Date().toISOString()
+      };
+      if (hasEl) {
+        issue.elementId = el.expressId;
+        issue.modelName = el.modelName;
+        issue.elementType = ep.ifcType||'';
+        issue.elementName = ep.name||'';
+        issue.storey = ep.storey||'';
+        issue.material = ep.material||'';
+        issue.elementProps = ep;
+      }
+      d({t:'ADD_ISSUE',v:issue});
       d({t:'MODAL',v:false}); d({t:'TAB',v:'issues'});
     }
     var MS={position:'fixed',inset:0,background:'rgba(0,0,0,.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:50};
-    var MX={background:'#1e293b',border:'1px solid #334155',borderRadius:12,width:360,maxWidth:'95vw',boxShadow:'0 25px 50px rgba(0,0,0,.5)'};
+    var MX={background:'#1e293b',border:'1px solid #334155',borderRadius:12,width:420,maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 25px 50px rgba(0,0,0,.5)'};
+    var LBL={fontSize:'.7rem',color:'#64748b',display:'block',marginBottom:'.2rem'};
+    var ROW={display:'flex',justifyContent:'space-between',padding:'.1rem 0'};
+    var LS={fontSize:'.6rem',color:'#64748b'}; var VS={fontSize:'.6rem',color:'#cbd5e1'};
     return html`<div style=${MS}><div style=${MX}>
       <div style=${{display:'flex',justifyContent:'space-between',padding:'.8rem 1rem',borderBottom:'1px solid #334155'}}>
-        <span style=${{fontWeight:600,fontSize:'.875rem'}}>New Issue</span>
+        <span style=${{fontWeight:600,fontSize:'.875rem'}}>${hasEl?'New Element Issue':'New Issue'}</span>
         <button onClick=${function(){d({t:'MODAL',v:false})}} style=${{...S_BTN,background:'none',color:'#64748b',fontSize:'1.1rem',padding:0}}>✕</button>
       </div>
+      ${hasEl && html`<div style=${{padding:'.6rem 1rem',borderBottom:'1px solid #334155',background:'#0f172a'}}>
+        <div style=${{fontSize:'.65rem',fontWeight:600,color:'#93c5fd',marginBottom:'.3rem'}}>Linked Element</div>
+        <div style=${{display:'flex',flexWrap:'wrap',gap:'.3rem'}}>
+          ${ep.ifcType && html`<span style=${{fontSize:'.6rem',background:'#1e3a5f',color:'#93c5fd',padding:'.1rem .4rem',borderRadius:4}}>${ep.ifcType}</span>`}
+          ${ep.name && html`<span style=${{fontSize:'.6rem',background:'#1e293b',color:'#e2e8f0',padding:'.1rem .4rem',borderRadius:4}}>${ep.name}</span>`}
+          ${ep.storey && html`<span style=${{fontSize:'.6rem',background:'#1e293b',color:'#94a3b8',padding:'.1rem .4rem',borderRadius:4}}>${ep.storey}</span>`}
+          ${ep.material && html`<span style=${{fontSize:'.6rem',background:'#1e293b',color:'#94a3b8',padding:'.1rem .4rem',borderRadius:4}}>${ep.material}</span>`}
+        </div>
+        <div style=${{fontSize:'.55rem',color:'#475569',marginTop:'.2rem'}}>${el.modelName} · #${el.expressId}</div>
+      </div>`}
       <form onSubmit=${submit} style=${{padding:'1rem',display:'flex',flexDirection:'column',gap:'.5rem'}}>
-        <div><label style=${{fontSize:'.7rem',color:'#64748b',display:'block',marginBottom:'.2rem'}}>Title *</label>
-          <input required value=${form.title} onInput=${upd('title')} placeholder="Short description" style=${S_INPUT} /></div>
-        <div><label style=${{fontSize:'.7rem',color:'#64748b',display:'block',marginBottom:'.2rem'}}>Description</label>
-          <textarea value=${form.desc} onInput=${upd('desc')} rows="3" placeholder="More context…" style=${{...S_INPUT,resize:'none'}} /></div>
-        <div><label style=${{fontSize:'.7rem',color:'#64748b',display:'block',marginBottom:'.2rem'}}>Priority</label>
-          <select value=${form.priority} onChange=${upd('priority')} style=${S_INPUT}>
-            <option value="critical">Critical</option><option value="normal">Normal</option><option value="low">Low</option>
-          </select></div>
-        <div style=${{display:'flex',gap:'.4rem',paddingTop:'.2rem'}}>
+        <div><label style=${LBL}>Title *</label>
+          <input required value=${form.title} onInput=${upd('title')} placeholder="Short description of the issue" style=${S_INPUT} /></div>
+        <div><label style=${LBL}>Description</label>
+          <textarea value=${form.desc} onInput=${upd('desc')} rows=${hasEl?'4':'3'} placeholder="Describe the issue in detail…" style=${{...S_INPUT,resize:'vertical'}} /></div>
+        <div style=${{display:'flex',gap:'.5rem'}}>
+          <div style=${{flex:1}}><label style=${LBL}>Priority</label>
+            <select value=${form.priority} onChange=${upd('priority')} style=${S_INPUT}>
+              <option value="critical">Critical</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option>
+            </select></div>
+          <div style=${{flex:1}}><label style=${LBL}>Category</label>
+            <select value=${form.category} onChange=${upd('category')} style=${S_INPUT}>
+              <option value="design">Design</option><option value="coordination">Coordination</option><option value="constructability">Constructability</option><option value="safety">Safety</option><option value="code_compliance">Code Compliance</option><option value="other">Other</option>
+            </select></div>
+        </div>
+        <div style=${{display:'flex',gap:'.5rem'}}>
+          <div style=${{flex:1}}><label style=${LBL}>Assigned to</label>
+            <input value=${form.assignee} onInput=${upd('assignee')} placeholder="Name or team" style=${S_INPUT} /></div>
+          <div style=${{flex:1}}><label style=${LBL}>Due date</label>
+            <input type="date" value=${form.dueDate} onInput=${upd('dueDate')} style=${S_INPUT} /></div>
+        </div>
+        <div style=${{display:'flex',gap:'.4rem',paddingTop:'.3rem'}}>
           <button type="button" onClick=${function(){d({t:'MODAL',v:false})}} style=${{...S_BTN,flex:1,background:'#334155',color:'#e2e8f0'}}>Cancel</button>
-          <button type="submit" style=${{...S_BTN,flex:1,background:'#2563eb',color:'#fff',fontWeight:600}}>Create</button>
+          <button type="submit" style=${{...S_BTN,flex:1,background:'#2563eb',color:'#fff',fontWeight:600}}>Create Issue</button>
         </div>
       </form>
     </div></div>`;
@@ -1325,11 +1382,11 @@ function startApp() {
       <${Header} s=${s} d=${d} />
       <div style=${{display:'flex',flex:1,overflow:'hidden'}}>
         <${ModelSidebar} s=${s} d=${d} />
-        <${Viewer} s=${s} />
+        <${Viewer} s=${s} d=${d} />
         <${IssuePanel} s=${s} d=${d} />
       </div>
       <${ClashBar} s=${s} d=${d} />
-      ${s.showModal && html`<${NewIssueModal} d=${d} />`}
+      ${s.showModal && html`<${NewIssueModal} d=${d} el=${s.modalElement} />`}
     </div>`;
   }
 
