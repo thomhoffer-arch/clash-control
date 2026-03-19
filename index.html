@@ -183,6 +183,8 @@ function startApp() {
       case 'ADD_MODEL':   return Object.assign({},s,{models:s.models.concat([a.v])});
       case 'DEL_MODEL':   return Object.assign({},s,{models:s.models.filter(function(m){return m.id!==a.id})});
       case 'UPD_MODEL':   return Object.assign({},s,{models:s.models.map(function(m){return m.id===a.id?Object.assign({},m,a.u):m})});
+      case 'TOGGLE_STOREY': return Object.assign({},s,{models:s.models.map(function(m){if(m.id!==a.id)return m;var hs=Object.assign({},m.hiddenStoreys||{});if(hs[a.storey])delete hs[a.storey];else hs[a.storey]=true;return Object.assign({},m,{hiddenStoreys:hs});})});
+      case 'TOGGLE_ALL_STOREYS': return Object.assign({},s,{models:s.models.map(function(m){if(m.id!==a.id)return m;return Object.assign({},m,{hiddenStoreys:a.hide?a.storeys.reduce(function(o,st){o[st]=true;return o;},{}):{}}); })});
       case 'SET_CLASHES': var newSt={clashes:a.v, detecting:false, activeId:null, floors:deriveFloors(a.v)}; if(s.prefs.resetFiltersOnRun!==false) newSt.filters=Object.assign({},INIT_FILTERS); return Object.assign({},s,newSt);
       case 'DETECTING':   return Object.assign({},s,{detecting:true});
       case 'ADD_ISSUE':   return Object.assign({},s,{issues:s.issues.concat([a.v])});
@@ -810,7 +812,22 @@ function startApp() {
             S.orbit.sync();
           }
         }
-        if(S.map[model.id]) S.map[model.id].visible = model.visible!==false;
+        if(S.map[model.id]) {
+          S.map[model.id].visible = model.visible!==false;
+          // Apply storey visibility
+          var hs = model.hiddenStoreys||{};
+          var elMap = {};
+          (model.elements||[]).forEach(function(el){
+            var st = el.props&&el.props.storey||'';
+            elMap[el.expressId] = st;
+          });
+          S.map[model.id].traverse(function(obj){
+            if(obj.isMesh && obj.userData.expressID!=null){
+              var st = elMap[obj.userData.expressID]||'';
+              obj.visible = !hs[st];
+            }
+          });
+        }
       });
     }, [s.models]);
 
@@ -1011,6 +1028,29 @@ function startApp() {
           <input type="color" value=${m.color} onChange=${function(e){d({t:'UPD_MODEL',id:m.id,u:{color:e.target.value}})}} style=${{width:24,height:20,border:'none',padding:0,background:'none',cursor:'pointer'}} />
         </div>
         <span style=${{fontSize:'.65rem',color:'#334155'}}>${(m.elements&&m.elements.length||0)} elements</span>
+        ${m.storeys&&m.storeys.length>0 && html`<div style=${{borderTop:'1px solid #334155',paddingTop:'.35rem',marginTop:'.1rem'}}>
+          <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.25rem'}}>
+            <span style=${{fontSize:'.6rem',fontWeight:600,color:'#64748b',textTransform:'uppercase',letterSpacing:'.03em'}}>Levels</span>
+            <div style=${{display:'flex',gap:'.2rem'}}>
+              <button onClick=${function(){d({t:'TOGGLE_ALL_STOREYS',id:m.id,storeys:m.storeys,hide:false})}}
+                style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .25rem',background:'#0f172a',color:'#64748b'}}>All on</button>
+              <button onClick=${function(){d({t:'TOGGLE_ALL_STOREYS',id:m.id,storeys:m.storeys,hide:true})}}
+                style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .25rem',background:'#0f172a',color:'#64748b'}}>All off</button>
+            </div>
+          </div>
+          <div style=${{maxHeight:120,overflowY:'auto',display:'flex',flexDirection:'column',gap:'.15rem'}}>
+            ${m.storeys.map(function(st){
+              var hidden = m.hiddenStoreys&&m.hiddenStoreys[st];
+              return html`<label key=${st} style=${{display:'flex',alignItems:'center',gap:'.3rem',cursor:'pointer',padding:'.1rem 0'}}>
+                <span onClick=${function(e){e.preventDefault();d({t:'TOGGLE_STOREY',id:m.id,storey:st})}}
+                  style=${{width:12,height:12,borderRadius:2,border:'2px solid '+(hidden?'#475569':'#3b82f6'),background:hidden?'transparent':'#3b82f6',cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
+                  ${!hidden && html`<span style=${{color:'#fff',fontSize:8}}>✓</span>`}
+                </span>
+                <span style=${{fontSize:'.65rem',color:hidden?'#475569':'#e2e8f0',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title=${st}>${st}</span>
+              </label>`;
+            })}
+          </div>
+        </div>`}
       </div>`}
     </div>`;
   }
