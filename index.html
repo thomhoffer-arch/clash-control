@@ -166,18 +166,24 @@ function startApp() {
     floor:'all', distMin:0, distMax:9999, elementId:'', selfClash:'all',
     ifcType:'all', storey:'all', material:'all'
   };
+  var INIT_PREFS = {
+    autoFlyTo:true, autoHighlight:true, showGrid:true, showAxes:true,
+    defaultPriority:'normal', defaultCategory:'design', defaultStatus:'open',
+    defaultClearance:50, resetFiltersOnRun:true
+  };
   var INIT = {
-    models:[], clashes:[], issues:[], activeId:null, showModal:false, modalElement:null, tab:'clashes',
+    models:[], clashes:[], issues:[], activeId:null, showModal:false, showSettings:false, modalElement:null, tab:'clashes',
     rules:{ modelA:'all', modelB:'all', hard:true, soft:true, clearance:50 },
     detecting:false, sectionAxis:null, sectionPos:0.5,
-    filters:Object.assign({},INIT_FILTERS), floors:[]
+    filters:Object.assign({},INIT_FILTERS), floors:[],
+    prefs:Object.assign({},INIT_PREFS)
   };
   function reducer(s,a) {
     switch(a.t) {
       case 'ADD_MODEL':   return Object.assign({},s,{models:s.models.concat([a.v])});
       case 'DEL_MODEL':   return Object.assign({},s,{models:s.models.filter(function(m){return m.id!==a.id})});
       case 'UPD_MODEL':   return Object.assign({},s,{models:s.models.map(function(m){return m.id===a.id?Object.assign({},m,a.u):m})});
-      case 'SET_CLASHES': return Object.assign({},s,{clashes:a.v, detecting:false, activeId:null, floors:deriveFloors(a.v), filters:Object.assign({},INIT_FILTERS)});
+      case 'SET_CLASHES': var newSt={clashes:a.v, detecting:false, activeId:null, floors:deriveFloors(a.v)}; if(s.prefs.resetFiltersOnRun!==false) newSt.filters=Object.assign({},INIT_FILTERS); return Object.assign({},s,newSt);
       case 'DETECTING':   return Object.assign({},s,{detecting:true});
       case 'ADD_ISSUE':   return Object.assign({},s,{issues:s.issues.concat([a.v])});
       case 'UPD_ISSUE':   return Object.assign({},s,{issues:s.issues.map(function(i){return i.id===a.id?Object.assign({},i,a.u):i})});
@@ -189,6 +195,8 @@ function startApp() {
       case 'RESET_FILTERS': return Object.assign({},s,{filters:Object.assign({},INIT_FILTERS)});
       case 'SECTION':     return Object.assign({},s,{sectionAxis:a.axis, sectionPos:a.pos!=null?a.pos:s.sectionPos});
       case 'TAB':         return Object.assign({},s,{tab:a.v});
+      case 'SETTINGS':    return Object.assign({},s,{showSettings:a.v});
+      case 'UPD_PREFS':   return Object.assign({},s,{prefs:Object.assign({},s.prefs,a.u)});
       default:            return s;
     }
   }
@@ -756,8 +764,10 @@ function startApp() {
       sun.position.set(80,120,60); scene.add(sun);
       var fill = new THREE.DirectionalLight(0xd0e8ff,0.3);
       fill.position.set(-50,-20,-50); scene.add(fill);
-      scene.add(new THREE.GridHelper(200,80,0x1e3a5f,0x172554));
-      scene.add(new THREE.AxesHelper(3));
+      S.grid = new THREE.GridHelper(200,80,0x1e3a5f,0x172554);
+      scene.add(S.grid);
+      S.axes = new THREE.AxesHelper(3);
+      scene.add(S.axes);
 
       var mg = new THREE.Group(); scene.add(mg); S.mg = mg;
 
@@ -817,6 +827,13 @@ function startApp() {
       S.renderer.clippingPlanes=planes;
       S.mg.traverse(function(obj){if(obj.isMesh&&obj.material){obj.material.clippingPlanes=planes;obj.material.needsUpdate=true;}});
     }, [s.sectionAxis, s.sectionPos]);
+
+    // Prefs: grid & axes visibility
+    useEffect(function(){
+      var S = state3d.current;
+      if(S.grid) S.grid.visible = s.prefs.showGrid!==false;
+      if(S.axes) S.axes.visible = s.prefs.showAxes!==false;
+    }, [s.prefs.showGrid, s.prefs.showAxes]);
 
     var P = {position:'absolute',pointerEvents:'none',fontSize:'.7rem',padding:'.2rem .6rem',borderRadius:'5px'};
     var ep = selectedEl ? selectedEl.props : null;
@@ -897,6 +914,9 @@ function startApp() {
           style=${{...S_BTN,background:all.length?'#2563eb':'#1e293b',color:all.length?'#fff':'#475569',cursor:all.length?'pointer':'not-allowed'}}>
           ↓ Export BCF
         </button>
+        <button onClick=${function(){d({t:'SETTINGS',v:true})}}
+          style=${{...S_BTN,background:'#1e293b',color:'#94a3b8',border:'1px solid #334155',fontSize:'.85rem',padding:'.3rem .5rem'}}
+          title="Settings">⚙</button>
       </div>
     </header>`;
   }
@@ -1177,7 +1197,7 @@ function startApp() {
           <div style=${{fontSize:'2rem',marginBottom:'.3rem'}}>${isClashTab?'✅':'📋'}</div>
           ${activeCount>0||f.search?'No matches':'No '+(isClashTab?'clashes found yet':'issues yet')}
         </div>`}
-        ${items.map(function(it){return html`<${IssueRow} key=${it.id} item=${it} active=${s.activeId===it.id} d=${d} isClash=${isClashTab} />`})}
+        ${items.map(function(it){return html`<${IssueRow} key=${it.id} item=${it} active=${s.activeId===it.id} d=${d} isClash=${isClashTab} prefs=${s.prefs} />`})}
       </div>
     </aside>`;
   }
@@ -1228,10 +1248,10 @@ function startApp() {
   }
 
   function IssueRow(props) {
-    var it=props.item, active=props.active, d=props.d, isClash=props.isClash;
+    var it=props.item, active=props.active, d=props.d, isClash=props.isClash, pr=props.prefs||{};
     var icon = it.type==='hard'?'🔴':it.type==='soft'?'🟡':it.source==='element'?'🏗':'📌';
     var stBg = (STAT[it.status]||STAT.open).bg;
-    return html`<div onClick=${function(){d({t:'ACTIVE',id:active?null:it.id});if(!active&&it.point&&_flyTo){_flyTo(it.point);if(it.elementId&&_highlightById)_highlightById(it.elementId);}}}
+    return html`<div onClick=${function(){d({t:'ACTIVE',id:active?null:it.id});if(!active&&it.point&&_flyTo&&pr.autoFlyTo!==false){_flyTo(it.point);if(it.elementId&&_highlightById&&pr.autoHighlight!==false)_highlightById(it.elementId);}}}
       style=${{padding:'.6rem .7rem',borderBottom:'1px solid #1e293b',cursor:'pointer',background:active?'#1e293b':'transparent',borderLeft:active?'2px solid #3b82f6':'2px solid transparent'}}>
       <div style=${{display:'flex',gap:'.35rem',alignItems:'flex-start'}}>
         <span style=${{fontSize:'.85rem',flexShrink:0}}>${icon}</span>
@@ -1311,13 +1331,13 @@ function startApp() {
   // ── New Issue Modal ────────────────────────────────────────────
 
   function NewIssueModal(props) {
-    var d=props.d, el=props.el;
+    var d=props.d, el=props.el, pr=props.prefs||{};
     var ep = el ? el.props||{} : null;
     var hasEl = !!el;
     var defaultTitle = hasEl ? ('Issue: '+(ep.ifcType||'Element')+' '+(ep.name||'#'+el.expressId)) : '';
     var defaultDesc = hasEl ? ('Model: '+el.modelName+'\nType: '+(ep.ifcType||'Unknown')+'\nName: '+(ep.name||'N/A')+'\nStorey: '+(ep.storey||'N/A')+'\nMaterial: '+(ep.material||'N/A')+'\nExpress ID: #'+el.expressId) : '';
 
-    var f=useState({title:defaultTitle,desc:'',priority:'normal',status:'open',category:'design',assignee:'',dueDate:''}), form=f[0], setForm=f[1];
+    var f=useState({title:defaultTitle,desc:'',priority:pr.defaultPriority||'normal',status:pr.defaultStatus||'open',category:pr.defaultCategory||'design',assignee:'',dueDate:''}), form=f[0], setForm=f[1];
     useEffect(function(){
       function onKey(e){if(e.key==='Escape')d({t:'MODAL',v:false});}
       window.addEventListener('keydown',onKey);
@@ -1398,6 +1418,86 @@ function startApp() {
     </div></div>`;
   }
 
+  // ── Settings Modal ───────────────────────────────────────────
+
+  function SettingsModal(props) {
+    var d=props.d, p=props.prefs;
+    useEffect(function(){
+      function onKey(e){if(e.key==='Escape')d({t:'SETTINGS',v:false});}
+      window.addEventListener('keydown',onKey);
+      return function(){window.removeEventListener('keydown',onKey);};
+    },[]);
+    function tog(k){return function(){var u={};u[k]=!p[k];d({t:'UPD_PREFS',u:u});}}
+    function sel(k){return function(e){var u={};u[k]=e.target.value;d({t:'UPD_PREFS',u:u});}}
+    var MS={position:'fixed',inset:0,background:'rgba(0,0,0,.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:50};
+    var MX={background:'#1e293b',border:'1px solid #334155',borderRadius:12,width:440,maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 25px 50px rgba(0,0,0,.5)'};
+    var LBL={fontSize:'.7rem',color:'#64748b',display:'block',marginBottom:'.2rem'};
+    var SEC={fontSize:'.65rem',fontWeight:700,color:'#93c5fd',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.4rem',marginTop:'.6rem'};
+    var TROW={display:'flex',justifyContent:'space-between',alignItems:'center',padding:'.35rem 0',borderBottom:'1px solid #1e293b'};
+    var TLBL={fontSize:'.75rem',color:'#e2e8f0'};
+    var TSUB={fontSize:'.6rem',color:'#64748b',marginTop:'.05rem'};
+    // Toggle switch style
+    function Toggle(tp) {
+      var on=tp.on;
+      return html`<div onClick=${tp.onToggle} style=${{width:36,height:20,borderRadius:10,background:on?'#2563eb':'#475569',cursor:'pointer',position:'relative',transition:'background .2s',flexShrink:0}}>
+        <div style=${{width:16,height:16,borderRadius:8,background:'#fff',position:'absolute',top:2,left:on?18:2,transition:'left .2s'}}></div>
+      </div>`;
+    }
+    return html`<div style=${MS}><div style=${MX}>
+      <div style=${{display:'flex',justifyContent:'space-between',padding:'.8rem 1rem',borderBottom:'1px solid #334155'}}>
+        <span style=${{fontWeight:600,fontSize:'.875rem'}}>Settings</span>
+        <button onClick=${function(){d({t:'SETTINGS',v:false})}} style=${{...S_BTN,background:'none',color:'#64748b',fontSize:'1.1rem',padding:0}}>✕</button>
+      </div>
+      <div style=${{padding:'0 1rem .8rem 1rem'}}>
+        <div style=${SEC}>Viewer</div>
+        <div style=${TROW}>
+          <div><div style=${TLBL}>Auto fly-to on click</div><div style=${TSUB}>Camera moves to element when selecting a clash or issue</div></div>
+          <${Toggle} on=${p.autoFlyTo!==false} onToggle=${tog('autoFlyTo')} />
+        </div>
+        <div style=${TROW}>
+          <div><div style=${TLBL}>Auto highlight element</div><div style=${TSUB}>Highlight the element with a blue box when clicking a clash or issue</div></div>
+          <${Toggle} on=${p.autoHighlight!==false} onToggle=${tog('autoHighlight')} />
+        </div>
+        <div style=${TROW}>
+          <div><div style=${TLBL}>Show grid</div><div style=${TSUB}>Display the reference grid in the 3D view</div></div>
+          <${Toggle} on=${p.showGrid!==false} onToggle=${tog('showGrid')} />
+        </div>
+        <div style=${TROW}>
+          <div><div style=${TLBL}>Show axes</div><div style=${TSUB}>Display the X/Y/Z axes indicator</div></div>
+          <${Toggle} on=${p.showAxes!==false} onToggle=${tog('showAxes')} />
+        </div>
+
+        <div style=${SEC}>Clash Detection</div>
+        <div style=${TROW}>
+          <div><div style=${TLBL}>Default clearance distance</div><div style=${TSUB}>Initial soft clash tolerance (mm)</div></div>
+          <input type="number" min="0" max="2000" step="5" value=${p.defaultClearance||50}
+            onChange=${function(e){d({t:'UPD_PREFS',u:{defaultClearance:+e.target.value}});d({t:'UPD_RULES',u:{clearance:+e.target.value}});}}
+            style=${{...S_INPUT,width:70,textAlign:'center'}} />
+        </div>
+        <div style=${TROW}>
+          <div><div style=${TLBL}>Reset filters after detection</div><div style=${TSUB}>Clear all filters when running a new clash detection</div></div>
+          <${Toggle} on=${p.resetFiltersOnRun!==false} onToggle=${tog('resetFiltersOnRun')} />
+        </div>
+
+        <div style=${SEC}>Issue Defaults</div>
+        <div style=${{display:'flex',gap:'.5rem',padding:'.35rem 0'}}>
+          <div style=${{flex:1}}><label style=${LBL}>Default Priority</label>
+            <select value=${p.defaultPriority||'normal'} onChange=${sel('defaultPriority')} style=${S_INPUT}>
+              <option value="critical">Critical</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option>
+            </select></div>
+          <div style=${{flex:1}}><label style=${LBL}>Default Status</label>
+            <select value=${p.defaultStatus||'open'} onChange=${sel('defaultStatus')} style=${S_INPUT}>
+              ${Object.keys(STAT).map(function(k){return html`<option key=${k} value=${k}>${STAT[k].label}</option>`})}
+            </select></div>
+          <div style=${{flex:1}}><label style=${LBL}>Default Category</label>
+            <select value=${p.defaultCategory||'design'} onChange=${sel('defaultCategory')} style=${S_INPUT}>
+              <option value="design">Design</option><option value="coordination">Coordination</option><option value="constructability">Constructability</option><option value="safety">Safety</option><option value="code_compliance">Code Compliance</option><option value="other">Other</option>
+            </select></div>
+        </div>
+      </div>
+    </div></div>`;
+  }
+
   // ── App ────────────────────────────────────────────────────────
 
   function App() {
@@ -1410,7 +1510,8 @@ function startApp() {
         <${IssuePanel} s=${s} d=${d} />
       </div>
       <${ClashBar} s=${s} d=${d} />
-      ${s.showModal && html`<${NewIssueModal} d=${d} el=${s.modalElement} />`}
+      ${s.showModal && html`<${NewIssueModal} d=${d} el=${s.modalElement} prefs=${s.prefs} />`}
+      ${s.showSettings && html`<${SettingsModal} d=${d} prefs=${s.prefs} />`}
     </div>`;
   }
 
