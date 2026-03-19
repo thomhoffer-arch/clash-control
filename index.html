@@ -1298,7 +1298,7 @@ function startApp() {
     var defaultTitle = hasEl ? ('Issue: '+(ep.ifcType||'Element')+' '+(ep.name||'#'+el.expressId)) : '';
     var defaultDesc = hasEl ? ('Model: '+el.modelName+'\nType: '+(ep.ifcType||'Unknown')+'\nName: '+(ep.name||'N/A')+'\nStorey: '+(ep.storey||'N/A')+'\nMaterial: '+(ep.material||'N/A')+'\nExpress ID: #'+el.expressId) : '';
 
-    var f=useState({title:defaultTitle,desc:defaultDesc,priority:'normal',category:'design',assignee:'',dueDate:''}), form=f[0], setForm=f[1];
+    var f=useState({title:defaultTitle,desc:'',priority:'normal',category:'design',assignee:'',dueDate:''}), form=f[0], setForm=f[1];
     useEffect(function(){
       function onKey(e){if(e.key==='Escape')d({t:'MODAL',v:false});}
       window.addEventListener('keydown',onKey);
@@ -1348,8 +1348,8 @@ function startApp() {
       <form onSubmit=${submit} style=${{padding:'1rem',display:'flex',flexDirection:'column',gap:'.5rem'}}>
         <div><label style=${LBL}>Title *</label>
           <input required value=${form.title} onInput=${upd('title')} placeholder="Short description of the issue" style=${S_INPUT} /></div>
-        <div><label style=${LBL}>Description</label>
-          <textarea value=${form.desc} onInput=${upd('desc')} rows=${hasEl?'4':'3'} placeholder="Describe the issue in detail…" style=${{...S_INPUT,resize:'vertical'}} /></div>
+        <div><label style=${LBL}>What is the issue? *</label>
+          <textarea required value=${form.desc} onInput=${upd('desc')} rows="3" placeholder="Describe what the problem is and what needs to be resolved…" style=${{...S_INPUT,resize:'vertical'}} /></div>
         <div style=${{display:'flex',gap:'.5rem'}}>
           <div style=${{flex:1}}><label style=${LBL}>Priority</label>
             <select value=${form.priority} onChange=${upd('priority')} style=${S_INPUT}>
