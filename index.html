@@ -129,6 +129,7 @@ function startApp() {
   if (typeof ReactDOM === 'undefined') need.push('ReactDOM');
   if (typeof THREE === 'undefined')    need.push('Three.js');
   if (typeof htm === 'undefined')      need.push('htm');
+  if (typeof JSZip === 'undefined')   need.push('JSZip');
   if (need.length) throw new Error('CDN failed for: ' + need.join(', ') + '. Check internet.');
 
   var h          = React.createElement;
@@ -136,7 +137,6 @@ function startApp() {
   var useEffect  = React.useEffect;
   var useRef     = React.useRef;
   var useReducer = React.useReducer;
-  var useCallback = React.useCallback;
   var html       = htm.bind(h);
 
   // ── Constants ──────────────────────────────────────────────────
@@ -170,7 +170,7 @@ function startApp() {
       case 'ADD_MODEL':   return Object.assign({},s,{models:s.models.concat([a.v])});
       case 'DEL_MODEL':   return Object.assign({},s,{models:s.models.filter(function(m){return m.id!==a.id})});
       case 'UPD_MODEL':   return Object.assign({},s,{models:s.models.map(function(m){return m.id===a.id?Object.assign({},m,a.u):m})});
-      case 'SET_CLASHES': return Object.assign({},s,{clashes:a.v, detecting:false});
+      case 'SET_CLASHES': return Object.assign({},s,{clashes:a.v, detecting:false, activeId:null});
       case 'DETECTING':   return Object.assign({},s,{detecting:true});
       case 'ADD_ISSUE':   return Object.assign({},s,{issues:s.issues.concat([a.v])});
       case 'UPD_ISSUE':   return Object.assign({},s,{issues:s.issues.map(function(i){return i.id===a.id?Object.assign({},i,a.u):i})});
@@ -228,7 +228,7 @@ function startApp() {
             elBox.expandByObject(mesh);
             elMeshes.push(mesh); meshes.push(mesh);
             gd.delete();
-          } catch(e) {}
+          } catch(e) { console.warn('Skipped element geometry #'+expressID+': '+(e.message||e)); }
         }
         if (elMeshes.length > 0) elements.push({ expressId:expressID, meshes:elMeshes, box:elBox.clone() });
       });
@@ -304,8 +304,7 @@ function startApp() {
           // Restore rules
           d({ t:'UPD_RULES', u: data.rules });
           // Restore clashes & issues
-          (data.clashes||[]).forEach(function(c) { d({ t:'UPD_CLASH', id:c.id, u:c }); });
-          data.clashes && d({ t:'SET_CLASHES', v: data.clashes });
+          if (data.clashes) d({ t:'SET_CLASHES', v: data.clashes });
           (data.issues||[]).forEach(function(i) { d({ t:'ADD_ISSUE', v:i }); });
         } catch(err) {
           alert('Load failed: ' + err.message);
@@ -388,6 +387,7 @@ function startApp() {
 
   // ── Three.js Viewer Component ──────────────────────────────────
 
+  var _flyTo = null;
   function Viewer(props) {
     var s = props.s;
     var ref = useRef(null);
@@ -414,11 +414,17 @@ function startApp() {
       S.renderer = renderer;
 
       S.orbit = makeOrbit(camera, renderer.domElement);
+      _flyTo = function(pt) {
+        if(!pt||pt.length<3) return;
+        var t=S.orbit.target, d=S.orbit;
+        t.set(pt[0],pt[1],pt[2]);
+        S.camera.position.set(pt[0]+15,pt[1]+10,pt[2]+15);
+        d.sync(); d.apply();
+      };
 
       scene.add(new THREE.AmbientLight(0xffffff,0.5));
       var sun = new THREE.DirectionalLight(0xfff8f0,1.0);
       sun.position.set(80,120,60); scene.add(sun);
-      scene.add(new THREE.DirectionalLight(0xd0e8ff,0.3).position.set(-50,-20,-50) && scene.children[scene.children.length-1] || new THREE.Object3D());
       var fill = new THREE.DirectionalLight(0xd0e8ff,0.3);
       fill.position.set(-50,-20,-50); scene.add(fill);
       scene.add(new THREE.GridHelper(200,80,0x1e3a5f,0x172554));
@@ -445,7 +451,10 @@ function startApp() {
       var ids = s.models.map(function(m){return m.id});
       // Remove stale
       Object.keys(S.map).forEach(function(id){
-        if(ids.indexOf(id)===-1){S.mg.remove(S.map[id]);delete S.map[id];}
+        if(ids.indexOf(id)===-1){
+          S.map[id].traverse(function(obj){if(obj.isMesh){obj.geometry&&obj.geometry.dispose();obj.material&&obj.material.dispose();}});
+          S.mg.remove(S.map[id]);delete S.map[id];
+        }
       });
       // Add new
       s.models.forEach(function(model){
@@ -604,6 +613,7 @@ function startApp() {
         </span>
         <span style=${{width:10,height:10,borderRadius:'50%',background:m.color,flexShrink:0}}></span>
         <span style=${{color:'#e2e8f0',fontSize:'.75rem',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title=${m.name}>${m.name}</span>
+        ${m._stub && html`<span style=${{fontSize:'.55rem',color:'#f59e0b',background:'#422006',padding:'.05rem .3rem',borderRadius:4,flexShrink:0}}>stub</span>`}
         <button onClick=${function(){setOpen(!open)}} style=${{...S_BTN,padding:'0 2px',background:'none',color:'#475569',fontSize:'.6rem'}}>${open?'▲':'▼'}</button>
         <button onClick=${function(){d({t:'DEL_MODEL',id:m.id})}} style=${{...S_BTN,padding:'0 2px',background:'none',color:'#475569',fontSize:'.6rem'}}>✕</button>
       </div>
@@ -625,7 +635,14 @@ function startApp() {
 
   function IssuePanel(props) {
     var s=props.s, d=props.d;
-    var items = s.tab==='clashes' ? s.clashes : s.issues;
+    var sq=useState(''), search=sq[0], setSearch=sq[1];
+    var sf=useState('all'), statusFilter=sf[0], setStatusFilter=sf[1];
+    var rawItems = s.tab==='clashes' ? s.clashes : s.issues;
+    var items = rawItems.filter(function(it){
+      if(statusFilter!=='all' && it.status!==statusFilter) return false;
+      if(search){var q=search.toLowerCase();if((it.title||'').toLowerCase().indexOf(q)===-1&&(it.description||'').toLowerCase().indexOf(q)===-1)return false;}
+      return true;
+    });
     var oC=s.clashes.filter(function(c){return c.status==='open'}).length;
     var oI=s.issues.filter(function(i){return i.status==='open'}).length;
     return html`<aside style=${{...S_PANELR,width:264}}>
@@ -636,13 +653,24 @@ function startApp() {
             ${t.label}${t.n>0?html`<span style=${{marginLeft:'.3rem',background:t.bg,color:'#fff',fontSize:'.6rem',padding:'.05rem .35rem',borderRadius:99}}>${t.n}</span>`:''}
           </button>`})}
       </div>
+      <div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0,display:'flex',gap:'.3rem'}}>
+        <input type="text" placeholder="Search…" value=${search} onInput=${function(e){setSearch(e.target.value)}}
+          style=${{...S_INPUT,fontSize:'.7rem',padding:'.25rem .4rem',flex:1}} />
+        <select value=${statusFilter} onChange=${function(e){setStatusFilter(e.target.value)}}
+          style=${{fontSize:'.65rem',padding:'.2rem .3rem',borderRadius:4,background:'#1e293b',color:'#94a3b8',border:'1px solid #334155'}}>
+          <option value="all">All</option>
+          <option value="open">Open</option>
+          <option value="in_progress">In progress</option>
+          <option value="resolved">Resolved</option>
+        </select>
+      </div>
       ${s.tab==='issues' && html`<div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
         <button onClick=${function(){d({t:'MODAL',v:true})}} style=${{...S_BTN,width:'100%',background:'#2563eb',color:'#fff'}}>+ New Issue</button>
       </div>`}
       <div style=${{flex:1,overflowY:'auto'}}>
         ${items.length===0 && html`<div style=${{textAlign:'center',color:'#334155',fontSize:'.75rem',padding:'2.5rem 1rem'}}>
           <div style=${{fontSize:'2rem',marginBottom:'.3rem'}}>${s.tab==='clashes'?'✅':'📋'}</div>
-          ${s.tab==='clashes'?'No clashes found yet':'No issues yet'}
+          ${search||statusFilter!=='all'?'No matches':'No '+(s.tab==='clashes'?'clashes found yet':'issues yet')}
         </div>`}
         ${items.map(function(it){return html`<${IssueRow} key=${it.id} item=${it} active=${s.activeId===it.id} d=${d} isClash=${s.tab==='clashes'} />`})}
       </div>
@@ -653,7 +681,7 @@ function startApp() {
     var it=props.item, active=props.active, d=props.d, isClash=props.isClash;
     var icon = it.type==='hard'?'🔴':it.type==='soft'?'🟡':'📌';
     var stBg = (STAT[it.status]||STAT.open).bg;
-    return html`<div onClick=${function(){d({t:'ACTIVE',id:active?null:it.id})}}
+    return html`<div onClick=${function(){d({t:'ACTIVE',id:active?null:it.id});if(!active&&it.point&&_flyTo)_flyTo(it.point);}}
       style=${{padding:'.6rem .7rem',borderBottom:'1px solid #1e293b',cursor:'pointer',background:active?'#1e293b':'transparent',borderLeft:active?'2px solid #3b82f6':'2px solid transparent'}}>
       <div style=${{display:'flex',gap:'.35rem',alignItems:'flex-start'}}>
         <span style=${{fontSize:'.85rem',flexShrink:0}}>${icon}</span>
@@ -723,6 +751,11 @@ function startApp() {
   function NewIssueModal(props) {
     var d=props.d;
     var f=useState({title:'',desc:'',priority:'normal'}), form=f[0], setForm=f[1];
+    useEffect(function(){
+      function onKey(e){if(e.key==='Escape')d({t:'MODAL',v:false});}
+      window.addEventListener('keydown',onKey);
+      return function(){window.removeEventListener('keydown',onKey);};
+    },[]);
     function upd(k){return function(e){setForm(function(prev){var n=Object.assign({},prev);n[k]=e.target.value;return n;})}}
     function submit(e){
       e.preventDefault();
@@ -773,7 +806,9 @@ function startApp() {
 
   document.getElementById('boot').style.display = 'none';
   var rootEl = document.getElementById('root');
-  ReactDOM.render(html`<${App} />`, rootEl);
+  var root = ReactDOM.createRoot ? ReactDOM.createRoot(rootEl) : null;
+  if (root) { root.render(html`<${App} />`); }
+  else { ReactDOM.render(html`<${App} />`, rootEl); }
 
 } // end startApp
 </script>
