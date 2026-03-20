@@ -168,6 +168,7 @@ function startApp() {
   };
   var INIT_PREFS = {
     autoFlyTo:true, autoHighlight:true, showGrid:true, showAxes:true,
+    showClashMarkers:true, hoverHighlight:true, outlineSelected:true,
     defaultPriority:'normal', defaultCategory:'design', defaultStatus:'open',
     defaultClearance:50, resetFiltersOnRun:true
   };
@@ -666,6 +667,12 @@ function startApp() {
 
   var _flyTo = null;
   var _highlightById = null;
+  var _fitToClashes = null;
+  var _fitToElement = null;
+  var _showClashMarkers = null;
+  var _clearClashMarkers = null;
+  var _findAndHighlightElements = null;
+  var _clearFoundElements = null;
   function Viewer(props) {
     var s = props.s, d = props.d;
     var ref = useRef(null);
@@ -673,8 +680,14 @@ function startApp() {
     var se = useState(null), selectedEl=se[0], setSelectedEl=se[1];
     var cm = useState(null), ctxMenu=cm[0], setCtxMenu=cm[1];
     var hlRef = useRef(null); // highlighted mesh outline
+    var outlineRef = useRef(null); // outliner mesh
+    var hoverRef = useRef(null); // hover highlight mesh
+    var clashMarkersRef = useRef(null); // group of clash markers
+    var foundMarkersRef = useRef([]); // items finder highlights
     var modelsRef = useRef(s.models);
     modelsRef.current = s.models;
+    var prefsRef = useRef(s.prefs);
+    prefsRef.current = s.prefs;
 
     // Init scene
     useEffect(function() {
@@ -707,6 +720,7 @@ function startApp() {
       _highlightById = function(expressId) {
         if(!expressId||!S.mg) return;
         if(hlRef.current){scene.remove(hlRef.current);hlRef.current=null;}
+        if(outlineRef.current){scene.remove(outlineRef.current);outlineRef.current=null;}
         var found = null;
         S.mg.traverse(function(obj){
           if(obj.isMesh && obj.userData.expressID===expressId && !found) found=obj;
@@ -716,8 +730,182 @@ function startApp() {
           box.material.linewidth = 2;
           scene.add(box);
           hlRef.current = box;
+          // Outliner: add a glowing back-face scaled clone
+          if(prefsRef.current.outlineSelected!==false){
+            try {
+              var outGeo = found.geometry.clone();
+              var outMat = new THREE.MeshBasicMaterial({color:0x3b82f6, side:THREE.BackSide, transparent:true, opacity:0.35});
+              var outMesh = new THREE.Mesh(outGeo, outMat);
+              // Copy the world transform, then slightly scale up from center
+              outMesh.applyMatrix4(found.matrixWorld);
+              var outBox = new THREE.Box3().setFromObject(outMesh);
+              var outCtr = outBox.getCenter(new THREE.Vector3());
+              outMesh.position.sub(outCtr).multiplyScalar(1.05).add(outCtr);
+              outMesh.scale.multiplyScalar(1.05);
+              outMesh.renderOrder = -1;
+              scene.add(outMesh);
+              outlineRef.current = outMesh;
+            } catch(e){}
+          }
         }
       };
+
+      // ── Clash Markers ──
+      _showClashMarkers = function(clashes) {
+        _clearClashMarkers();
+        if(!clashes||!clashes.length) return;
+        var grp = new THREE.Group();
+        grp.name = 'clashMarkers';
+        var hardMat = new THREE.MeshBasicMaterial({color:0xef4444, transparent:true, opacity:0.85});
+        var softMat = new THREE.MeshBasicMaterial({color:0xf59e0b, transparent:true, opacity:0.85});
+        var pinGeo = new THREE.SphereGeometry(0.15, 12, 12);
+        var ringGeo = new THREE.RingGeometry(0.25, 0.4, 24);
+        var ringMat = new THREE.MeshBasicMaterial({color:0xffffff, transparent:true, opacity:0.4, side:THREE.DoubleSide});
+        clashes.forEach(function(c){
+          if(!c.point||c.point.length<3) return;
+          var mat = c.type==='hard'?hardMat:softMat;
+          var pin = new THREE.Mesh(pinGeo, mat);
+          pin.position.set(c.point[0],c.point[1],c.point[2]);
+          pin.userData.clashId = c.id;
+          grp.add(pin);
+          // Add a horizontal ring around the marker
+          var ring = new THREE.Mesh(ringGeo, ringMat);
+          ring.position.set(c.point[0],c.point[1],c.point[2]);
+          ring.rotation.x = -Math.PI/2;
+          grp.add(ring);
+        });
+        scene.add(grp);
+        clashMarkersRef.current = grp;
+      };
+      _clearClashMarkers = function() {
+        if(clashMarkersRef.current){
+          clashMarkersRef.current.traverse(function(obj){if(obj.isMesh){obj.geometry&&obj.geometry.dispose();obj.material&&obj.material.dispose();}});
+          scene.remove(clashMarkersRef.current);
+          clashMarkersRef.current = null;
+        }
+      };
+
+      // ── BoundingBoxer: Fit camera to all clashes or a specific element ──
+      _fitToClashes = function(clashes) {
+        if(!clashes||!clashes.length||!S.orbit) return;
+        var box = new THREE.Box3();
+        clashes.forEach(function(c){
+          if(c.point&&c.point.length>=3){
+            box.expandByPoint(new THREE.Vector3(c.point[0],c.point[1],c.point[2]));
+          }
+        });
+        if(box.isEmpty()) return;
+        var ctr = box.getCenter(new THREE.Vector3());
+        var sz = box.getSize(new THREE.Vector3());
+        var dist = Math.max(sz.x,sz.y,sz.z,5)*2;
+        S.orbit.target.copy(ctr);
+        S.camera.position.set(ctr.x+dist,ctr.y+dist*0.6,ctr.z+dist);
+        S.orbit.sync(); S.orbit.apply();
+      };
+      _fitToElement = function(expressId) {
+        if(!expressId||!S.mg||!S.orbit) return;
+        var found = null;
+        S.mg.traverse(function(obj){
+          if(obj.isMesh && obj.userData.expressID===expressId && !found) found=obj;
+        });
+        if(!found) return;
+        var box = new THREE.Box3().setFromObject(found);
+        var ctr = box.getCenter(new THREE.Vector3());
+        var sz = box.getSize(new THREE.Vector3());
+        var dist = Math.max(sz.x,sz.y,sz.z,2)*2.5;
+        S.orbit.target.copy(ctr);
+        S.camera.position.set(ctr.x+dist,ctr.y+dist*0.5,ctr.z+dist);
+        S.orbit.sync(); S.orbit.apply();
+      };
+
+      // ── Items Finder: search and highlight elements by name/type ──
+      _findAndHighlightElements = function(query, models) {
+        _clearFoundElements();
+        if(!query||!models||!S.mg) return [];
+        var q = query.toLowerCase();
+        var results = [];
+        models.forEach(function(model){
+          (model.elements||[]).forEach(function(el){
+            var p = el.props||{};
+            var match = (p.name||'').toLowerCase().indexOf(q)!==-1 ||
+                        (p.ifcType||'').toLowerCase().indexOf(q)!==-1 ||
+                        (p.objectType||'').toLowerCase().indexOf(q)!==-1 ||
+                        (p.storey||'').toLowerCase().indexOf(q)!==-1 ||
+                        (p.material||'').toLowerCase().indexOf(q)!==-1 ||
+                        String(el.expressId).indexOf(q)!==-1;
+            if(match) results.push({el:el, model:model});
+          });
+        });
+        // Highlight found items in 3D
+        var markers = [];
+        results.forEach(function(r){
+          S.mg.traverse(function(obj){
+            if(obj.isMesh && obj.userData.expressID===r.el.expressId){
+              var box = new THREE.BoxHelper(obj, 0x22c55e);
+              box.material.linewidth = 2;
+              scene.add(box);
+              markers.push(box);
+            }
+          });
+        });
+        foundMarkersRef.current = markers;
+        return results;
+      };
+      _clearFoundElements = function() {
+        foundMarkersRef.current.forEach(function(m){
+          scene.remove(m);
+          if(m.material) m.material.dispose();
+          if(m.geometry) m.geometry.dispose();
+        });
+        foundMarkersRef.current = [];
+      };
+
+      // ── Hover highlighting ──
+      var hoverRaycaster = new THREE.Raycaster();
+      var hoverMouse = new THREE.Vector2();
+      var lastHoveredMesh = null;
+      var lastHoverOriginals = null;
+      renderer.domElement.addEventListener('mousemove', function(e){
+        if(!prefsRef.current.hoverHighlight) return;
+        var rect = renderer.domElement.getBoundingClientRect();
+        hoverMouse.x = ((e.clientX-rect.left)/rect.width)*2-1;
+        hoverMouse.y = -((e.clientY-rect.top)/rect.height)*2+1;
+        hoverRaycaster.setFromCamera(hoverMouse, camera);
+        var hits = hoverRaycaster.intersectObjects(S.mg.children, true);
+        var hitMesh = null;
+        if(hits.length>0 && hits[0].object.isMesh) hitMesh = hits[0].object;
+        if(hitMesh===lastHoveredMesh) return;
+        // Restore previous
+        if(lastHoveredMesh && lastHoverOriginals){
+          lastHoveredMesh.material.emissive = lastHoverOriginals.emissive;
+          lastHoveredMesh.material.opacity = lastHoverOriginals.opacity;
+          lastHoveredMesh.material.needsUpdate = true;
+        }
+        if(hoverRef.current){scene.remove(hoverRef.current);hoverRef.current=null;}
+        if(hitMesh){
+          // Store originals and apply hover effect
+          lastHoverOriginals = {
+            emissive: hitMesh.material.emissive ? hitMesh.material.emissive.clone() : new THREE.Color(0),
+            opacity: hitMesh.material.opacity
+          };
+          if(hitMesh.material.emissive) hitMesh.material.emissive.set(0x1e3a5f);
+          hitMesh.material.needsUpdate = true;
+          // Add a subtle wireframe overlay
+          try {
+            var wfGeo = new THREE.WireframeGeometry(hitMesh.geometry);
+            var wfMat = new THREE.LineBasicMaterial({color:0x60a5fa, transparent:true, opacity:0.3});
+            var wf = new THREE.LineSegments(wfGeo, wfMat);
+            wf.applyMatrix4(hitMesh.matrixWorld);
+            scene.add(wf);
+            hoverRef.current = wf;
+          } catch(e){}
+          renderer.domElement.style.cursor = 'pointer';
+        } else {
+          lastHoverOriginals = null;
+          renderer.domElement.style.cursor = '';
+        }
+        lastHoveredMesh = hitMesh;
+      });
 
       // Raycaster for element picking
       var raycaster = new THREE.Raycaster();
@@ -759,6 +947,7 @@ function startApp() {
         } else {
           // Click on empty space — deselect
           if(hlRef.current){scene.remove(hlRef.current);hlRef.current=null;}
+          if(outlineRef.current){scene.remove(outlineRef.current);outlineRef.current=null;}
           setSelectedEl(null);
         }
       });
@@ -883,12 +1072,33 @@ function startApp() {
       S.mg.traverse(function(obj){if(obj.isMesh&&obj.material){obj.material.clippingPlanes=planes;obj.material.needsUpdate=true;}});
     }, [s.sectionAxis, s.sectionPos, s.sectionCustom]);
 
+    // Sync clash markers when clashes change
+    useEffect(function(){
+      if(s.prefs.showClashMarkers!==false && s.clashes.length>0 && _showClashMarkers){
+        _showClashMarkers(s.clashes);
+      } else if(_clearClashMarkers){
+        _clearClashMarkers();
+      }
+    }, [s.clashes, s.prefs.showClashMarkers]);
+
     // Prefs: grid & axes visibility
     useEffect(function(){
       var S = state3d.current;
       if(S.grid) S.grid.visible = s.prefs.showGrid!==false;
       if(S.axes) S.axes.visible = s.prefs.showAxes!==false;
     }, [s.prefs.showGrid, s.prefs.showAxes]);
+
+    // Items Finder state
+    var fs = useState(''), findQuery=fs[0], setFindQuery=fs[1];
+    var fr = useState([]), findResults=fr[0], setFindResults=fr[1];
+    var fo2 = useState(false), finderOpen=fo2[0], setFinderOpen=fo2[1];
+
+    function doFind(q) {
+      setFindQuery(q);
+      if(!q||q.length<2){setFindResults([]);if(_clearFoundElements)_clearFoundElements();return;}
+      var results = _findAndHighlightElements ? _findAndHighlightElements(q, s.models) : [];
+      setFindResults(results);
+    }
 
     var P = {position:'absolute',pointerEvents:'none',fontSize:'.7rem',padding:'.2rem .6rem',borderRadius:'5px'};
     var ep = selectedEl ? selectedEl.props : null;
@@ -898,9 +1108,52 @@ function startApp() {
     var LS={fontSize:'.6rem',color:'#64748b'}; var VS={fontSize:'.6rem',color:'#cbd5e1'};
     return html`<div style=${{flex:1,position:'relative',overflow:'hidden'}}>
       <div ref=${ref} style=${{width:'100%',height:'100%'}}></div>
-      <div style=${{...P,top:'.75rem',left:'.75rem',background:'rgba(15,23,42,.85)',color:'#64748b'}}>
-        ${s.models.length===0?'Load an IFC file to begin':s.models.length+' model'+(s.models.length>1?'s':'')+' loaded'}
+      <div style=${{...P,top:'.75rem',left:'.75rem',background:'rgba(15,23,42,.85)',color:'#64748b',display:'flex',alignItems:'center',gap:'.5rem'}}>
+        <span>${s.models.length===0?'Load an IFC file to begin':s.models.length+' model'+(s.models.length>1?'s':'')+' loaded'}</span>
+        ${s.clashes.length>0 && html`<span style=${{color:'#ef4444'}}>· ${s.clashes.length} clashes</span>`}
       </div>
+      ${s.clashes.length>0 && html`<div style=${{position:'absolute',top:'.75rem',left:'50%',transform:'translateX(-50%)',display:'flex',gap:'.3rem',pointerEvents:'auto'}}>
+        <button onClick=${function(){if(_fitToClashes)_fitToClashes(s.clashes);}}
+          style=${{...S_BTN,background:'rgba(30,41,59,.9)',color:'#93c5fd',border:'1px solid #334155',fontSize:'.65rem',padding:'.25rem .5rem'}}>
+          Fit All Clashes
+        </button>
+        <button onClick=${function(){d({t:'UPD_PREFS',u:{showClashMarkers:!s.prefs.showClashMarkers}})}}
+          style=${{...S_BTN,background:s.prefs.showClashMarkers!==false?'rgba(37,99,235,.7)':'rgba(30,41,59,.9)',color:s.prefs.showClashMarkers!==false?'#fff':'#64748b',border:'1px solid #334155',fontSize:'.65rem',padding:'.25rem .5rem'}}>
+          ${s.prefs.showClashMarkers!==false?'Markers On':'Markers Off'}
+        </button>
+      </div>`}
+      ${s.models.length>0 && html`<div style=${{position:'absolute',top:'.75rem',right:'50%',transform:'translateX(50%)',marginRight:'-45%',pointerEvents:'auto'}}>
+        <div style=${{display:'flex',alignItems:'center',gap:'.2rem'}}>
+          <button onClick=${function(){setFinderOpen(!finderOpen);if(finderOpen){doFind('');setFindQuery('');}}}
+            style=${{...S_BTN,background:finderOpen?'rgba(37,99,235,.7)':'rgba(30,41,59,.9)',color:finderOpen?'#fff':'#94a3b8',border:'1px solid #334155',fontSize:'.65rem',padding:'.25rem .5rem'}}>
+            Find Elements
+          </button>
+        </div>
+        ${finderOpen && html`<div style=${{marginTop:'.3rem',background:'rgba(15,23,42,.95)',border:'1px solid #334155',borderRadius:8,padding:'.4rem',width:240,boxShadow:'0 4px 12px rgba(0,0,0,.4)'}}>
+          <input type="text" placeholder="Search by name, type, storey…" value=${findQuery}
+            onInput=${function(e){doFind(e.target.value);}}
+            style=${{...S_INPUT,fontSize:'.65rem',padding:'.25rem .4rem',marginBottom:'.3rem'}} />
+          ${findResults.length>0 && html`<div style=${{fontSize:'.6rem',color:'#64748b',marginBottom:'.2rem'}}>${findResults.length} element${findResults.length>1?'s':''} found</div>`}
+          <div style=${{maxHeight:180,overflowY:'auto'}}>
+            ${findResults.slice(0,50).map(function(r,idx){
+              var p=r.el.props||{};
+              return html`<div key=${idx} onClick=${function(){
+                  if(_fitToElement)_fitToElement(r.el.expressId);
+                  if(_highlightById)_highlightById(r.el.expressId);
+                }}
+                style=${{padding:'.2rem .3rem',cursor:'pointer',borderBottom:'1px solid #1e293b',fontSize:'.6rem',color:'#cbd5e1'}}>
+                <div style=${{display:'flex',justifyContent:'space-between'}}>
+                  <span style=${{color:'#93c5fd'}}>${p.ifcType||'Element'}</span>
+                  <span style=${{color:'#475569'}}>#${r.el.expressId}</span>
+                </div>
+                <div style=${{color:'#94a3b8',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${p.name||'(unnamed)'}</div>
+              </div>`;
+            })}
+            ${findResults.length>50 && html`<div style=${{fontSize:'.55rem',color:'#475569',textAlign:'center',padding:'.3rem'}}>+${findResults.length-50} more…</div>`}
+          </div>
+          ${findQuery&&findResults.length===0 && html`<div style=${{fontSize:'.6rem',color:'#475569',textAlign:'center',padding:'.5rem'}}>No matches</div>`}
+        </div>`}
+      </div>`}
       ${(s.sectionAxis||s.sectionCustom) && html`<div style=${{...P,top:'.75rem',right:'.75rem',background:'rgba(30,58,138,.9)',color:'#93c5fd',pointerEvents:'auto',cursor:'pointer',display:'flex',alignItems:'center',gap:'.4rem'}}
         onClick=${function(){d({t:'SECTION',axis:null})}}>
         <span>Section ${s.sectionAxis?s.sectionAxis.toUpperCase():'Surface'} · ${Math.round(s.sectionPos*100)}%</span>
@@ -912,7 +1165,7 @@ function startApp() {
           <div style=${{display:'flex',gap:'.3rem'}}>
             <button onClick=${function(){d({t:'MODAL',v:true,el:selectedEl});d({t:'TAB',v:'issues'});}}
               style=${{...S_BTN,padding:'.1rem .4rem',background:'#2563eb',color:'#fff',fontSize:'.65rem',fontWeight:600,borderRadius:4}}>Create Issue</button>
-            <button onClick=${function(){setSelectedEl(null);if(hlRef.current&&state3d.current.scene){state3d.current.scene.remove(hlRef.current);hlRef.current=null;}}}
+            <button onClick=${function(){setSelectedEl(null);if(hlRef.current&&state3d.current.scene){state3d.current.scene.remove(hlRef.current);hlRef.current=null;}if(outlineRef.current&&state3d.current.scene){state3d.current.scene.remove(outlineRef.current);outlineRef.current=null;}}}
               style=${{...S_BTN,padding:'0 4px',background:'none',color:'#475569',fontSize:'.7rem'}}>✕</button>
           </div>
         </div>
@@ -1333,6 +1586,12 @@ function startApp() {
     var it=props.item;
     var dp=useState(false), detailOpen=dp[0], setDetailOpen=dp[1];
     return html`<div onClick=${function(e){e.stopPropagation();}}>
+      <div style=${{display:'flex',gap:'.2rem',marginBottom:'.2rem'}}>
+        <button onClick=${function(){if(_fitToElement&&it.elemA)_fitToElement(it.elemA);if(_highlightById&&it.elemA)_highlightById(it.elemA);}}
+          style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f3a5f',color:'#93c5fd',flex:1}}>Zoom A</button>
+        <button onClick=${function(){if(_fitToElement&&it.elemB)_fitToElement(it.elemB);if(_highlightById&&it.elemB)_highlightById(it.elemB);}}
+          style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f3a5f',color:'#93c5fd',flex:1}}>Zoom B</button>
+      </div>
       <button onClick=${function(){setDetailOpen(!detailOpen)}}
         style=${{...S_BTN,fontSize:'.55rem',padding:'.15rem .35rem',background:'#0f172a',color:'#64748b',width:'100%',textAlign:'left',border:'1px solid #1e293b'}}>
         ${detailOpen?'▼':'▶'} Element Properties
@@ -1562,6 +1821,18 @@ function startApp() {
         <div style=${TROW}>
           <div><div style=${TLBL}>Show axes</div><div style=${TSUB}>Display the X/Y/Z axes indicator</div></div>
           <${Toggle} on=${p.showAxes!==false} onToggle=${tog('showAxes')} />
+        </div>
+        <div style=${TROW}>
+          <div><div style=${TLBL}>Show clash markers</div><div style=${TSUB}>Display 3D markers at clash points (red=hard, yellow=soft)</div></div>
+          <${Toggle} on=${p.showClashMarkers!==false} onToggle=${tog('showClashMarkers')} />
+        </div>
+        <div style=${TROW}>
+          <div><div style=${TLBL}>Hover highlight</div><div style=${TSUB}>Highlight elements on mouse hover with wireframe overlay</div></div>
+          <${Toggle} on=${p.hoverHighlight!==false} onToggle=${tog('hoverHighlight')} />
+        </div>
+        <div style=${TROW}>
+          <div><div style=${TLBL}>Outline selected</div><div style=${TSUB}>Add glowing outline effect to selected elements</div></div>
+          <${Toggle} on=${p.outlineSelected!==false} onToggle=${tog('outlineSelected')} />
         </div>
 
         <div style=${SEC}>Clash Detection</div>
