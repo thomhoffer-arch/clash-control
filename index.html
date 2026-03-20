@@ -124,7 +124,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.1.9',hash:'c3b2df5',date:'2026-03-20T17:21:09Z'};
+  var CC_VERSION = {v:'1.1.16',hash:'caf4ef8',date:'2026-03-20T20:20:30Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -168,7 +168,9 @@ function startApp() {
   var INIT_FILTERS = {
     search:'', status:'all', type:'all', discipline:'all',
     floor:'all', distMin:0, distMax:9999, elementId:'', selfClash:'all',
-    ifcType:'all', storey:'all', material:'all'
+    ifcType:'all', storey:'all', material:'all',
+    // Issue-specific filters
+    priority:'all', category:'all', assignee:'all', issueElementType:'all', issueStorey:'all'
   };
   var INIT_PREFS = {
     autoFlyTo:true, autoHighlight:true, showGrid:true, showAxes:true,
@@ -338,6 +340,86 @@ function startApp() {
   }
 
   // Pre-build material map: expressID -> material name (scans relations once, not per element)
+  // Resolve material name from any IFC material entity
+  function resolveMaterialName(api, modelID, mat) {
+    if (!mat) return '';
+    // Direct material with Name
+    if (mat.Name) return safeStr(mat.Name);
+    // IfcMaterialLayerSetUsage → ForLayerSet → MaterialLayers
+    if (mat.ForLayerSet || mat.MaterialLayers) {
+      var layerSet = mat.ForLayerSet ? api.GetLine(modelID, mat.ForLayerSet.value != null ? mat.ForLayerSet.value : mat.ForLayerSet) : mat;
+      if (layerSet) {
+        if (layerSet.Name) return safeStr(layerSet.Name);
+        if (layerSet.MaterialLayers) {
+          var names = [];
+          for (var k = 0; k < layerSet.MaterialLayers.length; k++) {
+            try {
+              var lid = layerSet.MaterialLayers[k].value != null ? layerSet.MaterialLayers[k].value : layerSet.MaterialLayers[k];
+              var layer = api.GetLine(modelID, lid);
+              if (layer && layer.Material) {
+                var mid = layer.Material.value != null ? layer.Material.value : layer.Material;
+                var m2 = api.GetLine(modelID, mid);
+                if (m2 && m2.Name) names.push(safeStr(m2.Name));
+              }
+            } catch(e) {}
+          }
+          if (names.length) return names.join(', ');
+        }
+      }
+    }
+    // IfcMaterialConstituentSet → MaterialConstituents
+    if (mat.MaterialConstituents) {
+      var cNames = [];
+      for (var c = 0; c < mat.MaterialConstituents.length; c++) {
+        try {
+          var cid = mat.MaterialConstituents[c].value != null ? mat.MaterialConstituents[c].value : mat.MaterialConstituents[c];
+          var constituent = api.GetLine(modelID, cid);
+          if (constituent && constituent.Material) {
+            var cmid = constituent.Material.value != null ? constituent.Material.value : constituent.Material;
+            var cm = api.GetLine(modelID, cmid);
+            if (cm && cm.Name) cNames.push(safeStr(cm.Name));
+          }
+        } catch(e) {}
+      }
+      if (cNames.length) return cNames.join(', ');
+    }
+    // IfcMaterialProfileSetUsage → ForProfileSet → MaterialProfiles
+    if (mat.ForProfileSet || mat.MaterialProfiles) {
+      var profSet = mat.ForProfileSet ? api.GetLine(modelID, mat.ForProfileSet.value != null ? mat.ForProfileSet.value : mat.ForProfileSet) : mat;
+      if (profSet) {
+        if (profSet.Name) return safeStr(profSet.Name);
+        if (profSet.MaterialProfiles) {
+          var pNames = [];
+          for (var p = 0; p < profSet.MaterialProfiles.length; p++) {
+            try {
+              var pid = profSet.MaterialProfiles[p].value != null ? profSet.MaterialProfiles[p].value : profSet.MaterialProfiles[p];
+              var profile = api.GetLine(modelID, pid);
+              if (profile && profile.Material) {
+                var pmid = profile.Material.value != null ? profile.Material.value : profile.Material;
+                var pm = api.GetLine(modelID, pmid);
+                if (pm && pm.Name) pNames.push(safeStr(pm.Name));
+              }
+            } catch(e) {}
+          }
+          if (pNames.length) return pNames.join(', ');
+        }
+      }
+    }
+    // IfcMaterialList → Materials
+    if (mat.Materials) {
+      var lNames = [];
+      for (var l = 0; l < mat.Materials.length; l++) {
+        try {
+          var mlid = mat.Materials[l].value != null ? mat.Materials[l].value : mat.Materials[l];
+          var ml = api.GetLine(modelID, mlid);
+          if (ml && ml.Name) lNames.push(safeStr(ml.Name));
+        } catch(e) {}
+      }
+      if (lNames.length) return lNames.join(', ');
+    }
+    return '';
+  }
+
   function buildMaterialMap(api, modelID) {
     var matMap = {};
     try {
@@ -348,27 +430,7 @@ function startApp() {
           var matRef = rel.RelatingMaterial ? (rel.RelatingMaterial.value||rel.RelatingMaterial) : null;
           if (!matRef) continue;
           var mat = api.GetLine(modelID, matRef);
-          if (!mat) continue;
-          var matName = '';
-          if (mat.Name) { matName = safeStr(mat.Name); }
-          else if (mat.ForLayerSet || mat.MaterialLayers) {
-            var layerSet = mat.ForLayerSet ? api.GetLine(modelID, mat.ForLayerSet.value != null ? mat.ForLayerSet.value : mat.ForLayerSet) : mat;
-            if (layerSet && layerSet.MaterialLayers) {
-              var names = [];
-              for (var k = 0; k < layerSet.MaterialLayers.length; k++) {
-                try {
-                  var lid = layerSet.MaterialLayers[k].value != null ? layerSet.MaterialLayers[k].value : layerSet.MaterialLayers[k];
-                  var layer = api.GetLine(modelID, lid);
-                  if (layer && layer.Material) {
-                    var mid = layer.Material.value != null ? layer.Material.value : layer.Material;
-                    var m2 = api.GetLine(modelID, mid);
-                    if (m2 && m2.Name) names.push(safeStr(m2.Name));
-                  }
-                } catch(e) {}
-              }
-              matName = names.join(', ');
-            }
-          }
+          var matName = resolveMaterialName(api, modelID, mat);
           if (!matName) continue;
           var objs = rel.RelatedObjects || [];
           for (var j = 0; j < objs.length; j++) {
@@ -848,6 +910,9 @@ function startApp() {
 
   // ── Orbit Controls (inline) ────────────────────────────────────
 
+  // Global flag: set true when dragging section box handles to suppress orbit
+  var _sboxDragging = false;
+
   function makeOrbit(camera, el) {
     var target = new THREE.Vector3();
     var sph = { r:60, phi:Math.PI/4, theta:Math.PI/4 };
@@ -871,6 +936,7 @@ function startApp() {
     sync();
 
     el.addEventListener('mousedown', function(e) {
+      if(_sboxDragging) return; // don't orbit while dragging section box handles
       if (e.button===0) dragging=true;
       if (e.button===2) panning=true;
       lx=e.clientX; ly=e.clientY; e.preventDefault();
@@ -887,7 +953,20 @@ function startApp() {
       }
     });
     window.addEventListener('mouseup', function(){dragging=false;panning=false});
-    el.addEventListener('wheel', function(e){sph.r*=1+e.deltaY*0.0008;apply();e.preventDefault()},{passive:false});
+    el.addEventListener('wheel', function(e){
+      // Ctrl+scroll adjusts floor plan cut height
+      if(e.ctrlKey && window._ccFloorPlanActive && window._ccDispatch){
+        e.preventDefault();
+        var fp = window._ccCurrentFloorPlan;
+        if(fp){
+          var delta = e.deltaY > 0 ? -0.15 : 0.15;
+          var newElev = fp.elevation + delta;
+          window._ccDispatch({t:'FLOOR_PLAN',v:Object.assign({},fp,{elevation:newElev})});
+        }
+        return;
+      }
+      sph.r*=1+e.deltaY*0.0008;apply();e.preventDefault();
+    },{passive:false});
     return {target:target, sync:sync, apply:apply, sph:sph};
   }
 
@@ -898,6 +977,7 @@ function startApp() {
   var _highlightById = null;
   var _fitToClashes = null;
   var _fitToElement = null;
+  var _flyToElements = null;
   var _showClashMarkers = null;
   var _clearClashMarkers = null;
   var _findAndHighlightElements = null;
@@ -1162,6 +1242,34 @@ function startApp() {
         _flyTo([ctr.x,ctr.y,ctr.z], dist);
       };
 
+      // Fly to element(s) with same camera alignment as element click
+      _flyToElements = function(expressIds, fallbackPt) {
+        if(!S.mg||!S.orbit) return;
+        if(!expressIds||!expressIds.length){
+          if(fallbackPt) _flyTo(fallbackPt);
+          return;
+        }
+        var box = new THREE.Box3();
+        var foundAny = false;
+        expressIds.forEach(function(eid){
+          S.mg.traverse(function(obj){
+            if(obj.isMesh && obj.userData.expressID===eid){
+              box.expandByObject(obj);
+              foundAny = true;
+            }
+          });
+        });
+        if(!foundAny){
+          if(fallbackPt) _flyTo(fallbackPt);
+          return;
+        }
+        var ctr = box.getCenter(new THREE.Vector3());
+        var sz = box.getSize(new THREE.Vector3());
+        var dist = Math.max(sz.x, sz.y, sz.z, 1) * 2.5;
+        var pt = [ctr.x, ctr.y, ctr.z];
+        _flyTo(pt, dist);
+      };
+
       // ── Section Box helper ──
       _getSectionBoxFromScene = function(){
         if(!S.mg||!S.mg.children.length) return null;
@@ -1282,9 +1390,121 @@ function startApp() {
       // Raycaster for element picking
       var raycaster = new THREE.Raycaster();
       var mouse = new THREE.Vector2();
+
+      // ── Section Box handle drag system ──
+      var _sboxDragState = null; // {type:'face'|'rotate', axis, side, startMouse, startSb, dragPlane}
+      renderer.domElement.addEventListener('mousedown', function(e){
+        if(e.button!==0) return;
+        var S2=state3d.current;
+        if(!S2._sboxHandles&&!S2._sboxRotRing) return;
+        var rect=renderer.domElement.getBoundingClientRect();
+        var mx=((e.clientX-rect.left)/rect.width)*2-1;
+        var my=-((e.clientY-rect.top)/rect.height)*2+1;
+        raycaster.setFromCamera(new THREE.Vector2(mx,my), camera);
+        // Check rotation ring first
+        var allHandles=[];
+        if(S2._sboxRotRing) allHandles.push(S2._sboxRotRing);
+        if(S2._sboxHandles) allHandles=allHandles.concat(S2._sboxHandles);
+        var hh=raycaster.intersectObjects(allHandles,false);
+        if(hh.length>0){
+          var hitH=hh[0].object;
+          e.stopImmediatePropagation();
+          _sboxDragging=true;
+          var curSb=window._ccCurrentSbox;
+          if(!curSb) return;
+          if(hitH.userData._sboxRotation){
+            // Rotation drag
+            _sboxDragState={type:'rotate',startX:e.clientX,startRot:curSb.rotation||0,startSb:Object.assign({},curSb,{min:curSb.min.slice(),max:curSb.max.slice()})};
+          } else if(hitH.userData._sboxHandle){
+            // Face handle drag
+            var ax=hitH.userData._handleAxis;
+            var sd=hitH.userData._handleSide;
+            var dir=hitH.userData._handleDir;
+            // Drag plane: perpendicular to camera, passing through handle
+            var camDir2=new THREE.Vector3();
+            camera.getWorldDirection(camDir2);
+            var dp2=new THREE.Plane().setFromNormalAndCoplanarPoint(camDir2,hitH.position.clone());
+            _sboxDragState={type:'face',axis:ax,side:sd,dir:dir.clone(),startSb:Object.assign({},curSb,{min:curSb.min.slice(),max:curSb.max.slice()}),dragPlane:dp2,startPos:hitH.position.clone()};
+          }
+          // Set cursor
+          renderer.domElement.style.cursor='grabbing';
+        }
+      }, true); // useCapture to fire before orbit
+
+      window.addEventListener('mousemove', function(e){
+        if(!_sboxDragState||!_sboxDragging) return;
+        var ds=_sboxDragState;
+        var rect=renderer.domElement.getBoundingClientRect();
+        var mx=((e.clientX-rect.left)/rect.width)*2-1;
+        var my=-((e.clientY-rect.top)/rect.height)*2+1;
+        raycaster.setFromCamera(new THREE.Vector2(mx,my), camera);
+
+        if(ds.type==='rotate'){
+          // Rotation: horizontal mouse movement maps to Y rotation
+          var dx=e.clientX-ds.startX;
+          var newRot=ds.startRot+dx*0.01;
+          var newSb=Object.assign({},ds.startSb,{min:ds.startSb.min.slice(),max:ds.startSb.max.slice(),rotation:newRot});
+          if(window._ccDispatch) window._ccDispatch({t:'SECTION_BOX',v:newSb});
+        } else if(ds.type==='face'){
+          // Project mouse ray onto drag plane to get world delta
+          var intPt=new THREE.Vector3();
+          if(raycaster.ray.intersectPlane(ds.dragPlane,intPt)){
+            var delta=intPt.clone().sub(ds.startPos);
+            var axisDelta=delta.dot(ds.dir);
+            var newSb=Object.assign({},ds.startSb,{min:ds.startSb.min.slice(),max:ds.startSb.max.slice()});
+            if(ds.side==='max') newSb.max[ds.axis]=ds.startSb.max[ds.axis]+axisDelta;
+            else newSb.min[ds.axis]=ds.startSb.min[ds.axis]+axisDelta;
+            // Prevent inverted box
+            if(newSb.min[ds.axis]>=newSb.max[ds.axis]-0.01){
+              if(ds.side==='max') newSb.max[ds.axis]=newSb.min[ds.axis]+0.01;
+              else newSb.min[ds.axis]=newSb.max[ds.axis]-0.01;
+            }
+            if(ds.startSb.rotation) newSb.rotation=ds.startSb.rotation;
+            if(window._ccDispatch) window._ccDispatch({t:'SECTION_BOX',v:newSb});
+          }
+        }
+      });
+
+      window.addEventListener('mouseup', function(){
+        if(_sboxDragging){
+          _sboxDragging=false;
+          _sboxDragState=null;
+          renderer.domElement.style.cursor='';
+        }
+      });
+
+      // ── Hover cursor for section box handles ──
+      renderer.domElement.addEventListener('mousemove', function(e){
+        if(_sboxDragging) return;
+        var S2=state3d.current;
+        if(!S2._sboxHandles&&!S2._sboxRotRing) return;
+        var rect=renderer.domElement.getBoundingClientRect();
+        var mx=((e.clientX-rect.left)/rect.width)*2-1;
+        var my=-((e.clientY-rect.top)/rect.height)*2+1;
+        raycaster.setFromCamera(new THREE.Vector2(mx,my), camera);
+        var allH=[];
+        if(S2._sboxRotRing) allH.push(S2._sboxRotRing);
+        if(S2._sboxHandles) allH=allH.concat(S2._sboxHandles);
+        var hh=raycaster.intersectObjects(allH,false);
+        if(hh.length>0){
+          var h=hh[0].object;
+          if(h.userData._sboxRotation) renderer.domElement.style.cursor='crosshair';
+          else renderer.domElement.style.cursor='grab';
+          // Highlight hovered handle
+          if(S2._lastHoveredHandle&&S2._lastHoveredHandle!==h){S2._lastHoveredHandle.material.opacity=0.8;}
+          h.material.opacity=1.0;
+          S2._lastHoveredHandle=h;
+        } else {
+          if(!_sboxDragging) renderer.domElement.style.cursor='';
+          if(S2._lastHoveredHandle){S2._lastHoveredHandle.material.opacity=0.8;S2._lastHoveredHandle=null;}
+        }
+      });
+
       var downPos = {x:0,y:0};
-      renderer.domElement.addEventListener('mousedown', function(e){downPos.x=e.clientX;downPos.y=e.clientY;setCtxMenu(null);});
+      renderer.domElement.addEventListener('mousedown', function(e){if(!_sboxDragging){downPos.x=e.clientX;downPos.y=e.clientY;}setCtxMenu(null);});
       renderer.domElement.addEventListener('mouseup', function(e){
+        // Don't pick if we were dragging section box handles
+        if(_sboxDragging) return;
         // Only pick if the mouse didn't move (not a drag)
         if(Math.abs(e.clientX-downPos.x)>3 || Math.abs(e.clientY-downPos.y)>3) return;
         var rect = renderer.domElement.getBoundingClientRect();
@@ -1397,7 +1617,24 @@ function startApp() {
               hitNormal = [fn.x, fn.y, fn.z];
             }
             setSelectedEl(found ? {props:found.el.props||{}, modelName:found.model.name, expressId:eid, point:hitPt, box:hitBox, normal:hitNormal} : {props:{expressId:eid}, modelName:'Unknown', expressId:eid, point:hitPt, box:hitBox, normal:hitNormal});
-            ghostOthers([eid]);
+            // Normal click: outline only, no transparency
+            unghostAll();
+            if(outlineRef.current){scene.remove(outlineRef.current);outlineRef.current=null;}
+            if(prefsRef.current.outlineSelected!==false){
+              try {
+                var outGeo = hit.geometry.clone();
+                var outMat = new THREE.MeshBasicMaterial({color:0x3b82f6, side:THREE.BackSide, transparent:true, opacity:0.35});
+                var outMesh = new THREE.Mesh(outGeo, outMat);
+                outMesh.applyMatrix4(hit.matrixWorld);
+                var ob = new THREE.Box3().setFromObject(outMesh);
+                var oc = ob.getCenter(new THREE.Vector3());
+                outMesh.position.sub(oc).multiplyScalar(1.05).add(oc);
+                outMesh.scale.multiplyScalar(1.05);
+                outMesh.renderOrder = -1;
+                scene.add(outMesh);
+                outlineRef.current = outMesh;
+              } catch(e){}
+            }
             // Fly to element on click (if autoFlyTo enabled)
             if(prefsRef.current.autoFlyTo!==false && _flyTo) {
               var elSz = hitBox.getSize(new THREE.Vector3());
@@ -1428,11 +1665,13 @@ function startApp() {
           // Transform normal from object space to world space
           faceNormal.transformDirection(hit.object.matrixWorld);
           var pt = hit.point;
+          var ctxEid = hit.object.userData.expressID;
           setCtxMenu({
             x: e.clientX - rect.left,
             y: e.clientY - rect.top,
             normal: [faceNormal.x, faceNormal.y, faceNormal.z],
-            point: [pt.x, pt.y, pt.z]
+            point: [pt.x, pt.y, pt.z],
+            expressId: ctxEid
           });
         } else {
           setCtxMenu(null);
@@ -1478,70 +1717,14 @@ function startApp() {
 
       var mg = new THREE.Group(); scene.add(mg); S.mg = mg;
 
-      // Mini-map: top-down orthographic camera
-      var miniCam = new THREE.OrthographicCamera(-50,50,50,-50,0.1,10000);
-      miniCam.position.set(0,200,0);
-      miniCam.lookAt(0,0,0);
-      S.miniCam = miniCam;
-      S.miniMapEnabled = true;
-      // Camera indicator for mini-map
-      var camIndicator = new THREE.Mesh(
-        new THREE.ConeGeometry(1.5,3,4),
-        new THREE.MeshBasicMaterial({color:0x3b82f6,transparent:true,opacity:0.9})
-      );
-      camIndicator.rotation.x = Math.PI;
-      scene.add(camIndicator);
-      S.camIndicator = camIndicator;
-
       // FPS tracking
       S.perf = {fps:0, frameCount:0, lastTime:performance.now(), tris:0, meshCount:0, drawCalls:0};
-      // Cached mini-map bounds (invalidated on model add/remove)
-      S._mmBoxCache = null;
-      S._mmBoxCacheTime = 0;
       function tick(){
         S.raf=requestAnimationFrame(tick);
         // Main render
         renderer.setViewport(0,0,el.clientWidth,el.clientHeight);
         renderer.setScissorTest(false);
         renderer.render(scene,camera);
-        // Mini-map render (recalculate bounds only every 2s)
-        if(S.miniMapEnabled && S.mg && S.mg.children.length>0){
-          var mmSize = 140;
-          var now2 = performance.now();
-          if(!S._mmBoxCache || now2 - S._mmBoxCacheTime > 2000){
-            S._mmBoxCache = new THREE.Box3().setFromObject(S.mg);
-            S._mmBoxCacheTime = now2;
-            if(!S._mmBoxCache.isEmpty()){
-              var mmCtr2 = S._mmBoxCache.getCenter(new THREE.Vector3());
-              var mmSz2 = S._mmBoxCache.getSize(new THREE.Vector3());
-              var extent = Math.max(mmSz2.x, mmSz2.z) * 0.7;
-              miniCam.left = -extent; miniCam.right = extent;
-              miniCam.top = extent; miniCam.bottom = -extent;
-              miniCam.position.set(mmCtr2.x, mmCtr2.y + Math.max(mmSz2.y,50)*2, mmCtr2.z);
-              miniCam.lookAt(mmCtr2.x, mmCtr2.y, mmCtr2.z);
-              miniCam.updateProjectionMatrix();
-              S._mmCtr = mmCtr2;
-            }
-          }
-          if(S._mmCtr){
-            // Only camera indicator needs per-frame update (cheap)
-            camIndicator.position.copy(camera.position);
-            camIndicator.position.y = S._mmCtr.y + 0.5;
-            var lookDir = new THREE.Vector3();
-            camera.getWorldDirection(lookDir);
-            camIndicator.rotation.y = Math.atan2(lookDir.x, lookDir.z);
-            camIndicator.visible = true;
-          }
-          renderer.setViewport(el.clientWidth-mmSize-8, 8, mmSize, mmSize);
-          renderer.setScissor(el.clientWidth-mmSize-8, 8, mmSize, mmSize);
-          renderer.setScissorTest(true);
-          renderer.setClearColor(0x0c1222, 1);
-          renderer.clear();
-          renderer.render(scene, miniCam);
-          renderer.setClearColor(0x0f172a, 1);
-        } else {
-          if(camIndicator) camIndicator.visible = false;
-        }
         S.perf.frameCount++;
         var now = performance.now();
         if(now - S.perf.lastTime >= 1000) {
@@ -1639,50 +1822,150 @@ function startApp() {
       S.renderer.clippingPlanes=planes;
     }, [s.sectionAxis, s.sectionPos, s.sectionCustom]);
 
-    // Section Box: 6 clipping planes forming a box
+    // Section Box: 6 clipping planes + interactive drag handles + rotation
+    var sboxDragRef = useRef(null); // {handle, axis, side, startMouse, startVal, plane}
     useEffect(function(){
       var S = state3d.current; if(!S.renderer||!S.mg) return;
+      // Clean up previous
+      function cleanupSbox(){
+        if(S._sboxHelper){S.scene.remove(S._sboxHelper);S._sboxHelper=null;}
+        if(S._sboxHandles){S._sboxHandles.forEach(function(h){S.scene.remove(h);});S._sboxHandles=null;}
+        if(S._sboxRotRing){S.scene.remove(S._sboxRotRing);S._sboxRotRing=null;}
+        if(S._sboxFacePanels){S._sboxFacePanels.forEach(function(p){S.scene.remove(p);});S._sboxFacePanels=null;}
+      }
       if(!s.sectionBox||!s.sectionBox.enabled) {
         if(S._sectionBoxActive) {
           S.renderer.clippingPlanes=[];
           S._sectionBoxActive=false;
         }
-        // Clean up box helper
-        if(S._sboxHelper){S.scene.remove(S._sboxHelper);S._sboxHelper=null;}
+        cleanupSbox();
+        window._ccCurrentSbox=null;
         return;
       }
       var sb=s.sectionBox;
+      var rot=sb.rotation||0; // rotation around Y axis in radians
+      // Build rotation matrix
+      var cosR=Math.cos(rot), sinR=Math.sin(rot);
+      var ctr=new THREE.Vector3((sb.min[0]+sb.max[0])/2,(sb.min[1]+sb.max[1])/2,(sb.min[2]+sb.max[2])/2);
+      var hx=(sb.max[0]-sb.min[0])/2, hy=(sb.max[1]-sb.min[1])/2, hz=(sb.max[2]-sb.min[2])/2;
+      // Local axes after rotation
+      var axX=new THREE.Vector3(cosR,0,sinR);
+      var axY=new THREE.Vector3(0,1,0);
+      var axZ=new THREE.Vector3(-sinR,0,cosR);
+      // 6 clipping planes in rotated space
       var planes=[
-        new THREE.Plane(new THREE.Vector3(1,0,0),-sb.min[0]),
-        new THREE.Plane(new THREE.Vector3(-1,0,0),sb.max[0]),
-        new THREE.Plane(new THREE.Vector3(0,1,0),-sb.min[1]),
-        new THREE.Plane(new THREE.Vector3(0,-1,0),sb.max[1]),
-        new THREE.Plane(new THREE.Vector3(0,0,1),-sb.min[2]),
-        new THREE.Plane(new THREE.Vector3(0,0,-1),sb.max[2])
+        new THREE.Plane().setFromNormalAndCoplanarPoint(axX.clone(), ctr.clone().addScaledVector(axX,-hx)),
+        new THREE.Plane().setFromNormalAndCoplanarPoint(axX.clone().negate(), ctr.clone().addScaledVector(axX,hx)),
+        new THREE.Plane().setFromNormalAndCoplanarPoint(axY.clone(), ctr.clone().addScaledVector(axY,-hy)),
+        new THREE.Plane().setFromNormalAndCoplanarPoint(axY.clone().negate(), ctr.clone().addScaledVector(axY,hy)),
+        new THREE.Plane().setFromNormalAndCoplanarPoint(axZ.clone(), ctr.clone().addScaledVector(axZ,-hz)),
+        new THREE.Plane().setFromNormalAndCoplanarPoint(axZ.clone().negate(), ctr.clone().addScaledVector(axZ,hz))
       ];
       S.renderer.clippingPlanes=planes;
       S._sectionBoxActive=true;
-      // Box wireframe helper
-      if(S._sboxHelper){S.scene.remove(S._sboxHelper);S._sboxHelper=null;}
-      var bx=new THREE.Box3(new THREE.Vector3(sb.min[0],sb.min[1],sb.min[2]),new THREE.Vector3(sb.max[0],sb.max[1],sb.max[2]));
-      var helper=new THREE.Box3Helper(bx, 0x3b82f6);
-      helper.material.transparent=true; helper.material.opacity=0.5;
-      S.scene.add(helper);
-      S._sboxHelper=helper;
+      window._ccCurrentSbox=sb; // expose for drag handlers
+      cleanupSbox();
+
+      // --- Wireframe box (rotated) ---
+      var boxGeo=new THREE.BoxGeometry(hx*2,hy*2,hz*2);
+      var edges=new THREE.EdgesGeometry(boxGeo);
+      var lineMat=new THREE.LineBasicMaterial({color:0x3b82f6,transparent:true,opacity:0.5});
+      var wireframe=new THREE.LineSegments(edges,lineMat);
+      wireframe.position.copy(ctr);
+      wireframe.rotation.y=rot;
+      wireframe.userData._sboxPart=true;
+      S.scene.add(wireframe);
+      S._sboxHelper=wireframe;
+
+      // --- Semi-transparent face panels ---
+      var facePanelMat=new THREE.MeshBasicMaterial({color:0x3b82f6,transparent:true,opacity:0.06,side:THREE.DoubleSide,depthWrite:false});
+      var facePanels=[];
+      // Face definitions: [width,height], position offset along normal, rotation
+      var faceDefs=[
+        {w:hz*2,h:hy*2,pos:axX.clone().multiplyScalar(hx),lookDir:'x'},   // +X face
+        {w:hz*2,h:hy*2,pos:axX.clone().multiplyScalar(-hx),lookDir:'-x'}, // -X face
+        {w:hx*2,h:hz*2,pos:axY.clone().multiplyScalar(hy),lookDir:'y'},   // +Y (top)
+        {w:hx*2,h:hz*2,pos:axY.clone().multiplyScalar(-hy),lookDir:'-y'}, // -Y (bottom)
+        {w:hx*2,h:hy*2,pos:axZ.clone().multiplyScalar(hz),lookDir:'z'},   // +Z face
+        {w:hx*2,h:hy*2,pos:axZ.clone().multiplyScalar(-hz),lookDir:'-z'}  // -Z face
+      ];
+      faceDefs.forEach(function(fd){
+        var pg=new THREE.PlaneGeometry(fd.w,fd.h);
+        var pm=new THREE.Mesh(pg,facePanelMat.clone());
+        pm.position.copy(ctr).add(fd.pos);
+        // Orient plane to face outward
+        if(fd.lookDir==='x'||fd.lookDir==='-x'){
+          pm.rotation.y=rot+(fd.lookDir==='x'?Math.PI/2:-Math.PI/2);
+        } else if(fd.lookDir==='y'||fd.lookDir==='-y'){
+          pm.rotation.x=(fd.lookDir==='y'?-Math.PI/2:Math.PI/2);
+          pm.rotation.z=-rot;
+        } else {
+          pm.rotation.y=rot+(fd.lookDir==='z'?Math.PI:0);
+        }
+        pm.userData._sboxPart=true;
+        S.scene.add(pm);
+        facePanels.push(pm);
+      });
+      S._sboxFacePanels=facePanels;
+
+      // --- 6 face-center drag handles (spheres) ---
+      var handleSize=Math.max(hx,hy,hz)*0.06;
+      handleSize=Math.max(0.05,Math.min(handleSize,0.5));
+      var handleGeo=new THREE.SphereGeometry(handleSize,8,8);
+      var handles=[];
+      // Face handle definitions: axis (0=x,1=y,2=z), side (min/max), position
+      var handleDefs=[
+        {axis:0,side:'max',pos:ctr.clone().addScaledVector(axX,hx),color:0xef4444,dir:axX},   // +X red
+        {axis:0,side:'min',pos:ctr.clone().addScaledVector(axX,-hx),color:0xef4444,dir:axX},   // -X red
+        {axis:1,side:'max',pos:ctr.clone().addScaledVector(axY,hy),color:0x22c55e,dir:axY},    // +Y green
+        {axis:1,side:'min',pos:ctr.clone().addScaledVector(axY,-hy),color:0x22c55e,dir:axY},   // -Y green
+        {axis:2,side:'max',pos:ctr.clone().addScaledVector(axZ,hz),color:0x3b82f6,dir:axZ},    // +Z blue
+        {axis:2,side:'min',pos:ctr.clone().addScaledVector(axZ,-hz),color:0x3b82f6,dir:axZ}    // -Z blue
+      ];
+      handleDefs.forEach(function(hd){
+        var mat=new THREE.MeshBasicMaterial({color:hd.color,transparent:true,opacity:0.8,depthTest:false});
+        var mesh=new THREE.Mesh(handleGeo,mat);
+        mesh.position.copy(hd.pos);
+        mesh.userData._sboxHandle=true;
+        mesh.userData._handleAxis=hd.axis;
+        mesh.userData._handleSide=hd.side;
+        mesh.userData._handleDir=hd.dir;
+        mesh.renderOrder=999;
+        S.scene.add(mesh);
+        handles.push(mesh);
+      });
+
+      S._sboxHandles=handles;
+
+      // --- Rotation ring on top face ---
+      var ringRadius=Math.max(hx,hz)*0.7;
+      var ringGeo=new THREE.TorusGeometry(ringRadius,handleSize*0.35,8,32);
+      var ringMat=new THREE.MeshBasicMaterial({color:0xf59e0b,transparent:true,opacity:0.6,depthTest:false});
+      var ring=new THREE.Mesh(ringGeo,ringMat);
+      ring.position.copy(ctr).addScaledVector(axY,hy);
+      ring.rotation.x=Math.PI/2; // lay flat
+      ring.userData._sboxRotation=true;
+      ring.renderOrder=999;
+      S.scene.add(ring);
+      S._sboxRotRing=ring;
     }, [s.sectionBox]);
 
-    // Floor plan: horizontal section cut at storey elevation + top-down camera
+    // Floor plan: Dalux-style 3D section cut (single clip from above, angled 3D view)
     var floorPlanCamRef = useRef(null);
     useEffect(function(){
       var S = state3d.current; if(!S.renderer||!S.mg) return;
       if(!s.floorPlan){
-        // Restore perspective camera if we were in floor plan mode
+        window._ccFloorPlanActive = false;
+        window._ccCurrentFloorPlan = null;
+        // Restore camera if we were in floor plan mode
         if(floorPlanCamRef.current){
           S.camera.position.copy(floorPlanCamRef.current.pos);
           S.orbit.target.copy(floorPlanCamRef.current.target);
           S.orbit.sync(); S.orbit.apply();
           floorPlanCamRef.current = null;
         }
+        // Remove cut plane indicator
+        if(S._cutPlaneHelper){S.scene.remove(S._cutPlaneHelper);S._cutPlaneHelper=null;}
         // Don't clear clipping if another section mode is active
         if(!s.sectionAxis && !s.sectionCustom && !s.sectionBox){
           S.renderer.clippingPlanes=[];
@@ -1691,27 +1974,43 @@ function startApp() {
       }
       var fp = s.floorPlan;
       var cutElev = fp.elevation;
-      var cutHeight = fp.cutHeight || 1.2; // default 1.2m above floor level (standard plan cut height)
-      // Two horizontal clipping planes: one cuts from below at the elevation, one from above at cutElev+cutHeight
+      var cutHeight = fp.cutHeight || 1.2;
+      var cutAt = cutElev + cutHeight;
+      window._ccFloorPlanActive = true;
+      window._ccCurrentFloorPlan = fp;
+      // Single clipping plane: remove everything above cut elevation
+      // Everything below remains visible in full color (Dalux style)
       var planes = [
-        new THREE.Plane(new THREE.Vector3(0,1,0), -cutElev),         // remove everything below this level
-        new THREE.Plane(new THREE.Vector3(0,-1,0), cutElev+cutHeight) // remove everything above cut height
+        new THREE.Plane(new THREE.Vector3(0,-1,0), cutAt)
       ];
       S.renderer.clippingPlanes = planes;
-      // Switch to top-down orthographic-like view
-      if(!floorPlanCamRef.current){
-        floorPlanCamRef.current = {pos:S.camera.position.clone(), target:S.orbit.target.clone()};
-      }
-      // Compute model center at this level
+      // Visual cut plane indicator (subtle translucent plane at cut level)
+      if(S._cutPlaneHelper){S.scene.remove(S._cutPlaneHelper);S._cutPlaneHelper=null;}
       var box = new THREE.Box3().setFromObject(S.mg);
       var ctr = box.getCenter(new THREE.Vector3());
       var sz = box.getSize(new THREE.Vector3());
-      var viewDist = Math.max(sz.x,sz.z)*1.2;
-      // Position camera directly above looking down
-      S.orbit.target.set(ctr.x, cutElev+cutHeight*0.5, ctr.z);
-      S.camera.position.set(ctr.x, cutElev+viewDist, ctr.z+0.001);
-      S.camera.lookAt(S.orbit.target);
-      S.orbit.sync();
+      var planeSize = Math.max(sz.x,sz.z)*1.5;
+      var cutGeo = new THREE.PlaneGeometry(planeSize, planeSize);
+      var cutMat = new THREE.MeshBasicMaterial({color:0x3b82f6, transparent:true, opacity:0.04, side:THREE.DoubleSide, depthWrite:false});
+      var cutMesh = new THREE.Mesh(cutGeo, cutMat);
+      cutMesh.rotation.x = -Math.PI/2;
+      cutMesh.position.set(ctr.x, cutAt, ctr.z);
+      S.scene.add(cutMesh);
+      S._cutPlaneHelper = cutMesh;
+      // Position camera at angled 3D perspective (Dalux-style, not straight down)
+      // Only reposition on first activation, let user navigate freely after
+      if(!floorPlanCamRef.current){
+        floorPlanCamRef.current = {pos:S.camera.position.clone(), target:S.orbit.target.clone()};
+        var viewDist = Math.max(sz.x,sz.z)*0.9;
+        // Angled view: 55° from horizontal, looking at cut level from one corner
+        var angle = Math.PI/3.3; // ~55 degrees from horizontal
+        var camY = cutAt + viewDist * Math.sin(angle);
+        var camOffset = viewDist * Math.cos(angle);
+        S.orbit.target.set(ctr.x, cutAt - cutHeight*0.5, ctr.z);
+        S.camera.position.set(ctr.x + camOffset*0.7, camY, ctr.z + camOffset*0.7);
+        S.camera.lookAt(S.orbit.target);
+        S.orbit.sync();
+      }
     }, [s.floorPlan]);
 
     // Classification visibility: hide/show groups
@@ -1954,8 +2253,8 @@ function startApp() {
       </div>`}
       ${s.floorPlan && html`<div style=${{...P,top:'.75rem',right:'.75rem',background:'rgba(91,33,182,.9)',color:'#c084fc',pointerEvents:'auto',cursor:'pointer',display:'flex',alignItems:'center',gap:'.4rem'}}
         onClick=${function(){d({t:'FLOOR_PLAN',v:null})}}>
-        <span>Floor Plan: ${s.floorPlan.storeyName} · ${s.floorPlan.elevation.toFixed(1)}m</span>
-        <span style=${{fontSize:'.6rem',opacity:.7}} title="Exit floor plan">✕</span>
+        <span>3D Section: ${s.floorPlan.storeyName} · ${(s.floorPlan.elevation+(s.floorPlan.cutHeight||1.2)).toFixed(1)}m</span>
+        <span style=${{fontSize:'.6rem',opacity:.7}} title="Exit 3D section">✕</span>
       </div>`}
       ${selectedEl && html`<div style=${{position:'absolute',bottom:'.75rem',left:'.75rem',width:280,maxHeight:'50%',overflowY:'auto',background:'rgba(15,23,42,.95)',border:'1px solid #334155',borderRadius:8,padding:'.6rem',pointerEvents:'auto',boxShadow:'0 4px 20px rgba(0,0,0,.5)'}}>
         <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.4rem'}}>
@@ -1978,26 +2277,31 @@ function startApp() {
         ${ep && ep.material && html`<div style=${ROW}><span style=${LS}>Material</span><span style=${VS}>${ep.material}</span></div>`}
         <div style=${ROW}><span style=${LS}>Express ID</span><span style=${VS}>#${selectedEl.expressId}</span></div>
         ${function(){
-          // Show IFC quantities for length/width/height if available, otherwise bounding box
+          // Show IFC dimensions from quantities and property sets
           var q = ep&&ep.quantities||{};
-          var hasIfcDims = q.Length||q.Width||q.Height||q.Depth||q.Perimeter;
+          var psets = ep&&ep.psets||{};
           var ifcDims = [];
-          if(q.Length) ifcDims.push({l:'Length',v:q.Length});
-          if(q.Width) ifcDims.push({l:'Width',v:q.Width});
-          if(q.Height) ifcDims.push({l:'Height',v:q.Height});
-          if(q.Depth) ifcDims.push({l:'Depth',v:q.Depth});
-          if(q.Perimeter) ifcDims.push({l:'Perimeter',v:q.Perimeter});
+          // Collect from IFC quantities
+          var dimKeys = ['Length','Width','Height','Depth','Perimeter','Thickness','Area','Volume','GrossArea','NetArea','GrossSideArea','NetSideArea','GrossVolume','NetVolume','GrossFootprintArea'];
+          dimKeys.forEach(function(k){ if(q[k]!=null) ifcDims.push({l:k,v:q[k]}); });
+          // Also scan property sets for dimension-like properties
+          var dimPropKeys = ['Height','Width','Length','Depth','Thickness','Span','Diameter','Radius','OverallHeight','OverallWidth','OverallDepth','NominalHeight','NominalWidth','NominalLength'];
+          Object.keys(psets).forEach(function(setName){
+            var ps=psets[setName];
+            dimPropKeys.forEach(function(k){
+              if(ps[k]!=null && !ifcDims.some(function(d){return d.l===k;})){
+                var v=ps[k];
+                if(typeof v==='number'||(!isNaN(parseFloat(v))&&isFinite(v))) ifcDims.push({l:k,v:typeof v==='number'?v:parseFloat(v),src:setName});
+              }
+            });
+          });
+          if(!ifcDims.length) return null;
           return html`<div style=${{marginTop:'.2rem',borderTop:'1px solid #1e293b',paddingTop:'.2rem'}}>
-            <div style=${{fontSize:'.6rem',fontWeight:600,color:'#64748b',marginBottom:'.1rem'}}>Dimensions${hasIfcDims?' (IFC)':' (bounding box)'}</div>
-            ${hasIfcDims ? ifcDims.map(function(d){
+            <div style=${{fontSize:'.6rem',fontWeight:600,color:'#64748b',marginBottom:'.1rem'}}>Dimensions (IFC)</div>
+            ${ifcDims.map(function(d){
               var val = typeof d.v==='number'?(d.v>=1?(d.v.toFixed(3)+' m'):((d.v*1000).toFixed(0)+' mm')):String(d.v);
               return html`<div key=${d.l} style=${ROW}><span style=${LS}>${d.l}</span><span style=${VS}>${val}</span></div>`;
-            }) : selectedEl.box ? function(){
-              var sz = selectedEl.box.getSize(new THREE.Vector3());
-              return [{l:'Length (X)',v:sz.x},{l:'Width (Z)',v:sz.z},{l:'Height (Y)',v:sz.y}].map(function(d){
-                return html`<div key=${d.l} style=${ROW}><span style=${LS}>${d.l}</span><span style=${VS}>${(d.v*1000).toFixed(0)} mm (${d.v.toFixed(3)} m)</span></div>`;
-              });
-            }() : null}
+            })}
           </div>`;
         }()}
         ${epQ.length>0 && html`<div style=${{marginTop:'.3rem',borderTop:'1px solid #1e293b',paddingTop:'.3rem'}}>
@@ -2062,14 +2366,15 @@ function startApp() {
             style=${{...S_BTN,width:'100%',textAlign:'left',padding:'.5rem .7rem',background:'transparent',color:'#e2e8f0',fontSize:'.75rem',borderRadius:0,display:'flex',alignItems:'center',gap:'.4rem'}}>
             <span style=${{fontSize:'.85rem'}}>✂</span> Make Section
           </button>
-          <button onClick=${function(){d({t:'SECTION',axis:null});setCtxMenu(null);}}
+          ${ctxMenu.expressId!=null && html`<button onClick=${function(){if(_sboxAroundElements)_sboxAroundElements([ctxMenu.expressId]);setCtxMenu(null);}}
+            style=${{...S_BTN,width:'100%',textAlign:'left',padding:'.5rem .7rem',background:'transparent',color:'#e2e8f0',fontSize:'.75rem',borderRadius:0,borderTop:'1px solid #334155',display:'flex',alignItems:'center',gap:'.4rem'}}>
+            <span style=${{fontSize:'.85rem'}}>◻</span> Section Box
+          </button>`}
+          <button onClick=${function(){d({t:'SECTION_BOX',v:null});d({t:'SECTION',axis:null});setCtxMenu(null);}}
             style=${{...S_BTN,width:'100%',textAlign:'left',padding:'.5rem .7rem',background:'transparent',color:'#94a3b8',fontSize:'.75rem',borderRadius:0,borderTop:'1px solid #334155',display:'flex',alignItems:'center',gap:'.4rem'}}>
             <span style=${{fontSize:'.85rem'}}>○</span> Clear Section
           </button>
         </div>
-      </div>`}
-      ${s.models.length>0 && html`<div style=${{position:'absolute',bottom:8,right:8,width:140,height:140,border:'1px solid #334155',borderRadius:4,pointerEvents:'auto',overflow:'hidden'}}>
-        <div style=${{position:'absolute',top:2,left:4,fontSize:'.45rem',color:'#475569',zIndex:1}}>Mini-map</div>
       </div>`}
     </div>`;
   }
@@ -2082,40 +2387,30 @@ function startApp() {
     var active=sb&&sb.enabled;
     function toggleSectionBox(){
       if(active){d({t:'SECTION_BOX',v:null});return;}
-      // Get bounding box of all models
       if(_getSectionBoxFromScene){
         var box=_getSectionBoxFromScene();
         if(box) d({t:'SECTION_BOX',v:{enabled:true,min:[box.min.x,box.min.y,box.min.z],max:[box.max.x,box.max.y,box.max.z]}});
       }
     }
-    function updateAxis(axis, side, val){
+    function resetRotation(){
       if(!sb) return;
-      var newSb=Object.assign({},sb,{min:sb.min.slice(),max:sb.max.slice()});
-      if(side==='min') newSb.min[axis]=val;
-      else newSb.max[axis]=val;
+      var newSb=Object.assign({},sb,{min:sb.min.slice(),max:sb.max.slice(),rotation:0});
       d({t:'SECTION_BOX',v:newSb});
     }
-    var axes=['X','Y','Z'];
     return html`<div style=${{marginTop:'.4rem'}}>
       <button onClick=${toggleSectionBox}
         style=${{...S_BTN,width:'100%',padding:'.25rem',background:active?'#7c3aed':'#1e293b',color:active?'#fff':'#64748b',border:'1px solid '+(active?'#7c3aed':'#334155'),marginBottom:active?'.4rem':0}}>
         ${active?'Section Box ON':'Section Box'}
       </button>
-      ${active && html`<div style=${{display:'flex',flexDirection:'column',gap:'.25rem'}}>
-        ${[0,1,2].map(function(ax){
-          var range=sb.max[ax]-sb.min[ax];
-          var pad=range*0.5;
-          var lo=sb.min[ax]-pad, hi=sb.max[ax]+pad;
-          return html`<div key=${ax} style=${{display:'flex',alignItems:'center',gap:'.2rem',fontSize:'.55rem',color:'#64748b'}}>
-            <span style=${{width:10}}>${axes[ax]}</span>
-            <input type="range" min=${lo} max=${hi} step=${range/200||0.01} value=${sb.min[ax]}
-              onInput=${function(e){updateAxis(ax,'min',parseFloat(e.target.value));}}
-              style=${{flex:1,height:12}} />
-            <input type="range" min=${lo} max=${hi} step=${range/200||0.01} value=${sb.max[ax]}
-              onInput=${function(e){updateAxis(ax,'max',parseFloat(e.target.value));}}
-              style=${{flex:1,height:12}} />
-          </div>`;
-        })}
+      ${active && html`<div style=${{fontSize:'.55rem',color:'#64748b',padding:'.2rem 0'}}>
+        <div style=${{marginBottom:'.2rem'}}>Drag handles to resize · Ring to rotate</div>
+        <div style=${{display:'flex',gap:'.3rem',alignItems:'center',flexWrap:'wrap'}}>
+          <span style=${{display:'inline-flex',alignItems:'center',gap:'.15rem'}}><span style=${{width:6,height:6,borderRadius:'50%',background:'#ef4444',display:'inline-block'}}></span>X</span>
+          <span style=${{display:'inline-flex',alignItems:'center',gap:'.15rem'}}><span style=${{width:6,height:6,borderRadius:'50%',background:'#22c55e',display:'inline-block'}}></span>Y</span>
+          <span style=${{display:'inline-flex',alignItems:'center',gap:'.15rem'}}><span style=${{width:6,height:6,borderRadius:'50%',background:'#3b82f6',display:'inline-block'}}></span>Z</span>
+          <span style=${{display:'inline-flex',alignItems:'center',gap:'.15rem'}}><span style=${{width:6,height:6,borderRadius:'50%',background:'#f59e0b',display:'inline-block'}}></span>Rotate</span>
+        </div>
+        ${sb.rotation ? html`<button onClick=${resetRotation} style=${{...S_BTN,marginTop:'.2rem',padding:'.1rem .3rem',background:'#1e293b',color:'#f59e0b',fontSize:'.55rem',border:'1px solid #334155'}}>Reset Rotation (${Math.round((sb.rotation||0)*180/Math.PI)}°)</button>` : null}
       </div>`}
     </div>`;
   }
@@ -2298,19 +2593,20 @@ function startApp() {
                 else{d({t:'FLOOR_PLAN',v:{storeyName:st,elevation:elev,cutHeight:1.2}});}
               }}
                 style=${{...S_BTN,fontSize:'.4rem',padding:'.05rem .2rem',background:isPlanActive?'#7c3aed':'#1e293b',color:isPlanActive?'#fff':'#a78bfa',border:'1px solid '+(isPlanActive?'#7c3aed':'#334155'),flexShrink:0}}
-                title=${'Floor plan cut at '+st+' (+1.2m)'}>${isPlanActive?'Exit':'Plan'}</button>`}
+                title=${'3D section cut at '+st}>${isPlanActive?'Exit':'Cut'}</button>`}
             </div>`;
           })}
           ${activePlan && html`<div style=${{marginTop:'.3rem',padding:'.3rem',background:'#1e1338',border:'1px solid #3b0764',borderRadius:6}}>
-            <div style=${{fontSize:'.55rem',color:'#c084fc',fontWeight:600,marginBottom:'.2rem'}}>Floor Plan: ${activePlan.storeyName}</div>
-            <div style=${{fontSize:'.5rem',color:'#64748b',marginBottom:'.2rem'}}>Cut at ${activePlan.elevation.toFixed(2)}m + ${activePlan.cutHeight}m height</div>
-            <div style=${{display:'flex',alignItems:'center',gap:'.2rem'}}>
+            <div style=${{fontSize:'.55rem',color:'#c084fc',fontWeight:600,marginBottom:'.2rem'}}>3D Section: ${activePlan.storeyName}</div>
+            <div style=${{fontSize:'.5rem',color:'#64748b',marginBottom:'.2rem'}}>Cut at ${(activePlan.elevation+(activePlan.cutHeight||1.2)).toFixed(2)}m</div>
+            <div style=${{display:'flex',alignItems:'center',gap:'.2rem',marginBottom:'.15rem'}}>
               <span style=${{fontSize:'.5rem',color:'#64748b'}}>Cut height:</span>
-              <input type="range" min="0.3" max="3" step="0.1" value=${activePlan.cutHeight||1.2}
+              <input type="range" min="0.3" max="4" step="0.1" value=${activePlan.cutHeight||1.2}
                 onInput=${function(e){d({t:'FLOOR_PLAN',v:Object.assign({},activePlan,{cutHeight:parseFloat(e.target.value)})});}}
                 style=${{flex:1,height:10}} />
               <span style=${{fontSize:'.5rem',color:'#a78bfa',minWidth:25}}>${(activePlan.cutHeight||1.2).toFixed(1)}m</span>
             </div>
+            <div style=${{fontSize:'.45rem',color:'#475569'}}>Ctrl + scroll to move cut up/down</div>
           </div>`}
         </div>`;
       }()}
@@ -2396,8 +2692,9 @@ function startApp() {
   // ── Issue Panel ────────────────────────────────────────────────
 
   // ── Model Tree Panel ────────────────────────────────────────
-  function ModelTreePanel(props) {
+  function ExplorerPanel(props) {
     var s=props.s, d=props.d;
+    var vm = useState('tree'), viewMode=vm[0], setViewMode=vm[1];
     var sq = useState(''), treeSearch=sq[0], setTreeSearch=sq[1];
     var ex = useState({}), expanded=ex[0], setExpanded=ex[1];
     function toggle(key){setExpanded(function(prev){var n=Object.assign({},prev);if(n[key])delete n[key];else n[key]=true;return n;});}
@@ -2409,23 +2706,60 @@ function startApp() {
       });
       setExpanded(all);
     }
+    // Auto-classify
+    var cls = s.classifications;
+    var lastClassifyRef = useRef('');
+    useEffect(function(){
+      if(s.models.length===0) return;
+      var sig = s.models.map(function(m){return m.id+':'+(m.elements?m.elements.length:0)}).join(',');
+      if(sig===lastClassifyRef.current) return;
+      lastClassifyRef.current = sig;
+      d({t:'SET_CLASSIFICATIONS',v:classifyModels(s.models)});
+    }, [s.models]);
+    var hasCls = cls && Object.keys(cls).length>0;
+    var classView = viewMode!=='tree' ? viewMode : null;
+    var groups = classView && hasCls ? cls[classView] || {} : {};
+    var keys = classView ? Object.keys(groups).sort(function(a,b){return (groups[b].count||0)-(groups[a].count||0)}) : [];
+    var total = keys.reduce(function(sum,k){return sum+(groups[k].count||0)},0);
+    var hiddenCount = classView ? keys.filter(function(k){return s.hiddenClasses[classView+':'+k]}).length : 0;
+    var CLASS_COLORS = ['#60a5fa','#f87171','#34d399','#fbbf24','#c084fc','#fb923c','#22d3ee','#e879f9','#a3e635','#f472b6','#38bdf8','#facc15','#4ade80','#f97316','#818cf8'];
+    var VIEWS=[{id:'tree',label:'Tree'},{id:'byType',label:'IFC Type'},{id:'byStorey',label:'Storey'},{id:'byDiscipline',label:'Discipline'},{id:'byMaterial',label:'Material'}];
+
     return html`<div style=${{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
-        <input type="text" placeholder="Search elements…" value=${treeSearch}
-          onInput=${function(e){setTreeSearch(e.target.value);}}
-          style=${{...S_INPUT,fontSize:'.65rem',padding:'.2rem .4rem',marginBottom:'.3rem'}} />
-        <div style=${{display:'flex',gap:'.2rem'}}>
-          <button onClick=${expandAll} style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Expand all</button>
-          <button onClick=${function(){setExpanded({});}} style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Collapse all</button>
+        <div style=${{display:'flex',gap:'.2rem',flexWrap:'wrap',marginBottom:'.3rem'}}>
+          ${VIEWS.map(function(v){return html`<button key=${v.id} onClick=${function(){setViewMode(v.id)}}
+            style=${{...S_BTN,fontSize:'.55rem',padding:'.15rem .35rem',background:viewMode===v.id?'#2563eb':'#1e293b',color:viewMode===v.id?'#fff':'#475569'}}>${v.label}</button>`})}
         </div>
+        ${viewMode==='tree' && html`<div>
+          <input type="text" placeholder="Search elements…" value=${treeSearch}
+            onInput=${function(e){setTreeSearch(e.target.value);}}
+            style=${{...S_INPUT,fontSize:'.65rem',padding:'.2rem .4rem',marginBottom:'.3rem'}} />
+          <div style=${{display:'flex',gap:'.2rem'}}>
+            <button onClick=${expandAll} style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Expand all</button>
+            <button onClick=${function(){setExpanded({});}} style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Collapse all</button>
+          </div>
+        </div>`}
+        ${classView && total>0 && html`<div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'.15rem'}}>
+          <span style=${{fontSize:'.55rem',color:'#475569'}}>${keys.length} groups · ${total} elements</span>
+          <div style=${{display:'flex',gap:'.2rem'}}>
+            <button onClick=${function(){d({t:'COLOR_BY_CLASS',v:classView})}}
+              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:s.colorByClass===classView?'#7c3aed':'#1e293b',color:s.colorByClass===classView?'#fff':'#475569'}}
+              title="Color elements by this classification">Color</button>
+            <button onClick=${function(){d({t:'SHOW_ALL_CLASSES'})}}
+              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Show all</button>
+            <button onClick=${function(){d({t:'HIDE_ALL_CLASSES',view:classView})}}
+              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Hide all</button>
+          </div>
+        </div>`}
+        ${classView && hiddenCount>0 && html`<div style=${{fontSize:'.5rem',color:'#f59e0b',marginTop:'.15rem'}}>${hiddenCount} group${hiddenCount>1?'s':''} hidden</div>`}
       </div>
       <div style=${{flex:1,overflowY:'auto',fontSize:'.6rem'}}>
-        ${s.models.length===0 && html`<div style=${{textAlign:'center',color:'#334155',fontSize:'.7rem',padding:'2rem 1rem'}}>Load models to browse tree</div>`}
-        ${s.models.map(function(model){
+        ${s.models.length===0 && html`<div style=${{textAlign:'center',color:'#334155',fontSize:'.7rem',padding:'2rem 1rem'}}>Load models to explore</div>`}
+        ${viewMode==='tree' && s.models.map(function(model){
           var mKey = 'm_'+model.id;
           var mOpen = !!expanded[mKey];
           var disc = DISC.find(function(x){return x.id===model.discipline;});
-          // Group elements by storey
           var storeyGroups = {};
           var noStorey = [];
           (model.elements||[]).forEach(function(el){
@@ -2489,55 +2823,8 @@ function startApp() {
             </div>`}
           </div>`;
         })}
-      </div>
-    </div>`;
-  }
-
-  function ClassifyPanel(props) {
-    var s=props.s, d=props.d;
-    var cls = s.classifications;
-    var cv = useState('byType'), classView=cv[0], setClassView=cv[1];
-    var hasCls = cls && Object.keys(cls).length>0;
-    // Auto-classify when models are added/removed (skip storey/visibility toggles)
-    var lastClassifyRef = useRef('');
-    useEffect(function(){
-      if(s.models.length===0) return;
-      // Only reclassify when model set or element counts change
-      var sig = s.models.map(function(m){return m.id+':'+(m.elements?m.elements.length:0)}).join(',');
-      if(sig===lastClassifyRef.current) return;
-      lastClassifyRef.current = sig;
-      d({t:'SET_CLASSIFICATIONS',v:classifyModels(s.models)});
-    }, [s.models]);
-    var groups = hasCls ? cls[classView] || {} : {};
-    var keys = Object.keys(groups).sort(function(a,b){return (groups[b].count||0)-(groups[a].count||0)});
-    var total = keys.reduce(function(sum,k){return sum+(groups[k].count||0)},0);
-    var VIEWS=[{id:'byType',label:'IFC Type'},{id:'byStorey',label:'Storey'},{id:'byDiscipline',label:'Discipline'},{id:'byMaterial',label:'Material'}];
-    var hiddenCount = keys.filter(function(k){return s.hiddenClasses[classView+':'+k]}).length;
-    // Color palette for classification coloring
-    var CLASS_COLORS = ['#60a5fa','#f87171','#34d399','#fbbf24','#c084fc','#fb923c','#22d3ee','#e879f9','#a3e635','#f472b6','#38bdf8','#facc15','#4ade80','#f97316','#818cf8'];
-    return html`<div style=${{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-      <div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
-        <div style=${{display:'flex',gap:'.2rem',flexWrap:'wrap'}}>
-          ${VIEWS.map(function(v){return html`<button key=${v.id} onClick=${function(){setClassView(v.id)}}
-            style=${{...S_BTN,fontSize:'.55rem',padding:'.15rem .35rem',background:classView===v.id?'#2563eb':'#1e293b',color:classView===v.id?'#fff':'#475569'}}>${v.label}</button>`})}
-        </div>
-        ${total>0 && html`<div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'.3rem'}}>
-          <span style=${{fontSize:'.55rem',color:'#475569'}}>${keys.length} groups · ${total} elements</span>
-          <div style=${{display:'flex',gap:'.2rem'}}>
-            <button onClick=${function(){d({t:'COLOR_BY_CLASS',v:classView})}}
-              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:s.colorByClass===classView?'#7c3aed':'#1e293b',color:s.colorByClass===classView?'#fff':'#475569'}}
-              title="Color elements by this classification">Color</button>
-            <button onClick=${function(){d({t:'SHOW_ALL_CLASSES'})}}
-              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Show all</button>
-            <button onClick=${function(){d({t:'HIDE_ALL_CLASSES',view:classView})}}
-              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Hide all</button>
-          </div>
-        </div>`}
-        ${hiddenCount>0 && html`<div style=${{fontSize:'.5rem',color:'#f59e0b',marginTop:'.15rem'}}>${hiddenCount} group${hiddenCount>1?'s':''} hidden</div>`}
-      </div>
-      <div style=${{flex:1,overflowY:'auto'}}>
-        ${!hasCls && html`<div style=${{textAlign:'center',color:'#334155',fontSize:'.75rem',padding:'2rem 1rem'}}>Load models to see classification</div>`}
-        ${keys.map(function(k, idx){
+        ${classView && !hasCls && html`<div style=${{textAlign:'center',color:'#334155',fontSize:'.75rem',padding:'2rem 1rem'}}>Load models to see classification</div>`}
+        ${classView && keys.map(function(k, idx){
           var grp = groups[k];
           var pct = total>0 ? Math.round(grp.count/total*100) : 0;
           var visKey = classView+':'+k;
@@ -2567,12 +2854,13 @@ function startApp() {
     var s=props.s, d=props.d, f=s.filters;
     var fo=useState(false), filtersOpen=fo[0], setFiltersOpen=fo[1];
     var isClashTab = s.tab==='clashes';
-    var isClassifyTab = s.tab==='classify';
+    var isExplorerTab = s.tab==='explorer';
     var rawItems = isClashTab ? s.clashes : s.issues;
 
     // Collect unique values for dynamic filter dropdowns (memoized)
     var filterLists = useMemo(function(){
       var uTypes={}, uStoreys={}, uMats={};
+      var uPriorities={}, uCategories={}, uAssignees={}, uIssueTypes={}, uIssueStoreys={};
       if(isClashTab){
         s.clashes.forEach(function(c){
           if(c.elemAType) uTypes[c.elemAType]=true;
@@ -2582,9 +2870,19 @@ function startApp() {
           if(c.elemAMaterial) uMats[c.elemAMaterial]=true;
           if(c.elemBMaterial) uMats[c.elemBMaterial]=true;
         });
+      } else {
+        s.issues.forEach(function(i){
+          if(i.priority) uPriorities[i.priority]=true;
+          if(i.category) uCategories[i.category]=true;
+          if(i.assignee) uAssignees[i.assignee]=true;
+          if(i.elementType) uIssueTypes[i.elementType]=true;
+          if(i.storey) uIssueStoreys[i.storey]=true;
+        });
       }
-      return {types:Object.keys(uTypes).sort(), storeys:Object.keys(uStoreys).sort(), materials:Object.keys(uMats).sort()};
-    }, [s.clashes, isClashTab]);
+      return {types:Object.keys(uTypes).sort(), storeys:Object.keys(uStoreys).sort(), materials:Object.keys(uMats).sort(),
+        priorities:Object.keys(uPriorities).sort(), categories:Object.keys(uCategories).sort(), assignees:Object.keys(uAssignees).sort(),
+        issueTypes:Object.keys(uIssueTypes).sort(), issueStoreys:Object.keys(uIssueStoreys).sort()};
+    }, [s.clashes, s.issues, isClashTab]);
     var typeList = filterLists.types;
     var storeyList = filterLists.storeys;
     var materialList = filterLists.materials;
@@ -2601,6 +2899,11 @@ function startApp() {
     if(f.ifcType!=='all') activeCount++;
     if(f.storey!=='all') activeCount++;
     if(f.material!=='all') activeCount++;
+    if(f.priority!=='all') activeCount++;
+    if(f.category!=='all') activeCount++;
+    if(f.assignee!=='all') activeCount++;
+    if(f.issueElementType!=='all') activeCount++;
+    if(f.issueStorey!=='all') activeCount++;
 
     // Apply all filters
     var items = useMemo(function(){
@@ -2625,6 +2928,13 @@ function startApp() {
           if(f.ifcType!=='all' && it.elemAType!==f.ifcType && it.elemBType!==f.ifcType) return false;
           if(f.storey!=='all' && it.elemAStorey!==f.storey && it.elemBStorey!==f.storey) return false;
           if(f.material!=='all' && it.elemAMaterial!==f.material && it.elemBMaterial!==f.material) return false;
+        } else {
+          // Issue-specific filters
+          if(f.priority!=='all' && it.priority!==f.priority) return false;
+          if(f.category!=='all' && it.category!==f.category) return false;
+          if(f.assignee!=='all' && (it.assignee||'')!==f.assignee) return false;
+          if(f.issueElementType!=='all' && (it.elementType||'')!==f.issueElementType) return false;
+          if(f.issueStorey!=='all' && (it.storey||'')!==f.issueStorey) return false;
         }
         return true;
       });
@@ -2643,15 +2953,14 @@ function startApp() {
 
     return html`<aside style=${{...S_PANELR,width:280}}>
       <div style=${{display:'flex',borderBottom:'1px solid #1e293b',flexShrink:0}}>
-        ${[{id:'clashes',label:'Clashes',n:oC,bg:'#ef4444'},{id:'issues',label:'Issues',n:oI,bg:'#f59e0b'},{id:'classify',label:'Classify',n:0,bg:'#3b82f6'},{id:'tree',label:'Tree',n:0,bg:'#34d399'}].map(function(t){return html`
+        ${[{id:'clashes',label:'Clashes',n:oC,bg:'#ef4444'},{id:'issues',label:'Issues',n:oI,bg:'#f59e0b'},{id:'explorer',label:'Explorer',n:0,bg:'#34d399'}].map(function(t){return html`
           <button key=${t.id} onClick=${function(){d({t:'TAB',v:t.id})}}
             style=${{...S_BTN,flex:1,background:'none',borderRadius:0,padding:'.6rem',color:s.tab===t.id?'#e2e8f0':'#475569',borderBottom:s.tab===t.id?'2px solid #3b82f6':'2px solid transparent'}}>
             ${t.label}${t.n>0?html`<span style=${{marginLeft:'.3rem',background:t.bg,color:'#fff',fontSize:'.6rem',padding:'.05rem .35rem',borderRadius:99}}>${t.n}</span>`:''}
           </button>`})}
       </div>
-      ${isClassifyTab && html`<${ClassifyPanel} s=${s} d=${d} />`}
-      ${s.tab==='tree' && html`<${ModelTreePanel} s=${s} d=${d} />`}
-      ${!isClassifyTab && s.tab!=='tree' && html`<div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0,display:'flex',gap:'.3rem'}}>
+      ${s.tab==='explorer' && html`<${ExplorerPanel} s=${s} d=${d} />`}
+      ${s.tab!=='explorer' && html`<div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0,display:'flex',gap:'.3rem'}}>
         <input type="text" placeholder="Search…" value=${f.search} onInput=${function(e){d({t:'UPD_FILTERS',u:{search:e.target.value}})}}
           style=${{...S_INPUT,fontSize:'.7rem',padding:'.25rem .4rem',flex:1}} />
         <button onClick=${function(){setFiltersOpen(!filtersOpen)}}
@@ -2659,7 +2968,7 @@ function startApp() {
           ⚙ ${activeCount>0?activeCount:''}
         </button>
       </div>`}
-      ${!isClassifyTab && s.tab!=='tree' && filtersOpen && html`<div style=${{padding:'.5rem',borderBottom:'1px solid #1e293b',flexShrink:0,display:'flex',flexDirection:'column',gap:'.4rem',background:'#0c1222'}}>
+      ${!isExplorerTab && filtersOpen && html`<div style=${{padding:'.5rem',borderBottom:'1px solid #1e293b',flexShrink:0,display:'flex',flexDirection:'column',gap:'.4rem',background:'#0c1222'}}>
         <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
           <span style=${{fontSize:'.65rem',fontWeight:600,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em'}}>Filters</span>
           <button onClick=${function(){d({t:'RESET_FILTERS'})}} style=${{...S_BTN,fontSize:'.55rem',padding:'.1rem .3rem',background:'none',color:'#475569',textDecoration:'underline'}}>Clear all</button>
@@ -2746,12 +3055,52 @@ function startApp() {
             style=${{...S_INPUT,fontSize:'.65rem',padding:'.2rem .3rem'}} />
         </div>`}
 
+        ${!isClashTab && html`<div>
+          <span style=${FL}>Priority</span>
+          <div style=${{display:'flex',gap:'.2rem',flexWrap:'wrap'}}>
+            ${['all','low','normal','high','critical'].map(function(v){return html`<button key=${v} onClick=${function(){d({t:'UPD_FILTERS',u:{priority:v}})}}
+              style=${PILL(f.priority===v)}>${v==='all'?'All':v.charAt(0).toUpperCase()+v.slice(1)}</button>`})}
+          </div>
+        </div>`}
+
+        ${!isClashTab && html`<div>
+          <span style=${FL}>Category</span>
+          <div style=${{display:'flex',gap:'.2rem',flexWrap:'wrap'}}>
+            ${['all','design','coordination','safety','structural','mep','other'].map(function(v){return html`<button key=${v} onClick=${function(){d({t:'UPD_FILTERS',u:{category:v}})}}
+              style=${PILL(f.category===v)}>${v==='all'?'All':v.charAt(0).toUpperCase()+v.slice(1)}</button>`})}
+          </div>
+        </div>`}
+
+        ${!isClashTab && filterLists.assignees.length>0 && html`<div>
+          <span style=${FL}>Assignee</span>
+          <select value=${f.assignee} onChange=${function(e){d({t:'UPD_FILTERS',u:{assignee:e.target.value}})}} style=${SELSTYLE}>
+            <option value="all">All assignees</option>
+            ${filterLists.assignees.map(function(a){return html`<option key=${a} value=${a}>${a}</option>`})}
+          </select>
+        </div>`}
+
+        ${!isClashTab && filterLists.issueTypes.length>0 && html`<div>
+          <span style=${FL}>Element Type</span>
+          <select value=${f.issueElementType} onChange=${function(e){d({t:'UPD_FILTERS',u:{issueElementType:e.target.value}})}} style=${SELSTYLE}>
+            <option value="all">All types</option>
+            ${filterLists.issueTypes.map(function(t){return html`<option key=${t} value=${t}>${t}</option>`})}
+          </select>
+        </div>`}
+
+        ${!isClashTab && filterLists.issueStoreys.length>0 && html`<div>
+          <span style=${FL}>Storey</span>
+          <select value=${f.issueStorey} onChange=${function(e){d({t:'UPD_FILTERS',u:{issueStorey:e.target.value}})}} style=${SELSTYLE}>
+            <option value="all">All storeys</option>
+            ${filterLists.issueStoreys.map(function(t){return html`<option key=${t} value=${t}>${t}</option>`})}
+          </select>
+        </div>`}
+
         <div style=${{fontSize:'.6rem',color:'#334155',textAlign:'right'}}>${items.length} / ${rawItems.length} shown</div>
       </div>`}
-      ${!isClassifyTab && s.tab!=='tree' && s.tab==='issues' && html`<div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
+      ${s.tab==='issues' && html`<div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
         <button onClick=${function(){d({t:'MODAL',v:true})}} style=${{...S_BTN,width:'100%',background:'#2563eb',color:'#fff'}}>+ New Issue</button>
       </div>`}
-      ${!isClassifyTab && s.tab!=='tree' && html`<${VirtualList} items=${items} activeId=${s.activeId} d=${d} isClash=${isClashTab} prefs=${s.prefs} />`}
+      ${!isExplorerTab && html`<${VirtualList} items=${items} activeId=${s.activeId} d=${d} isClash=${isClashTab} prefs=${s.prefs} />`}
     </aside>`;
   }
 
@@ -2852,11 +3201,15 @@ function startApp() {
           if(_unghostAll)_unghostAll();
           return;
         }
-        if(it.point&&_flyTo&&pr.autoFlyTo!==false){
-          _flyTo(it.point);
+        if(pr.autoFlyTo!==false){
+          var flyIds=[];
+          if(it.elemA) flyIds.push(it.elemA);
+          if(it.elemB) flyIds.push(it.elemB);
+          if(it.elementId) flyIds.push(it.elementId);
+          if(_flyToElements && flyIds.length) _flyToElements(flyIds, it.point);
+          else if(it.point && _flyTo) _flyTo(it.point);
         }
         if(pr.autoHighlight!==false){
-          // For clashes, ghost everything except the two clash elements
           var ids=[];
           if(it.elemA) ids.push(it.elemA);
           if(it.elemB) ids.push(it.elemB);
