@@ -124,7 +124,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.1.4',hash:'b2e286c',date:'2026-03-20T12:46:11Z'};
+  var CC_VERSION = {v:'1.1.5',hash:'621e600',date:'2026-03-20T12:52:03Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -193,7 +193,9 @@ function startApp() {
     // Exploder
     explodeAmount:0, // 0=off, 0.01-1=exploded
     // Model tree
-    treeOpen:false
+    treeOpen:false,
+    // Floor plan cut
+    floorPlan:null // {storeyName, elevation, cutHeight} or null
   };
   function reducer(s,a) {
     switch(a.t) {
@@ -231,6 +233,7 @@ function startApp() {
       case 'COLOR_BY_CLASS': return Object.assign({},s,{colorByClass:s.colorByClass===a.v?null:a.v});
       case 'EXPLODE':      return Object.assign({},s,{explodeAmount:a.v});
       case 'TREE':         return Object.assign({},s,{treeOpen:a.v});
+      case 'FLOOR_PLAN':   return Object.assign({},s,{floorPlan:a.v, sectionAxis:null, sectionCustom:null, sectionBox:null});
       default:            return s;
     }
   }
@@ -293,8 +296,9 @@ function startApp() {
   }
 
   function extractStoreys(api, modelID) {
-    // Build map: elementExpressID -> storeyName
+    // Build map: elementExpressID -> storeyName, plus storeyData with elevations
     var storeyMap = {};
+    var storeyData = []; // [{name, elevation}]
     try {
       var storeyIds = api.GetLineIDsWithType(modelID, IFC.IFCBUILDINGSTOREY);
       var storeys = {};
@@ -302,7 +306,14 @@ function startApp() {
         var sid = storeyIds.get(i);
         try {
           var sl = api.GetLine(modelID, sid);
-          storeys[sid] = safeStr(sl.Name) || ('Storey #'+sid);
+          var name = safeStr(sl.Name) || ('Storey #'+sid);
+          storeys[sid] = name;
+          // Extract elevation from IfcBuildingStorey
+          var elev = 0;
+          if (sl.Elevation != null) {
+            elev = typeof sl.Elevation === 'object' ? (sl.Elevation.value||0) : sl.Elevation;
+          }
+          storeyData.push({name:name, elevation:Number(elev)||0, id:sid});
         } catch(e) { storeys[sid] = 'Storey #'+sid; }
       }
       // IfcRelContainedInSpatialStructure links elements to storeys
@@ -322,7 +333,9 @@ function startApp() {
         } catch(e) {}
       }
     } catch(e) { console.warn('Storey extraction failed:', e.message||e); }
-    return storeyMap;
+    // Sort storeyData by elevation
+    storeyData.sort(function(a,b){return a.elevation-b.elevation;});
+    return {map:storeyMap, data:storeyData};
   }
 
   // Pre-build material map: expressID -> material name (scans relations once, not per element)
@@ -446,7 +459,9 @@ function startApp() {
       if(onProgress) onProgress('Building property maps…');
 
       // Pre-build all lookup maps ONCE (O(relations) instead of O(elements*relations))
-      var storeyMap = extractStoreys(api, modelID);
+      var storeyResult = extractStoreys(api, modelID);
+      var storeyMap = storeyResult.map;
+      var storeyData = storeyResult.data;
       var matMap = buildMaterialMap(api, modelID);
       var propMap = buildPropertyMap(api, modelID);
       var allStoreys = {};
@@ -521,7 +536,7 @@ function startApp() {
           } else {
             api.CloseModel(modelID);
             var loadTime = Math.round(performance.now() - loadStart);
-            resolve({ meshes:meshes, elements:elements, storeys:Object.keys(allStoreys).sort(), stats:{loadTime:loadTime, fileSize:buffer.byteLength, elementCount:elements.length, meshCount:meshes.length} });
+            resolve({ meshes:meshes, elements:elements, storeys:Object.keys(allStoreys).sort(), storeyData:storeyData, stats:{loadTime:loadTime, fileSize:buffer.byteLength, elementCount:elements.length, meshCount:meshes.length} });
           }
         }
         processChunk(0);
@@ -1574,6 +1589,51 @@ function startApp() {
       S._sboxHelper=helper;
     }, [s.sectionBox]);
 
+    // Floor plan: horizontal section cut at storey elevation + top-down camera
+    var floorPlanCamRef = useRef(null);
+    useEffect(function(){
+      var S = state3d.current; if(!S.renderer||!S.mg) return;
+      if(!s.floorPlan){
+        // Restore perspective camera if we were in floor plan mode
+        if(floorPlanCamRef.current){
+          S.camera.position.copy(floorPlanCamRef.current.pos);
+          S.orbit.target.copy(floorPlanCamRef.current.target);
+          S.orbit.sync(); S.orbit.apply();
+          floorPlanCamRef.current = null;
+        }
+        // Don't clear clipping if another section mode is active
+        if(!s.sectionAxis && !s.sectionCustom && !s.sectionBox){
+          S.renderer.clippingPlanes=[];
+          S.mg.traverse(function(obj){if(obj.isMesh&&obj.material){obj.material.clippingPlanes=[];obj.material.needsUpdate=true;}});
+        }
+        return;
+      }
+      var fp = s.floorPlan;
+      var cutElev = fp.elevation;
+      var cutHeight = fp.cutHeight || 1.2; // default 1.2m above floor level (standard plan cut height)
+      // Two horizontal clipping planes: one cuts from below at the elevation, one from above at cutElev+cutHeight
+      var planes = [
+        new THREE.Plane(new THREE.Vector3(0,1,0), -cutElev),         // remove everything below this level
+        new THREE.Plane(new THREE.Vector3(0,-1,0), cutElev+cutHeight) // remove everything above cut height
+      ];
+      S.renderer.clippingPlanes = planes;
+      S.mg.traverse(function(obj){if(obj.isMesh&&obj.material){obj.material.clippingPlanes=planes;obj.material.needsUpdate=true;}});
+      // Switch to top-down orthographic-like view
+      if(!floorPlanCamRef.current){
+        floorPlanCamRef.current = {pos:S.camera.position.clone(), target:S.orbit.target.clone()};
+      }
+      // Compute model center at this level
+      var box = new THREE.Box3().setFromObject(S.mg);
+      var ctr = box.getCenter(new THREE.Vector3());
+      var sz = box.getSize(new THREE.Vector3());
+      var viewDist = Math.max(sz.x,sz.z)*1.2;
+      // Position camera directly above looking down
+      S.orbit.target.set(ctr.x, cutElev+cutHeight*0.5, ctr.z);
+      S.camera.position.set(ctr.x, cutElev+viewDist, ctr.z+0.001);
+      S.camera.lookAt(S.orbit.target);
+      S.orbit.sync();
+    }, [s.floorPlan]);
+
     // Classification visibility: hide/show groups
     useEffect(function(){
       var S = state3d.current; if(!S.mg) return;
@@ -1845,6 +1905,11 @@ function startApp() {
         <span>Section ${s.sectionAxis?s.sectionAxis.toUpperCase():'Surface'} · ${Math.round(s.sectionPos*100)}%</span>
         <span style=${{fontSize:'.6rem',opacity:.7}} title="Clear section">✕</span>
       </div>`}
+      ${s.floorPlan && html`<div style=${{...P,top:'.75rem',right:'.75rem',background:'rgba(91,33,182,.9)',color:'#c084fc',pointerEvents:'auto',cursor:'pointer',display:'flex',alignItems:'center',gap:'.4rem'}}
+        onClick=${function(){d({t:'FLOOR_PLAN',v:null})}}>
+        <span>Floor Plan: ${s.floorPlan.storeyName} · ${s.floorPlan.elevation.toFixed(1)}m</span>
+        <span style=${{fontSize:'.6rem',opacity:.7}} title="Exit floor plan">✕</span>
+      </div>`}
       ${selectedEl && html`<div style=${{position:'absolute',bottom:'.75rem',left:'.75rem',width:280,maxHeight:'50%',overflowY:'auto',background:'rgba(15,23,42,.95)',border:'1px solid #334155',borderRadius:8,padding:'.6rem',pointerEvents:'auto',boxShadow:'0 4px 20px rgba(0,0,0,.5)'}}>
         <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.4rem'}}>
           <span style=${{fontSize:'.7rem',fontWeight:600,color:'#93c5fd'}}>Element Properties</span>
@@ -2094,7 +2159,7 @@ function startApp() {
               var dObj = DISC.find(function(x){return x.id===disc;});
               col = dObj ? dObj.c : col;
               var fSize = result.stats ? result.stats.fileSize : buf.byteLength;
-              d({t:'ADD_MODEL', v:{id:uid(), name:f.name.replace(/\.ifc$/i,''), discipline:disc, color:col, visible:true, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], stats:result.stats||{fileSize:fSize}}});
+              d({t:'ADD_MODEL', v:{id:uid(), name:f.name.replace(/\.ifc$/i,''), discipline:disc, color:col, visible:true, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], storeyData:result.storeyData||[], stats:result.stats||{fileSize:fSize}}});
             });
           }).catch(function(er) {
             console.error(er);
@@ -2133,20 +2198,28 @@ function startApp() {
         ${s.models.map(function(m){return html`<${ModelCard} key=${m.id} m=${m} d=${d} />`})}
       </div>
       ${function(){
-        // Collect all unique storeys across all models for global toggle
+        // Collect all unique storeys across all models for global toggle + floor plan cuts
         var allStoreys = {};
+        var elevMap = {}; // storeyName -> elevation
         s.models.forEach(function(m){
           (m.storeys||[]).forEach(function(st){
             if(!allStoreys[st]) allStoreys[st]={models:[]};
             allStoreys[st].models.push(m.id);
           });
+          // Collect elevation data
+          (m.storeyData||[]).forEach(function(sd){
+            if(sd.name && sd.elevation!=null) elevMap[sd.name] = sd.elevation;
+          });
         });
-        var stKeys = Object.keys(allStoreys).sort();
+        var stKeys = Object.keys(allStoreys).sort(function(a,b){return (elevMap[a]||0)-(elevMap[b]||0)});
         if(stKeys.length===0) return null;
-        return html`<div style=${{padding:'.5rem .75rem',borderTop:'1px solid #1e293b',flexShrink:0,maxHeight:140,overflowY:'auto'}}>
+        var activePlan = s.floorPlan;
+        return html`<div style=${{padding:'.5rem .75rem',borderTop:'1px solid #1e293b',flexShrink:0,maxHeight:180,overflowY:'auto'}}>
           <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.3rem'}}>
             <span style=${{fontSize:'.65rem',fontWeight:600,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em'}}>Levels</span>
             <div style=${{display:'flex',gap:'.2rem'}}>
+              ${activePlan && html`<button onClick=${function(){d({t:'FLOOR_PLAN',v:null})}}
+                style=${{...S_BTN,fontSize:'.45rem',padding:'.05rem .25rem',background:'#7c3aed',color:'#fff'}}>Exit Plan</button>`}
               <button onClick=${function(){s.models.forEach(function(m){d({t:'TOGGLE_ALL_STOREYS',id:m.id,storeys:m.storeys||[],hide:false})})}}
                 style=${{...S_BTN,fontSize:'.45rem',padding:'.05rem .2rem',background:'#0f172a',color:'#64748b'}}>All on</button>
               <button onClick=${function(){s.models.forEach(function(m){d({t:'TOGGLE_ALL_STOREYS',id:m.id,storeys:m.storeys||[],hide:true})})}}
@@ -2154,21 +2227,39 @@ function startApp() {
             </div>
           </div>
           ${stKeys.map(function(st){
-            // Check if this storey is hidden in ANY model
             var hidden = s.models.every(function(m){return m.hiddenStoreys&&m.hiddenStoreys[st]});
-            return html`<label key=${st} style=${{display:'flex',alignItems:'center',gap:'.25rem',cursor:'pointer',padding:'.1rem 0'}}>
+            var elev = elevMap[st];
+            var hasElev = elev!=null;
+            var isPlanActive = activePlan && activePlan.storeyName===st;
+            return html`<div key=${st} style=${{display:'flex',alignItems:'center',gap:'.25rem',padding:'.1rem 0'}}>
               <span onClick=${function(e){e.preventDefault();s.models.forEach(function(m){
-                if((m.storeys||[]).indexOf(st)!==-1){
-                  // Toggle this storey for all models that have it
-                  d({t:'TOGGLE_STOREY',id:m.id,storey:st});
-                }
+                if((m.storeys||[]).indexOf(st)!==-1) d({t:'TOGGLE_STOREY',id:m.id,storey:st});
               });}}
                 style=${{width:11,height:11,borderRadius:2,border:'2px solid '+(hidden?'#475569':'#34d399'),background:hidden?'transparent':'#34d399',cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
                 ${!hidden && html`<span style=${{color:'#fff',fontSize:7}}>✓</span>`}
               </span>
-              <span style=${{fontSize:'.6rem',color:hidden?'#475569':'#e2e8f0',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title=${st}>${st}</span>
-            </label>`;
+              <span style=${{fontSize:'.6rem',color:hidden?'#475569':'#e2e8f0',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title=${st+(hasElev?' ('+elev.toFixed(1)+'m)':'')}>${st}</span>
+              ${hasElev && html`<span style=${{fontSize:'.45rem',color:'#475569',flexShrink:0}}>${elev.toFixed(1)}m</span>`}
+              ${hasElev && html`<button onClick=${function(e){
+                e.stopPropagation();
+                if(isPlanActive){d({t:'FLOOR_PLAN',v:null});}
+                else{d({t:'FLOOR_PLAN',v:{storeyName:st,elevation:elev,cutHeight:1.2}});}
+              }}
+                style=${{...S_BTN,fontSize:'.4rem',padding:'.05rem .2rem',background:isPlanActive?'#7c3aed':'#1e293b',color:isPlanActive?'#fff':'#a78bfa',border:'1px solid '+(isPlanActive?'#7c3aed':'#334155'),flexShrink:0}}
+                title=${'Floor plan cut at '+st+' (+1.2m)'}>${isPlanActive?'Exit':'Plan'}</button>`}
+            </div>`;
           })}
+          ${activePlan && html`<div style=${{marginTop:'.3rem',padding:'.3rem',background:'#1e1338',border:'1px solid #3b0764',borderRadius:6}}>
+            <div style=${{fontSize:'.55rem',color:'#c084fc',fontWeight:600,marginBottom:'.2rem'}}>Floor Plan: ${activePlan.storeyName}</div>
+            <div style=${{fontSize:'.5rem',color:'#64748b',marginBottom:'.2rem'}}>Cut at ${activePlan.elevation.toFixed(2)}m + ${activePlan.cutHeight}m height</div>
+            <div style=${{display:'flex',alignItems:'center',gap:'.2rem'}}>
+              <span style=${{fontSize:'.5rem',color:'#64748b'}}>Cut height:</span>
+              <input type="range" min="0.3" max="3" step="0.1" value=${activePlan.cutHeight||1.2}
+                onInput=${function(e){d({t:'FLOOR_PLAN',v:Object.assign({},activePlan,{cutHeight:parseFloat(e.target.value)})});}}
+                style=${{flex:1,height:10}} />
+              <span style=${{fontSize:'.5rem',color:'#a78bfa',minWidth:25}}>${(activePlan.cutHeight||1.2).toFixed(1)}m</span>
+            </div>
+          </div>`}
         </div>`;
       }()}
       <div style=${{padding:'.75rem',borderTop:'1px solid #1e293b',flexShrink:0}}>
