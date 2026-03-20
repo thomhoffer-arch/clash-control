@@ -124,7 +124,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.1.13',hash:'6a3b90c',date:'2026-03-20T20:06:51Z'};
+  var CC_VERSION = {v:'1.1.14',hash:'465cb69',date:'2026-03-20T20:13:36Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -168,7 +168,9 @@ function startApp() {
   var INIT_FILTERS = {
     search:'', status:'all', type:'all', discipline:'all',
     floor:'all', distMin:0, distMax:9999, elementId:'', selfClash:'all',
-    ifcType:'all', storey:'all', material:'all'
+    ifcType:'all', storey:'all', material:'all',
+    // Issue-specific filters
+    priority:'all', category:'all', assignee:'all', issueElementType:'all', issueStorey:'all'
   };
   var INIT_PREFS = {
     autoFlyTo:true, autoHighlight:true, showGrid:true, showAxes:true,
@@ -2627,8 +2629,9 @@ function startApp() {
   // ── Issue Panel ────────────────────────────────────────────────
 
   // ── Model Tree Panel ────────────────────────────────────────
-  function ModelTreePanel(props) {
+  function ExplorerPanel(props) {
     var s=props.s, d=props.d;
+    var vm = useState('tree'), viewMode=vm[0], setViewMode=vm[1];
     var sq = useState(''), treeSearch=sq[0], setTreeSearch=sq[1];
     var ex = useState({}), expanded=ex[0], setExpanded=ex[1];
     function toggle(key){setExpanded(function(prev){var n=Object.assign({},prev);if(n[key])delete n[key];else n[key]=true;return n;});}
@@ -2640,23 +2643,60 @@ function startApp() {
       });
       setExpanded(all);
     }
+    // Auto-classify
+    var cls = s.classifications;
+    var lastClassifyRef = useRef('');
+    useEffect(function(){
+      if(s.models.length===0) return;
+      var sig = s.models.map(function(m){return m.id+':'+(m.elements?m.elements.length:0)}).join(',');
+      if(sig===lastClassifyRef.current) return;
+      lastClassifyRef.current = sig;
+      d({t:'SET_CLASSIFICATIONS',v:classifyModels(s.models)});
+    }, [s.models]);
+    var hasCls = cls && Object.keys(cls).length>0;
+    var classView = viewMode!=='tree' ? viewMode : null;
+    var groups = classView && hasCls ? cls[classView] || {} : {};
+    var keys = classView ? Object.keys(groups).sort(function(a,b){return (groups[b].count||0)-(groups[a].count||0)}) : [];
+    var total = keys.reduce(function(sum,k){return sum+(groups[k].count||0)},0);
+    var hiddenCount = classView ? keys.filter(function(k){return s.hiddenClasses[classView+':'+k]}).length : 0;
+    var CLASS_COLORS = ['#60a5fa','#f87171','#34d399','#fbbf24','#c084fc','#fb923c','#22d3ee','#e879f9','#a3e635','#f472b6','#38bdf8','#facc15','#4ade80','#f97316','#818cf8'];
+    var VIEWS=[{id:'tree',label:'Tree'},{id:'byType',label:'IFC Type'},{id:'byStorey',label:'Storey'},{id:'byDiscipline',label:'Discipline'},{id:'byMaterial',label:'Material'}];
+
     return html`<div style=${{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
-        <input type="text" placeholder="Search elements…" value=${treeSearch}
-          onInput=${function(e){setTreeSearch(e.target.value);}}
-          style=${{...S_INPUT,fontSize:'.65rem',padding:'.2rem .4rem',marginBottom:'.3rem'}} />
-        <div style=${{display:'flex',gap:'.2rem'}}>
-          <button onClick=${expandAll} style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Expand all</button>
-          <button onClick=${function(){setExpanded({});}} style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Collapse all</button>
+        <div style=${{display:'flex',gap:'.2rem',flexWrap:'wrap',marginBottom:'.3rem'}}>
+          ${VIEWS.map(function(v){return html`<button key=${v.id} onClick=${function(){setViewMode(v.id)}}
+            style=${{...S_BTN,fontSize:'.55rem',padding:'.15rem .35rem',background:viewMode===v.id?'#2563eb':'#1e293b',color:viewMode===v.id?'#fff':'#475569'}}>${v.label}</button>`})}
         </div>
+        ${viewMode==='tree' && html`<div>
+          <input type="text" placeholder="Search elements…" value=${treeSearch}
+            onInput=${function(e){setTreeSearch(e.target.value);}}
+            style=${{...S_INPUT,fontSize:'.65rem',padding:'.2rem .4rem',marginBottom:'.3rem'}} />
+          <div style=${{display:'flex',gap:'.2rem'}}>
+            <button onClick=${expandAll} style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Expand all</button>
+            <button onClick=${function(){setExpanded({});}} style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Collapse all</button>
+          </div>
+        </div>`}
+        ${classView && total>0 && html`<div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'.15rem'}}>
+          <span style=${{fontSize:'.55rem',color:'#475569'}}>${keys.length} groups · ${total} elements</span>
+          <div style=${{display:'flex',gap:'.2rem'}}>
+            <button onClick=${function(){d({t:'COLOR_BY_CLASS',v:classView})}}
+              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:s.colorByClass===classView?'#7c3aed':'#1e293b',color:s.colorByClass===classView?'#fff':'#475569'}}
+              title="Color elements by this classification">Color</button>
+            <button onClick=${function(){d({t:'SHOW_ALL_CLASSES'})}}
+              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Show all</button>
+            <button onClick=${function(){d({t:'HIDE_ALL_CLASSES',view:classView})}}
+              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Hide all</button>
+          </div>
+        </div>`}
+        ${classView && hiddenCount>0 && html`<div style=${{fontSize:'.5rem',color:'#f59e0b',marginTop:'.15rem'}}>${hiddenCount} group${hiddenCount>1?'s':''} hidden</div>`}
       </div>
       <div style=${{flex:1,overflowY:'auto',fontSize:'.6rem'}}>
-        ${s.models.length===0 && html`<div style=${{textAlign:'center',color:'#334155',fontSize:'.7rem',padding:'2rem 1rem'}}>Load models to browse tree</div>`}
-        ${s.models.map(function(model){
+        ${s.models.length===0 && html`<div style=${{textAlign:'center',color:'#334155',fontSize:'.7rem',padding:'2rem 1rem'}}>Load models to explore</div>`}
+        ${viewMode==='tree' && s.models.map(function(model){
           var mKey = 'm_'+model.id;
           var mOpen = !!expanded[mKey];
           var disc = DISC.find(function(x){return x.id===model.discipline;});
-          // Group elements by storey
           var storeyGroups = {};
           var noStorey = [];
           (model.elements||[]).forEach(function(el){
@@ -2720,55 +2760,8 @@ function startApp() {
             </div>`}
           </div>`;
         })}
-      </div>
-    </div>`;
-  }
-
-  function ClassifyPanel(props) {
-    var s=props.s, d=props.d;
-    var cls = s.classifications;
-    var cv = useState('byType'), classView=cv[0], setClassView=cv[1];
-    var hasCls = cls && Object.keys(cls).length>0;
-    // Auto-classify when models are added/removed (skip storey/visibility toggles)
-    var lastClassifyRef = useRef('');
-    useEffect(function(){
-      if(s.models.length===0) return;
-      // Only reclassify when model set or element counts change
-      var sig = s.models.map(function(m){return m.id+':'+(m.elements?m.elements.length:0)}).join(',');
-      if(sig===lastClassifyRef.current) return;
-      lastClassifyRef.current = sig;
-      d({t:'SET_CLASSIFICATIONS',v:classifyModels(s.models)});
-    }, [s.models]);
-    var groups = hasCls ? cls[classView] || {} : {};
-    var keys = Object.keys(groups).sort(function(a,b){return (groups[b].count||0)-(groups[a].count||0)});
-    var total = keys.reduce(function(sum,k){return sum+(groups[k].count||0)},0);
-    var VIEWS=[{id:'byType',label:'IFC Type'},{id:'byStorey',label:'Storey'},{id:'byDiscipline',label:'Discipline'},{id:'byMaterial',label:'Material'}];
-    var hiddenCount = keys.filter(function(k){return s.hiddenClasses[classView+':'+k]}).length;
-    // Color palette for classification coloring
-    var CLASS_COLORS = ['#60a5fa','#f87171','#34d399','#fbbf24','#c084fc','#fb923c','#22d3ee','#e879f9','#a3e635','#f472b6','#38bdf8','#facc15','#4ade80','#f97316','#818cf8'];
-    return html`<div style=${{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-      <div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
-        <div style=${{display:'flex',gap:'.2rem',flexWrap:'wrap'}}>
-          ${VIEWS.map(function(v){return html`<button key=${v.id} onClick=${function(){setClassView(v.id)}}
-            style=${{...S_BTN,fontSize:'.55rem',padding:'.15rem .35rem',background:classView===v.id?'#2563eb':'#1e293b',color:classView===v.id?'#fff':'#475569'}}>${v.label}</button>`})}
-        </div>
-        ${total>0 && html`<div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'.3rem'}}>
-          <span style=${{fontSize:'.55rem',color:'#475569'}}>${keys.length} groups · ${total} elements</span>
-          <div style=${{display:'flex',gap:'.2rem'}}>
-            <button onClick=${function(){d({t:'COLOR_BY_CLASS',v:classView})}}
-              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:s.colorByClass===classView?'#7c3aed':'#1e293b',color:s.colorByClass===classView?'#fff':'#475569'}}
-              title="Color elements by this classification">Color</button>
-            <button onClick=${function(){d({t:'SHOW_ALL_CLASSES'})}}
-              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Show all</button>
-            <button onClick=${function(){d({t:'HIDE_ALL_CLASSES',view:classView})}}
-              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Hide all</button>
-          </div>
-        </div>`}
-        ${hiddenCount>0 && html`<div style=${{fontSize:'.5rem',color:'#f59e0b',marginTop:'.15rem'}}>${hiddenCount} group${hiddenCount>1?'s':''} hidden</div>`}
-      </div>
-      <div style=${{flex:1,overflowY:'auto'}}>
-        ${!hasCls && html`<div style=${{textAlign:'center',color:'#334155',fontSize:'.75rem',padding:'2rem 1rem'}}>Load models to see classification</div>`}
-        ${keys.map(function(k, idx){
+        ${classView && !hasCls && html`<div style=${{textAlign:'center',color:'#334155',fontSize:'.75rem',padding:'2rem 1rem'}}>Load models to see classification</div>`}
+        ${classView && keys.map(function(k, idx){
           var grp = groups[k];
           var pct = total>0 ? Math.round(grp.count/total*100) : 0;
           var visKey = classView+':'+k;
@@ -2798,12 +2791,13 @@ function startApp() {
     var s=props.s, d=props.d, f=s.filters;
     var fo=useState(false), filtersOpen=fo[0], setFiltersOpen=fo[1];
     var isClashTab = s.tab==='clashes';
-    var isClassifyTab = s.tab==='classify';
+    var isExplorerTab = s.tab==='explorer';
     var rawItems = isClashTab ? s.clashes : s.issues;
 
     // Collect unique values for dynamic filter dropdowns (memoized)
     var filterLists = useMemo(function(){
       var uTypes={}, uStoreys={}, uMats={};
+      var uPriorities={}, uCategories={}, uAssignees={}, uIssueTypes={}, uIssueStoreys={};
       if(isClashTab){
         s.clashes.forEach(function(c){
           if(c.elemAType) uTypes[c.elemAType]=true;
@@ -2813,9 +2807,19 @@ function startApp() {
           if(c.elemAMaterial) uMats[c.elemAMaterial]=true;
           if(c.elemBMaterial) uMats[c.elemBMaterial]=true;
         });
+      } else {
+        s.issues.forEach(function(i){
+          if(i.priority) uPriorities[i.priority]=true;
+          if(i.category) uCategories[i.category]=true;
+          if(i.assignee) uAssignees[i.assignee]=true;
+          if(i.elementType) uIssueTypes[i.elementType]=true;
+          if(i.storey) uIssueStoreys[i.storey]=true;
+        });
       }
-      return {types:Object.keys(uTypes).sort(), storeys:Object.keys(uStoreys).sort(), materials:Object.keys(uMats).sort()};
-    }, [s.clashes, isClashTab]);
+      return {types:Object.keys(uTypes).sort(), storeys:Object.keys(uStoreys).sort(), materials:Object.keys(uMats).sort(),
+        priorities:Object.keys(uPriorities).sort(), categories:Object.keys(uCategories).sort(), assignees:Object.keys(uAssignees).sort(),
+        issueTypes:Object.keys(uIssueTypes).sort(), issueStoreys:Object.keys(uIssueStoreys).sort()};
+    }, [s.clashes, s.issues, isClashTab]);
     var typeList = filterLists.types;
     var storeyList = filterLists.storeys;
     var materialList = filterLists.materials;
@@ -2832,6 +2836,11 @@ function startApp() {
     if(f.ifcType!=='all') activeCount++;
     if(f.storey!=='all') activeCount++;
     if(f.material!=='all') activeCount++;
+    if(f.priority!=='all') activeCount++;
+    if(f.category!=='all') activeCount++;
+    if(f.assignee!=='all') activeCount++;
+    if(f.issueElementType!=='all') activeCount++;
+    if(f.issueStorey!=='all') activeCount++;
 
     // Apply all filters
     var items = useMemo(function(){
@@ -2856,6 +2865,13 @@ function startApp() {
           if(f.ifcType!=='all' && it.elemAType!==f.ifcType && it.elemBType!==f.ifcType) return false;
           if(f.storey!=='all' && it.elemAStorey!==f.storey && it.elemBStorey!==f.storey) return false;
           if(f.material!=='all' && it.elemAMaterial!==f.material && it.elemBMaterial!==f.material) return false;
+        } else {
+          // Issue-specific filters
+          if(f.priority!=='all' && it.priority!==f.priority) return false;
+          if(f.category!=='all' && it.category!==f.category) return false;
+          if(f.assignee!=='all' && (it.assignee||'')!==f.assignee) return false;
+          if(f.issueElementType!=='all' && (it.elementType||'')!==f.issueElementType) return false;
+          if(f.issueStorey!=='all' && (it.storey||'')!==f.issueStorey) return false;
         }
         return true;
       });
@@ -2874,15 +2890,14 @@ function startApp() {
 
     return html`<aside style=${{...S_PANELR,width:280}}>
       <div style=${{display:'flex',borderBottom:'1px solid #1e293b',flexShrink:0}}>
-        ${[{id:'clashes',label:'Clashes',n:oC,bg:'#ef4444'},{id:'issues',label:'Issues',n:oI,bg:'#f59e0b'},{id:'classify',label:'Classify',n:0,bg:'#3b82f6'},{id:'tree',label:'Tree',n:0,bg:'#34d399'}].map(function(t){return html`
+        ${[{id:'clashes',label:'Clashes',n:oC,bg:'#ef4444'},{id:'issues',label:'Issues',n:oI,bg:'#f59e0b'},{id:'explorer',label:'Explorer',n:0,bg:'#34d399'}].map(function(t){return html`
           <button key=${t.id} onClick=${function(){d({t:'TAB',v:t.id})}}
             style=${{...S_BTN,flex:1,background:'none',borderRadius:0,padding:'.6rem',color:s.tab===t.id?'#e2e8f0':'#475569',borderBottom:s.tab===t.id?'2px solid #3b82f6':'2px solid transparent'}}>
             ${t.label}${t.n>0?html`<span style=${{marginLeft:'.3rem',background:t.bg,color:'#fff',fontSize:'.6rem',padding:'.05rem .35rem',borderRadius:99}}>${t.n}</span>`:''}
           </button>`})}
       </div>
-      ${isClassifyTab && html`<${ClassifyPanel} s=${s} d=${d} />`}
-      ${s.tab==='tree' && html`<${ModelTreePanel} s=${s} d=${d} />`}
-      ${!isClassifyTab && s.tab!=='tree' && html`<div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0,display:'flex',gap:'.3rem'}}>
+      ${s.tab==='explorer' && html`<${ExplorerPanel} s=${s} d=${d} />`}
+      ${s.tab!=='explorer' && html`<div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0,display:'flex',gap:'.3rem'}}>
         <input type="text" placeholder="Search…" value=${f.search} onInput=${function(e){d({t:'UPD_FILTERS',u:{search:e.target.value}})}}
           style=${{...S_INPUT,fontSize:'.7rem',padding:'.25rem .4rem',flex:1}} />
         <button onClick=${function(){setFiltersOpen(!filtersOpen)}}
@@ -2890,7 +2905,7 @@ function startApp() {
           ⚙ ${activeCount>0?activeCount:''}
         </button>
       </div>`}
-      ${!isClassifyTab && s.tab!=='tree' && filtersOpen && html`<div style=${{padding:'.5rem',borderBottom:'1px solid #1e293b',flexShrink:0,display:'flex',flexDirection:'column',gap:'.4rem',background:'#0c1222'}}>
+      ${!isExplorerTab && filtersOpen && html`<div style=${{padding:'.5rem',borderBottom:'1px solid #1e293b',flexShrink:0,display:'flex',flexDirection:'column',gap:'.4rem',background:'#0c1222'}}>
         <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
           <span style=${{fontSize:'.65rem',fontWeight:600,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em'}}>Filters</span>
           <button onClick=${function(){d({t:'RESET_FILTERS'})}} style=${{...S_BTN,fontSize:'.55rem',padding:'.1rem .3rem',background:'none',color:'#475569',textDecoration:'underline'}}>Clear all</button>
@@ -2977,12 +2992,52 @@ function startApp() {
             style=${{...S_INPUT,fontSize:'.65rem',padding:'.2rem .3rem'}} />
         </div>`}
 
+        ${!isClashTab && html`<div>
+          <span style=${FL}>Priority</span>
+          <div style=${{display:'flex',gap:'.2rem',flexWrap:'wrap'}}>
+            ${['all','low','normal','high','critical'].map(function(v){return html`<button key=${v} onClick=${function(){d({t:'UPD_FILTERS',u:{priority:v}})}}
+              style=${PILL(f.priority===v)}>${v==='all'?'All':v.charAt(0).toUpperCase()+v.slice(1)}</button>`})}
+          </div>
+        </div>`}
+
+        ${!isClashTab && html`<div>
+          <span style=${FL}>Category</span>
+          <div style=${{display:'flex',gap:'.2rem',flexWrap:'wrap'}}>
+            ${['all','design','coordination','safety','structural','mep','other'].map(function(v){return html`<button key=${v} onClick=${function(){d({t:'UPD_FILTERS',u:{category:v}})}}
+              style=${PILL(f.category===v)}>${v==='all'?'All':v.charAt(0).toUpperCase()+v.slice(1)}</button>`})}
+          </div>
+        </div>`}
+
+        ${!isClashTab && filterLists.assignees.length>0 && html`<div>
+          <span style=${FL}>Assignee</span>
+          <select value=${f.assignee} onChange=${function(e){d({t:'UPD_FILTERS',u:{assignee:e.target.value}})}} style=${SELSTYLE}>
+            <option value="all">All assignees</option>
+            ${filterLists.assignees.map(function(a){return html`<option key=${a} value=${a}>${a}</option>`})}
+          </select>
+        </div>`}
+
+        ${!isClashTab && filterLists.issueTypes.length>0 && html`<div>
+          <span style=${FL}>Element Type</span>
+          <select value=${f.issueElementType} onChange=${function(e){d({t:'UPD_FILTERS',u:{issueElementType:e.target.value}})}} style=${SELSTYLE}>
+            <option value="all">All types</option>
+            ${filterLists.issueTypes.map(function(t){return html`<option key=${t} value=${t}>${t}</option>`})}
+          </select>
+        </div>`}
+
+        ${!isClashTab && filterLists.issueStoreys.length>0 && html`<div>
+          <span style=${FL}>Storey</span>
+          <select value=${f.issueStorey} onChange=${function(e){d({t:'UPD_FILTERS',u:{issueStorey:e.target.value}})}} style=${SELSTYLE}>
+            <option value="all">All storeys</option>
+            ${filterLists.issueStoreys.map(function(t){return html`<option key=${t} value=${t}>${t}</option>`})}
+          </select>
+        </div>`}
+
         <div style=${{fontSize:'.6rem',color:'#334155',textAlign:'right'}}>${items.length} / ${rawItems.length} shown</div>
       </div>`}
-      ${!isClassifyTab && s.tab!=='tree' && s.tab==='issues' && html`<div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
+      ${s.tab==='issues' && html`<div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
         <button onClick=${function(){d({t:'MODAL',v:true})}} style=${{...S_BTN,width:'100%',background:'#2563eb',color:'#fff'}}>+ New Issue</button>
       </div>`}
-      ${!isClassifyTab && s.tab!=='tree' && html`<${VirtualList} items=${items} activeId=${s.activeId} d=${d} isClash=${isClashTab} prefs=${s.prefs} />`}
+      ${!isExplorerTab && html`<${VirtualList} items=${items} activeId=${s.activeId} d=${d} isClash=${isClashTab} prefs=${s.prefs} />`}
     </aside>`;
   }
 
