@@ -295,39 +295,79 @@ function startApp() {
     return storeyMap;
   }
 
-  function extractQuantitiesAndPsets(api, modelID, expressID, props) {
+  // Pre-build material map: expressID -> material name (scans relations once, not per element)
+  function buildMaterialMap(api, modelID) {
+    var matMap = {};
+    try {
+      var relIds = api.GetLineIDsWithType(modelID, IFC.IFCRELASSOCIATESMATERIAL);
+      for (var i = 0; i < relIds.size(); i++) {
+        try {
+          var rel = api.GetLine(modelID, relIds.get(i));
+          var matRef = rel.RelatingMaterial ? (rel.RelatingMaterial.value||rel.RelatingMaterial) : null;
+          if (!matRef) continue;
+          var mat = api.GetLine(modelID, matRef);
+          if (!mat) continue;
+          var matName = '';
+          if (mat.Name) { matName = safeStr(mat.Name); }
+          else if (mat.ForLayerSet || mat.MaterialLayers) {
+            var layerSet = mat.ForLayerSet ? api.GetLine(modelID, mat.ForLayerSet.value != null ? mat.ForLayerSet.value : mat.ForLayerSet) : mat;
+            if (layerSet && layerSet.MaterialLayers) {
+              var names = [];
+              for (var k = 0; k < layerSet.MaterialLayers.length; k++) {
+                try {
+                  var lid = layerSet.MaterialLayers[k].value != null ? layerSet.MaterialLayers[k].value : layerSet.MaterialLayers[k];
+                  var layer = api.GetLine(modelID, lid);
+                  if (layer && layer.Material) {
+                    var mid = layer.Material.value != null ? layer.Material.value : layer.Material;
+                    var m2 = api.GetLine(modelID, mid);
+                    if (m2 && m2.Name) names.push(safeStr(m2.Name));
+                  }
+                } catch(e) {}
+              }
+              matName = names.join(', ');
+            }
+          }
+          if (!matName) continue;
+          var objs = rel.RelatedObjects || [];
+          for (var j = 0; j < objs.length; j++) {
+            var oid = objs[j].value != null ? objs[j].value : objs[j];
+            matMap[oid] = matName;
+          }
+        } catch(e) {}
+      }
+    } catch(e) {}
+    return matMap;
+  }
+
+  // Pre-build property/quantity map: expressID -> {quantities, psets} (scans relations once)
+  function buildPropertyMap(api, modelID) {
+    var propMap = {}; // expressID -> {quantities:{}, psets:{}}
     try {
       var relIds = api.GetLineIDsWithType(modelID, IFC.IFCRELDEFINESBYPROPERTIES);
       for (var i = 0; i < relIds.size(); i++) {
         try {
           var rel = api.GetLine(modelID, relIds.get(i));
-          var objs = rel.RelatedObjects || [];
-          var found = false;
-          for (var j = 0; j < objs.length; j++) {
-            var oid = objs[j].value != null ? objs[j].value : objs[j];
-            if (oid === expressID) { found = true; break; }
-          }
-          if (!found) continue;
           var defId = rel.RelatingPropertyDefinition ? (rel.RelatingPropertyDefinition.value||rel.RelatingPropertyDefinition) : null;
           if (!defId) continue;
           var def = api.GetLine(modelID, defId);
           if (!def) continue;
           var setName = safeStr(def.Name) || 'Unknown';
-          // IfcElementQuantity
+          // Parse definition once
+          var quantities = null, pset = null;
           if (def.Quantities) {
+            quantities = {};
             for (var q = 0; q < def.Quantities.length; q++) {
               try {
                 var qid = def.Quantities[q].value != null ? def.Quantities[q].value : def.Quantities[q];
                 var ql = api.GetLine(modelID, qid);
                 var qn = safeStr(ql.Name);
                 var qv = ql.LengthValue||ql.AreaValue||ql.VolumeValue||ql.WeightValue||ql.CountValue;
-                if (qn && qv != null) props.quantities[qn] = typeof qv === 'object' ? qv.value : qv;
+                if (qn && qv != null) quantities[qn] = typeof qv === 'object' ? qv.value : qv;
               } catch(e) {}
             }
           }
-          // IfcPropertySet
           if (def.HasProperties) {
-            var pset = {};
+            pset = {};
             for (var p = 0; p < def.HasProperties.length; p++) {
               try {
                 var pid = def.HasProperties[p].value != null ? def.HasProperties[p].value : def.HasProperties[p];
@@ -337,72 +377,20 @@ function startApp() {
                 if (pn && pv != null) pset[pn] = typeof pv === 'object' ? (pv.value != null ? pv.value : String(pv)) : pv;
               } catch(e) {}
             }
-            if (Object.keys(pset).length) props.psets[setName] = pset;
+            if (!Object.keys(pset).length) pset = null;
           }
-        } catch(e) {}
-      }
-    } catch(e) { console.warn('Property extraction failed for #'+expressID+':', e.message||e); }
-  }
-
-  function extractMaterials(api, modelID, expressID) {
-    try {
-      var relIds = api.GetLineIDsWithType(modelID, IFC.IFCRELASSOCIATESMATERIAL);
-      for (var i = 0; i < relIds.size(); i++) {
-        try {
-          var rel = api.GetLine(modelID, relIds.get(i));
+          // Assign to all related objects
           var objs = rel.RelatedObjects || [];
-          var found = false;
           for (var j = 0; j < objs.length; j++) {
             var oid = objs[j].value != null ? objs[j].value : objs[j];
-            if (oid === expressID) { found = true; break; }
-          }
-          if (!found) continue;
-          var matRef = rel.RelatingMaterial ? (rel.RelatingMaterial.value||rel.RelatingMaterial) : null;
-          if (!matRef) continue;
-          var mat = api.GetLine(modelID, matRef);
-          if (!mat) continue;
-          // Direct material
-          if (mat.Name) return safeStr(mat.Name);
-          // MaterialLayerSetUsage -> MaterialLayerSet -> layers
-          if (mat.ForLayerSet) {
-            var lsid = mat.ForLayerSet.value != null ? mat.ForLayerSet.value : mat.ForLayerSet;
-            var ls = api.GetLine(modelID, lsid);
-            if (ls && ls.MaterialLayers) {
-              var names = [];
-              for (var k = 0; k < ls.MaterialLayers.length; k++) {
-                try {
-                  var lid = ls.MaterialLayers[k].value != null ? ls.MaterialLayers[k].value : ls.MaterialLayers[k];
-                  var layer = api.GetLine(modelID, lid);
-                  if (layer && layer.Material) {
-                    var mid = layer.Material.value != null ? layer.Material.value : layer.Material;
-                    var m = api.GetLine(modelID, mid);
-                    if (m && m.Name) names.push(safeStr(m.Name));
-                  }
-                } catch(e) {}
-              }
-              if (names.length) return names.join(', ');
-            }
-          }
-          // MaterialLayerSet directly
-          if (mat.MaterialLayers) {
-            var names = [];
-            for (var k = 0; k < mat.MaterialLayers.length; k++) {
-              try {
-                var lid = mat.MaterialLayers[k].value != null ? mat.MaterialLayers[k].value : mat.MaterialLayers[k];
-                var layer = api.GetLine(modelID, lid);
-                if (layer && layer.Material) {
-                  var mid = layer.Material.value != null ? layer.Material.value : layer.Material;
-                  var m = api.GetLine(modelID, mid);
-                  if (m && m.Name) names.push(safeStr(m.Name));
-                }
-              } catch(e) {}
-            }
-            if (names.length) return names.join(', ');
+            if (!propMap[oid]) propMap[oid] = {quantities:{}, psets:{}};
+            if (quantities) Object.assign(propMap[oid].quantities, quantities);
+            if (pset) propMap[oid].psets[setName] = pset;
           }
         } catch(e) {}
       }
-    } catch(e) {}
-    return '';
+    } catch(e) { console.warn('Property map build failed:', e.message||e); }
+    return propMap;
   }
 
   // IFC type ID to human-readable name map
@@ -420,16 +408,24 @@ function startApp() {
   IFC_TYPE_NAMES[900683007] = 'IfcFooting'; IFC_TYPE_NAMES[1687234759] = 'IfcPile';
   IFC_TYPE_NAMES[1973544240] = 'IfcCovering'; IFC_TYPE_NAMES[3856911033] = 'IfcSpace';
 
-  function loadIFC(buffer, fallbackColor) {
+  function loadIFC(buffer, fallbackColor, onProgress) {
     return getIfcAPI().then(function(api) {
       var modelID = api.OpenModel(new Uint8Array(buffer));
-      var meshes = [], elements = [];
 
-      // Pre-extract storey assignments for all elements
+      if(onProgress) onProgress('Building property maps…');
+
+      // Pre-build all lookup maps ONCE (O(relations) instead of O(elements*relations))
       var storeyMap = extractStoreys(api, modelID);
+      var matMap = buildMaterialMap(api, modelID);
+      var propMap = buildPropertyMap(api, modelID);
       var allStoreys = {};
       Object.keys(storeyMap).forEach(function(k){ allStoreys[storeyMap[k]] = true; });
 
+      if(onProgress) onProgress('Streaming geometry…');
+
+      // Collect raw mesh data first (StreamAllMeshes is synchronous, can't chunk it)
+      var rawElements = [];
+      var meshes = [];
       api.StreamAllMeshes(modelID, function(ifcMesh) {
         var expressID = ifcMesh.expressID;
         var elMeshes = [], elBox = new THREE.Box3();
@@ -461,19 +457,43 @@ function startApp() {
           } catch(e) { console.warn('Skipped element geometry #'+expressID+': '+(e.message||e)); }
         }
         if (elMeshes.length > 0) {
-          // Extract full properties for this element
-          var props = extractProperties(api, modelID, expressID);
-          props.storey = storeyMap[expressID] || '';
-          props.material = extractMaterials(api, modelID, expressID);
-          // Resolve type name from typeId
-          if (props.typeId && IFC_TYPE_NAMES[props.typeId]) props.ifcType = IFC_TYPE_NAMES[props.typeId];
-          // Extract quantities and property sets
-          extractQuantitiesAndPsets(api, modelID, expressID, props);
-          elements.push({ expressId:expressID, meshes:elMeshes, box:elBox.clone(), props:props });
+          rawElements.push({expressId:expressID, meshes:elMeshes, box:elBox.clone()});
         }
       });
-      api.CloseModel(modelID);
-      return { meshes:meshes, elements:elements, storeys:Object.keys(allStoreys).sort() };
+
+      // Now enrich with properties using pre-built maps (fast lookups, no re-scanning)
+      if(onProgress) onProgress('Enriching ' + rawElements.length + ' elements…');
+
+      // Process properties in chunks to keep the UI responsive
+      var elements = [];
+      var CHUNK = 200;
+      return new Promise(function(resolve) {
+        function processChunk(startIdx) {
+          var end = Math.min(startIdx + CHUNK, rawElements.length);
+          for (var idx = startIdx; idx < end; idx++) {
+            var raw = rawElements[idx];
+            var props = extractProperties(api, modelID, raw.expressId);
+            props.storey = storeyMap[raw.expressId] || '';
+            props.material = matMap[raw.expressId] || '';
+            if (props.typeId && IFC_TYPE_NAMES[props.typeId]) props.ifcType = IFC_TYPE_NAMES[props.typeId];
+            // Use pre-built property map instead of scanning all relations
+            var pm = propMap[raw.expressId];
+            if (pm) {
+              props.quantities = pm.quantities;
+              props.psets = pm.psets;
+            }
+            elements.push({expressId:raw.expressId, meshes:raw.meshes, box:raw.box, props:props});
+          }
+          if (end < rawElements.length) {
+            if(onProgress) onProgress('Processing elements ' + end + '/' + rawElements.length + '…');
+            setTimeout(function(){ processChunk(end); }, 0);
+          } else {
+            api.CloseModel(modelID);
+            resolve({ meshes:meshes, elements:elements, storeys:Object.keys(allStoreys).sort() });
+          }
+        }
+        processChunk(0);
+      });
     });
   }
 
@@ -1250,6 +1270,7 @@ function startApp() {
     var s=props.s, d=props.d;
     var fileRef = useRef(null);
     var ld = useState(false), loading=ld[0], setLoading=ld[1];
+    var lm = useState(''), loadMsg=lm[0], setLoadMsg=lm[1];
     var er = useState(''), err=er[0], setErr=er[1];
 
     function onFiles(e) {
@@ -1260,15 +1281,16 @@ function startApp() {
         if (!f.name.toLowerCase().match(/\.ifc$/)) return;
         chain = chain.then(function() {
           setLoading(true);
+          setLoadMsg('Reading ' + f.name + '…');
           return f.arrayBuffer().then(function(buf) {
             var disc='structural', col=DISC[0].c;
-            return loadIFC(buf, col).then(function(result) {
+            return loadIFC(buf, col, function(msg){ setLoadMsg(f.name + ': ' + msg); }).then(function(result) {
               d({t:'ADD_MODEL', v:{id:uid(), name:f.name.replace(/\.ifc$/i,''), discipline:disc, color:col, visible:true, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[]}});
             });
           }).catch(function(er) {
             console.error(er);
             setErr(er.message||'Load failed');
-          }).then(function(){ setLoading(false); });
+          }).then(function(){ setLoading(false); setLoadMsg(''); });
         });
       });
       e.target.value='';
@@ -1283,7 +1305,7 @@ function startApp() {
         <input ref=${fileRef} type="file" accept=".ifc" multiple style=${{display:'none'}} onChange=${onFiles} />
         <button onClick=${function(){setErr('');fileRef.current&&fileRef.current.click()}} disabled=${loading}
           style=${{...S_BTN,width:'100%',background:'#1e293b',color:'#94a3b8',border:'1px dashed #334155',display:'flex',alignItems:'center',justifyContent:'center',gap:'.3rem'}}>
-          ${loading?html`<span class="spin">⟳</span> Loading…`:'+ Add IFC'}
+          ${loading?html`<span class="spin">⟳</span> ${loadMsg||'Loading…'}`:'+ Add IFC'}
         </button>
         ${err && html`<div style=${{marginTop:'.4rem',padding:'.4rem',background:'#450a0a',border:'1px solid #7f1d1d',borderRadius:6,fontSize:'.7rem',color:'#fca5a5',whiteSpace:'pre-line'}}>${err}</div>`}
       </div>
