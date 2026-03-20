@@ -124,7 +124,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.1.14',hash:'465cb69',date:'2026-03-20T20:13:36Z'};
+  var CC_VERSION = {v:'1.1.15',hash:'f55f454',date:'2026-03-20T20:15:47Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -964,6 +964,7 @@ function startApp() {
   var _highlightById = null;
   var _fitToClashes = null;
   var _fitToElement = null;
+  var _flyToElements = null;
   var _showClashMarkers = null;
   var _clearClashMarkers = null;
   var _findAndHighlightElements = null;
@@ -1226,6 +1227,34 @@ function startApp() {
         var sz = box.getSize(new THREE.Vector3());
         var dist = Math.max(sz.x,sz.y,sz.z,1)*1.5;
         _flyTo([ctr.x,ctr.y,ctr.z], dist);
+      };
+
+      // Fly to element(s) with same camera alignment as element click
+      _flyToElements = function(expressIds, fallbackPt) {
+        if(!S.mg||!S.orbit) return;
+        if(!expressIds||!expressIds.length){
+          if(fallbackPt) _flyTo(fallbackPt);
+          return;
+        }
+        var box = new THREE.Box3();
+        var foundAny = false;
+        expressIds.forEach(function(eid){
+          S.mg.traverse(function(obj){
+            if(obj.isMesh && obj.userData.expressID===eid){
+              box.expandByObject(obj);
+              foundAny = true;
+            }
+          });
+        });
+        if(!foundAny){
+          if(fallbackPt) _flyTo(fallbackPt);
+          return;
+        }
+        var ctr = box.getCenter(new THREE.Vector3());
+        var sz = box.getSize(new THREE.Vector3());
+        var dist = Math.max(sz.x, sz.y, sz.z, 1) * 2.5;
+        var pt = [ctr.x, ctr.y, ctr.z];
+        _flyTo(pt, dist);
       };
 
       // ── Section Box helper ──
@@ -3138,11 +3167,15 @@ function startApp() {
           if(_unghostAll)_unghostAll();
           return;
         }
-        if(it.point&&_flyTo&&pr.autoFlyTo!==false){
-          _flyTo(it.point);
+        if(pr.autoFlyTo!==false){
+          var flyIds=[];
+          if(it.elemA) flyIds.push(it.elemA);
+          if(it.elemB) flyIds.push(it.elemB);
+          if(it.elementId) flyIds.push(it.elementId);
+          if(_flyToElements && flyIds.length) _flyToElements(flyIds, it.point);
+          else if(it.point && _flyTo) _flyTo(it.point);
         }
         if(pr.autoHighlight!==false){
-          // For clashes, ghost everything except the two clash elements
           var ids=[];
           if(it.elemA) ids.push(it.elemA);
           if(it.elemB) ids.push(it.elemB);
