@@ -124,7 +124,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.1.1',hash:'0161e69',date:'2026-03-20T08:13:23Z'};
+  var CC_VERSION = {v:'1.1.2',hash:'65d489a',date:'2026-03-20T12:15:39Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -179,6 +179,7 @@ function startApp() {
     models:[], clashes:[], issues:[], activeId:null, showModal:false, showSettings:false, modalElement:null, tab:'clashes',
     rules:{ modelA:'all', modelB:'all', hard:true, soft:true, clearance:50 },
     detecting:false, sectionAxis:null, sectionPos:0.5, sectionCustom:null,
+    sectionBox:null, // {enabled, min:[x,y,z], max:[x,y,z]} – 6-plane box clipping
     filters:Object.assign({},INIT_FILTERS), floors:[],
     prefs:Object.assign({},INIT_PREFS),
     // Measurements
@@ -186,7 +187,13 @@ function startApp() {
     // Viewpoints
     viewpoints:[],
     // Classification
-    classifications:{} // { byType:{}, byStorey:{}, byDiscipline:{}, byMaterial:{} }
+    classifications:{}, // { byType:{}, byStorey:{}, byDiscipline:{}, byMaterial:{} }
+    hiddenClasses:{}, // { 'byType:IfcWall':true, ... } – toggle visibility per classification group
+    colorByClass:null, // null, 'byType', 'byStorey', 'byDiscipline', 'byMaterial'
+    // Exploder
+    explodeAmount:0, // 0=off, 0.01-1=exploded
+    // Model tree
+    treeOpen:false
   };
   function reducer(s,a) {
     switch(a.t) {
@@ -217,6 +224,13 @@ function startApp() {
       case 'ADD_VIEWPOINT': return Object.assign({},s,{viewpoints:s.viewpoints.concat([a.v])});
       case 'DEL_VIEWPOINT': return Object.assign({},s,{viewpoints:s.viewpoints.filter(function(v){return v.id!==a.id})});
       case 'SET_CLASSIFICATIONS': return Object.assign({},s,{classifications:a.v});
+      case 'SECTION_BOX':  return Object.assign({},s,{sectionBox:a.v, sectionAxis:null, sectionCustom:null});
+      case 'TOGGLE_CLASS_VIS': var hc2=Object.assign({},s.hiddenClasses); if(hc2[a.key])delete hc2[a.key];else hc2[a.key]=true; return Object.assign({},s,{hiddenClasses:hc2});
+      case 'SHOW_ALL_CLASSES': return Object.assign({},s,{hiddenClasses:{}});
+      case 'HIDE_ALL_CLASSES': var hca={}; if(s.classifications[a.view]){Object.keys(s.classifications[a.view]).forEach(function(k){hca[a.view+':'+k]=true;});} return Object.assign({},s,{hiddenClasses:hca});
+      case 'COLOR_BY_CLASS': return Object.assign({},s,{colorByClass:s.colorByClass===a.v?null:a.v});
+      case 'EXPLODE':      return Object.assign({},s,{explodeAmount:a.v});
+      case 'TREE':         return Object.assign({},s,{treeOpen:a.v});
       default:            return s;
     }
   }
@@ -425,6 +439,7 @@ function startApp() {
   IFC_TYPE_NAMES[1973544240] = 'IfcCovering'; IFC_TYPE_NAMES[3856911033] = 'IfcSpace';
 
   function loadIFC(buffer, fallbackColor, onProgress) {
+    var loadStart = performance.now();
     return getIfcAPI().then(function(api) {
       var modelID = api.OpenModel(new Uint8Array(buffer));
 
@@ -505,7 +520,8 @@ function startApp() {
             setTimeout(function(){ processChunk(end); }, 0);
           } else {
             api.CloseModel(modelID);
-            resolve({ meshes:meshes, elements:elements, storeys:Object.keys(allStoreys).sort() });
+            var loadTime = Math.round(performance.now() - loadStart);
+            resolve({ meshes:meshes, elements:elements, storeys:Object.keys(allStoreys).sort(), stats:{loadTime:loadTime, fileSize:buffer.byteLength, elementCount:elements.length, meshCount:meshes.length} });
           }
         }
         processChunk(0);
@@ -1689,15 +1705,29 @@ function startApp() {
 
   // ── Model Sidebar ──────────────────────────────────────────────
 
+  // Auto-detect discipline from IFC types
+  function detectDiscipline(elements) {
+    var mepTypes = {'IfcFlowSegment':1,'IfcFlowTerminal':1,'IfcFlowFitting':1,'IfcDistributionFlowElement':1,'IfcPipeSegment':1,'IfcDuctSegment':1};
+    var structTypes = {'IfcBeam':1,'IfcColumn':1,'IfcFooting':1,'IfcPile':1,'IfcMember':1,'IfcPlate':1};
+    var mepCount=0, structCount=0, archCount=0;
+    (elements||[]).forEach(function(el){
+      var t=(el.props&&el.props.ifcType)||'';
+      if(mepTypes[t]) mepCount++; else if(structTypes[t]) structCount++; else archCount++;
+    });
+    if(mepCount>structCount&&mepCount>archCount) return 'mep';
+    if(structCount>archCount) return 'structural';
+    return 'architectural';
+  }
+
   function ModelSidebar(props) {
     var s=props.s, d=props.d;
     var fileRef = useRef(null);
     var ld = useState(false), loading=ld[0], setLoading=ld[1];
     var lm = useState(''), loadMsg=lm[0], setLoadMsg=lm[1];
     var er = useState(''), err=er[0], setErr=er[1];
+    var dg = useState(false), dragging=dg[0], setDragging=dg[1];
 
-    function onFiles(e) {
-      var files = Array.prototype.slice.call(e.target.files||[]);
+    function processFiles(files) {
       setErr('');
       var chain = Promise.resolve();
       files.forEach(function(f) {
@@ -1708,7 +1738,12 @@ function startApp() {
           return f.arrayBuffer().then(function(buf) {
             var disc='structural', col=DISC[0].c;
             return loadIFC(buf, col, function(msg){ setLoadMsg(f.name + ': ' + msg); }).then(function(result) {
-              d({t:'ADD_MODEL', v:{id:uid(), name:f.name.replace(/\.ifc$/i,''), discipline:disc, color:col, visible:true, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[]}});
+              // Auto-detect discipline
+              disc = detectDiscipline(result.elements);
+              var dObj = DISC.find(function(x){return x.id===disc;});
+              col = dObj ? dObj.c : col;
+              var fSize = result.stats ? result.stats.fileSize : buf.byteLength;
+              d({t:'ADD_MODEL', v:{id:uid(), name:f.name.replace(/\.ifc$/i,''), discipline:disc, color:col, visible:true, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], stats:result.stats||{fileSize:fSize}}});
             });
           }).catch(function(er) {
             console.error(er);
@@ -1716,10 +1751,20 @@ function startApp() {
           }).then(function(){ setLoading(false); setLoadMsg(''); });
         });
       });
+    }
+    function onFiles(e) {
+      processFiles(Array.prototype.slice.call(e.target.files||[]));
       e.target.value='';
     }
+    function onDrop(e) {
+      e.preventDefault(); e.stopPropagation(); setDragging(false);
+      var files = Array.prototype.slice.call(e.dataTransfer.files||[]);
+      if(files.length) processFiles(files);
+    }
+    function onDragOver(e){e.preventDefault();e.stopPropagation();setDragging(true);}
+    function onDragLeave(e){e.preventDefault();e.stopPropagation();setDragging(false);}
 
-    return html`<aside style=${{...S_PANEL,width:240}}>
+    return html`<aside style=${{...S_PANEL,width:240}} onDrop=${onDrop} onDragOver=${onDragOver} onDragLeave=${onDragLeave}>
       <div style=${{padding:'.75rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
         <div style=${{display:'flex',justifyContent:'space-between',marginBottom:'.4rem'}}>
           <span style=${{fontSize:'.7rem',fontWeight:600,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em'}}>Models</span>
@@ -1727,8 +1772,8 @@ function startApp() {
         </div>
         <input ref=${fileRef} type="file" accept=".ifc" multiple style=${{display:'none'}} onChange=${onFiles} />
         <button onClick=${function(){setErr('');fileRef.current&&fileRef.current.click()}} disabled=${loading}
-          style=${{...S_BTN,width:'100%',background:'#1e293b',color:'#94a3b8',border:'1px dashed #334155',display:'flex',alignItems:'center',justifyContent:'center',gap:'.3rem'}}>
-          ${loading?html`<span class="spin">⟳</span> ${loadMsg||'Loading…'}`:'+ Add IFC'}
+          style=${{...S_BTN,width:'100%',background:dragging?'#1e3a5f':'#1e293b',color:dragging?'#93c5fd':'#94a3b8',border:dragging?'2px dashed #3b82f6':'1px dashed #334155',display:'flex',alignItems:'center',justifyContent:'center',gap:'.3rem',transition:'all .15s'}}>
+          ${loading?html`<span class="spin">⟳</span> ${loadMsg||'Loading…'}`:dragging?'Drop IFC files here':'+ Add IFC (or drag & drop)'}
         </button>
         ${err && html`<div style=${{marginTop:'.4rem',padding:'.4rem',background:'#450a0a',border:'1px solid #7f1d1d',borderRadius:6,fontSize:'.7rem',color:'#fca5a5',whiteSpace:'pre-line'}}>${err}</div>`}
       </div>
@@ -1782,7 +1827,11 @@ function startApp() {
           <span style=${{fontSize:'.7rem',color:'#475569'}}>Colour</span>
           <input type="color" value=${m.color} onChange=${function(e){d({t:'UPD_MODEL',id:m.id,u:{color:e.target.value}})}} style=${{width:24,height:20,border:'none',padding:0,background:'none',cursor:'pointer'}} />
         </div>
-        <span style=${{fontSize:'.65rem',color:'#334155'}}>${(m.elements&&m.elements.length||0)} elements</span>
+        <span style=${{fontSize:'.65rem',color:'#334155'}}>${(m.elements&&m.elements.length||0)} elements · ${(m.meshes&&m.meshes.length||0)} meshes</span>
+        ${m.stats && html`<div style=${{fontSize:'.55rem',color:'#334155',display:'flex',gap:'.4rem',flexWrap:'wrap'}}>
+          ${m.stats.fileSize && html`<span>${(m.stats.fileSize/1048576).toFixed(1)} MB</span>`}
+          ${m.stats.loadTime && html`<span>${(m.stats.loadTime/1000).toFixed(1)}s load</span>`}
+        </div>`}
         ${m.storeys&&m.storeys.length>0 && html`<div style=${{borderTop:'1px solid #334155',paddingTop:'.35rem',marginTop:'.1rem'}}>
           <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.25rem'}}>
             <span style=${{fontSize:'.6rem',fontWeight:600,color:'#64748b',textTransform:'uppercase',letterSpacing:'.03em'}}>Levels</span>
