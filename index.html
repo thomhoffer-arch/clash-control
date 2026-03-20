@@ -124,7 +124,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.1.5',hash:'621e600',date:'2026-03-20T12:52:03Z'};
+  var CC_VERSION = {v:'1.1.6',hash:'d2fc529',date:'2026-03-20T13:06:55Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -895,6 +895,7 @@ function startApp() {
   // ── Three.js Viewer Component ──────────────────────────────────
 
   var _flyTo = null;
+  var _resetView = null;
   var _highlightById = null;
   var _fitToClashes = null;
   var _fitToElement = null;
@@ -936,6 +937,7 @@ function startApp() {
 
       var camera = new THREE.PerspectiveCamera(55, el.clientWidth/el.clientHeight, 0.01, 10000);
       camera.position.set(30,25,30);
+      camera.lookAt(0,0,0);
       S.camera = camera;
 
       var renderer = new THREE.WebGLRenderer({antialias:true});
@@ -946,6 +948,7 @@ function startApp() {
       S.renderer = renderer;
 
       S.orbit = makeOrbit(camera, renderer.domElement);
+      S.orbit.apply(); // ensure camera looks at orbit target on init
 
       // Animated fly-to with easing (1.5s)
       var _flyAnim = null;
@@ -960,6 +963,41 @@ function startApp() {
         var endPos = new THREE.Vector3(pt[0]+d2*0.6,pt[1]+d2*0.4,pt[2]+d2*0.6);
         var startTime = performance.now();
         var duration = 1500;
+        function animate(){
+          var elapsed = performance.now()-startTime;
+          var t = Math.min(elapsed/duration,1);
+          var e = easeInOut(t);
+          S.orbit.target.lerpVectors(startTarget,endTarget,e);
+          S.camera.position.lerpVectors(startPos,endPos,e);
+          S.camera.lookAt(S.orbit.target);
+          S.orbit.sync();
+          if(t<1) _flyAnim=requestAnimationFrame(animate);
+          else _flyAnim=null;
+        }
+        animate();
+      };
+
+      // Reset view: fit camera to all loaded geometry
+      _resetView = function() {
+        if(!S.mg||S.mg.children.length===0){
+          // No models loaded, reset to default
+          S.orbit.target.set(0,0,0);
+          S.camera.position.set(30,25,30);
+          S.camera.lookAt(S.orbit.target);
+          S.orbit.sync(); S.orbit.apply();
+          return;
+        }
+        var box=new THREE.Box3().setFromObject(S.mg);
+        var sz=box.getSize(new THREE.Vector3()), ctr=box.getCenter(new THREE.Vector3());
+        var d=Math.max(sz.x,sz.y,sz.z)*1.5;
+        var endTarget = ctr;
+        var endPos = new THREE.Vector3(ctr.x+d, ctr.y+d*0.6, ctr.z+d);
+        // Animated fly
+        if(_flyAnim) cancelAnimationFrame(_flyAnim);
+        var startTarget = S.orbit.target.clone();
+        var startPos = S.camera.position.clone();
+        var startTime = performance.now();
+        var duration = 1200;
         function animate(){
           var elapsed = performance.now()-startTime;
           var t = Math.min(elapsed/duration,1);
@@ -1501,14 +1539,8 @@ function startApp() {
           grp.userData.modelId = model.id;
           model.meshes.forEach(function(m){grp.add(m)});
           S.mg.add(grp); S.map[model.id] = grp;
-          if(Object.keys(S.map).length===1){
-            var box=new THREE.Box3().setFromObject(grp);
-            var sz=box.getSize(new THREE.Vector3()), ctr=box.getCenter(new THREE.Vector3());
-            var d=Math.max(sz.x,sz.y,sz.z)*1.5;
-            S.orbit.target.copy(ctr);
-            S.camera.position.set(ctr.x+d,ctr.y+d*0.6,ctr.z+d);
-            S.orbit.sync();
-          }
+          // Auto-fit view when first model loads
+          if(Object.keys(S.map).length===1 && _resetView) _resetView();
         }
         if(S.map[model.id]) {
           S.map[model.id].visible = model.visible!==false;
@@ -1902,7 +1934,7 @@ function startApp() {
       </div>`}
       ${(s.sectionAxis||s.sectionCustom) && html`<div style=${{...P,top:'.75rem',right:'.75rem',background:'rgba(30,58,138,.9)',color:'#93c5fd',pointerEvents:'auto',cursor:'pointer',display:'flex',alignItems:'center',gap:'.4rem'}}
         onClick=${function(){d({t:'SECTION',axis:null})}}>
-        <span>Section ${s.sectionAxis?s.sectionAxis.toUpperCase():'Surface'} · ${Math.round(s.sectionPos*100)}%</span>
+        <span>Section ${s.sectionAxis?(s.sectionAxis==='y'?'Z':s.sectionAxis==='z'?'Y':s.sectionAxis.toUpperCase()):'Surface'} · ${Math.round(s.sectionPos*100)}%</span>
         <span style=${{fontSize:'.6rem',opacity:.7}} title="Clear section">✕</span>
       </div>`}
       ${s.floorPlan && html`<div style=${{...P,top:'.75rem',right:'.75rem',background:'rgba(91,33,182,.9)',color:'#c084fc',pointerEvents:'auto',cursor:'pointer',display:'flex',alignItems:'center',gap:'.4rem'}}
@@ -1984,6 +2016,11 @@ function startApp() {
           </div>`})}
         </div>`}
         <div style=${{display:'flex',gap:'.2rem'}}>
+          <button onClick=${function(){if(_resetView)_resetView();if(s.floorPlan)d({t:'FLOOR_PLAN',v:null});}}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .5rem',background:'rgba(30,41,59,.9)',color:'#94a3b8',border:'1px solid #334155'}}
+            title="Reset camera to fit all models">
+            Reset View
+          </button>
           <button onClick=${function(){if(_captureViewpoint){var vp=_captureViewpoint('Viewpoint '+(s.viewpoints.length+1));d({t:'ADD_VIEWPOINT',v:vp});}}}
             style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .5rem',background:'rgba(30,41,59,.9)',color:'#94a3b8',border:'1px solid #334155'}}>
             Save Viewpoint
@@ -2265,8 +2302,8 @@ function startApp() {
       <div style=${{padding:'.75rem',borderTop:'1px solid #1e293b',flexShrink:0}}>
         <span style=${{fontSize:'.7rem',fontWeight:600,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em',display:'block',marginBottom:'.4rem'}}>Section / Clipping</span>
         <div style=${{display:'flex',gap:'.2rem',marginBottom:'.3rem'}}>
-          ${['x','y','z'].map(function(ax){return html`<button key=${ax} onClick=${function(){d({t:'SECTION_BOX',v:null});d({t:'SECTION',axis:s.sectionAxis===ax?null:ax});}}
-            style=${{...S_BTN,flex:1,padding:'.25rem',background:s.sectionAxis===ax?'#2563eb':'#1e293b',color:s.sectionAxis===ax?'#fff':'#64748b'}}>${ax.toUpperCase()}</button>`})}
+          ${[{axis:'x',label:'X'},{axis:'z',label:'Y'},{axis:'y',label:'Z'}].map(function(item){return html`<button key=${item.axis} onClick=${function(){d({t:'SECTION_BOX',v:null});d({t:'SECTION',axis:s.sectionAxis===item.axis?null:item.axis});}}
+            style=${{...S_BTN,flex:1,padding:'.25rem',background:s.sectionAxis===item.axis?'#2563eb':'#1e293b',color:s.sectionAxis===item.axis?'#fff':'#64748b'}}>${item.label}</button>`})}
           <button onClick=${function(){d({t:'SECTION',axis:null});d({t:'SECTION_BOX',v:null});}}
             style=${{...S_BTN,flex:1,padding:'.25rem',background:!s.sectionAxis&&!s.sectionCustom&&(!s.sectionBox||!s.sectionBox.enabled)?'#2563eb':'#1e293b',color:!s.sectionAxis&&!s.sectionCustom&&(!s.sectionBox||!s.sectionBox.enabled)?'#fff':'#64748b'}}>Off</button>
         </div>
