@@ -177,7 +177,13 @@ function startApp() {
     rules:{ modelA:'all', modelB:'all', hard:true, soft:true, clearance:50 },
     detecting:false, sectionAxis:null, sectionPos:0.5, sectionCustom:null,
     filters:Object.assign({},INIT_FILTERS), floors:[],
-    prefs:Object.assign({},INIT_PREFS)
+    prefs:Object.assign({},INIT_PREFS),
+    // Measurements
+    measurements:[], measureMode:null, // 'length','angle','area' or null
+    // Viewpoints
+    viewpoints:[],
+    // Classification
+    classifications:{} // { byType:{}, byStorey:{}, byDiscipline:{}, byMaterial:{} }
   };
   function reducer(s,a) {
     switch(a.t) {
@@ -201,6 +207,13 @@ function startApp() {
       case 'TAB':         return Object.assign({},s,{tab:a.v});
       case 'SETTINGS':    return Object.assign({},s,{showSettings:a.v});
       case 'UPD_PREFS':   return Object.assign({},s,{prefs:Object.assign({},s.prefs,a.u)});
+      case 'MEASURE_MODE': return Object.assign({},s,{measureMode:a.v});
+      case 'ADD_MEASUREMENT': return Object.assign({},s,{measurements:s.measurements.concat([a.v])});
+      case 'DEL_MEASUREMENT': return Object.assign({},s,{measurements:s.measurements.filter(function(m){return m.id!==a.id})});
+      case 'CLEAR_MEASUREMENTS': return Object.assign({},s,{measurements:[]});
+      case 'ADD_VIEWPOINT': return Object.assign({},s,{viewpoints:s.viewpoints.concat([a.v])});
+      case 'DEL_VIEWPOINT': return Object.assign({},s,{viewpoints:s.viewpoints.filter(function(v){return v.id!==a.id})});
+      case 'SET_CLASSIFICATIONS': return Object.assign({},s,{classifications:a.v});
       default:            return s;
     }
   }
@@ -568,7 +581,7 @@ function startApp() {
   function saveProject(s) {
     // Serialise everything except Three.js mesh objects (not JSON-safe)
     var data = {
-      _cc: 'ClashControl', _v: '0.9',
+      _cc: 'ClashControl', _v: '1.0',
       savedAt: new Date().toISOString(),
       rules: s.rules,
       models: s.models.map(function(m) {
@@ -577,6 +590,8 @@ function startApp() {
       clashes: s.clashes,
       issues:  s.issues,
       floors:  s.floors,
+      viewpoints: (s.viewpoints||[]).map(function(v){return Object.assign({},v,{snapshot:undefined})}),
+      measurements: s.measurements||[],
     };
     var blob = new Blob([JSON.stringify(data, null, 2)], {type:'application/json'});
     var a = document.createElement('a');
@@ -604,6 +619,8 @@ function startApp() {
           // Restore clashes & issues
           if (data.clashes) d({ t:'SET_CLASHES', v: data.clashes });
           (data.issues||[]).forEach(function(i) { d({ t:'ADD_ISSUE', v:i }); });
+          (data.viewpoints||[]).forEach(function(v) { d({ t:'ADD_VIEWPOINT', v:v }); });
+          if (data.measurements) data.measurements.forEach(function(m) { d({ t:'ADD_MEASUREMENT', v:m }); });
         } catch(err) {
           alert('Load failed: ' + err.message);
         }
@@ -613,27 +630,185 @@ function startApp() {
     inp.click();
   }
 
-  // ── BCF 2.1 Export ─────────────────────────────────────────────
+  // (BCF export moved above with v2.1/3.0 support)
 
-  function exportBCF(items) {
-    if (!items.length) return;
-    var zip = new JSZip();
-    zip.file('bcf.version','<?xml version="1.0" encoding="UTF-8"?>\n<Version VersionId="2.1"><DetailedVersion>2.1</DetailedVersion></Version>');
-    zip.file('project.bcfp','<?xml version="1.0" encoding="UTF-8"?>\n<ProjectExtension><Project ProjectId="'+guid()+'"><Name>ClashControl</Name></Project></ProjectExtension>');
-    items.forEach(function(it) {
-      var g = guid(), f = zip.folder(g);
-      var type = it.type==='hard'?'Issue':it.type==='soft'?'Warning':'Request';
-      var st   = it.status==='resolved'?'Closed':'Open';
-      f.file('markup.bcf',
-        '<?xml version="1.0" encoding="UTF-8"?>\n<Markup><Topic Guid="'+g+'" TopicType="'+type+'" TopicStatus="'+st+'">' +
-        '<Title>'+esc(it.title)+'</Title><CreationDate>'+(it.createdAt||new Date().toISOString())+'</CreationDate>' +
-        '<Description>'+esc(it.description||'')+'</Description>' +
-        '<Priority>'+(it.type==='hard'?'Critical':'Normal')+'</Priority></Topic></Markup>');
+  // ── Auto-Classification ───────────────────────────────────────
+
+  function classifyModels(models) {
+    var byType = {}, byStorey = {}, byDiscipline = {}, byMaterial = {};
+    models.forEach(function(model) {
+      // By discipline
+      var disc = model.discipline || 'other';
+      if (!byDiscipline[disc]) byDiscipline[disc] = {label:disc, items:[], count:0};
+      byDiscipline[disc].count += (model.elements||[]).length;
+      (model.elements||[]).forEach(function(el) {
+        var p = el.props || {};
+        byDiscipline[disc].items.push({expressId:el.expressId, modelId:model.id});
+        // By IFC type
+        var t = p.ifcType || 'Unknown';
+        if (!byType[t]) byType[t] = {label:t, items:[], count:0};
+        byType[t].items.push({expressId:el.expressId, modelId:model.id});
+        byType[t].count++;
+        // By storey
+        var st = p.storey || '(No storey)';
+        if (!byStorey[st]) byStorey[st] = {label:st, items:[], count:0};
+        byStorey[st].items.push({expressId:el.expressId, modelId:model.id});
+        byStorey[st].count++;
+        // By material
+        var mt = p.material || '(No material)';
+        if (!byMaterial[mt]) byMaterial[mt] = {label:mt, items:[], count:0};
+        byMaterial[mt].items.push({expressId:el.expressId, modelId:model.id});
+        byMaterial[mt].count++;
+      });
     });
+    return {byType:byType, byStorey:byStorey, byDiscipline:byDiscipline, byMaterial:byMaterial};
+  }
+
+  // ── Viewpoint helpers ────────────────────────────────────────
+
+  var _captureViewpoint = null; // set in Viewer
+  var _restoreViewpoint = null;
+
+  // ── BCF Import ──────────────────────────────────────────────
+
+  function importBCF(d) {
+    var inp = document.createElement('input');
+    inp.type = 'file'; inp.accept = '.bcf,.bcfzip';
+    inp.onchange = function(e) {
+      var f = e.target.files[0]; if (!f) return;
+      f.arrayBuffer().then(function(buf) {
+        return JSZip.loadAsync(buf);
+      }).then(function(zip) {
+        var promises = [];
+        zip.forEach(function(path, entry) {
+          if (path.match(/markup\.bcf$/i)) {
+            promises.push(entry.async('text').then(function(xml) {
+              return {folder: path.split('/')[0], xml: xml};
+            }));
+          }
+        });
+        return Promise.all(promises);
+      }).then(function(markups) {
+        var imported = 0;
+        markups.forEach(function(m) {
+          try {
+            var parser = new DOMParser();
+            var doc = parser.parseFromString(m.xml, 'text/xml');
+            var topic = doc.querySelector('Topic');
+            if (!topic) return;
+            var title = (topic.querySelector('Title')||{}).textContent || 'Imported topic';
+            var desc = (topic.querySelector('Description')||{}).textContent || '';
+            var priority = (topic.querySelector('Priority')||{}).textContent || 'normal';
+            var status = (topic.getAttribute('TopicStatus')||'').toLowerCase();
+            var topicType = (topic.getAttribute('TopicType')||'').toLowerCase();
+            var creationDate = (topic.querySelector('CreationDate')||{}).textContent || new Date().toISOString();
+            // Map BCF status to our status
+            var mappedStatus = 'open';
+            if (status === 'closed' || status === 'resolved') mappedStatus = 'resolved';
+            else if (status === 'in progress' || status === 'in_progress') mappedStatus = 'in_progress';
+            // Map type
+            var mappedType = 'manual';
+            if (topicType === 'issue' || topicType === 'error') mappedType = 'hard';
+            else if (topicType === 'warning') mappedType = 'soft';
+            d({t:'ADD_ISSUE', v:{
+              id:uid(), source:'bcf_import', type:mappedType, status:mappedStatus,
+              title:title, description:desc, priority:priority.toLowerCase(),
+              category:'coordination', assignee:'', dueDate:'',
+              createdAt:creationDate, bcfGuid:topic.getAttribute('Guid')||''
+            }});
+            imported++;
+          } catch(e) { console.warn('BCF parse error:', e); }
+        });
+        if (imported > 0) {
+          d({t:'TAB', v:'issues'});
+          alert('Imported ' + imported + ' topic' + (imported>1?'s':'') + ' from BCF.');
+        } else {
+          alert('No valid topics found in BCF file.');
+        }
+      }).catch(function(err) {
+        alert('BCF import failed: ' + err.message);
+      });
+    };
+    inp.click();
+  }
+
+  // ── BCF Export (supports v2.1 and v3.0) ──────────────────────
+
+  function exportBCF(items, version, viewpoints) {
+    if (!items.length) return;
+    var v3 = version === '3.0';
+    var zip = new JSZip();
+    var versionId = v3 ? '3.0' : '2.1';
+    zip.file('bcf.version','<?xml version="1.0" encoding="UTF-8"?>\n<Version VersionId="'+versionId+'"><DetailedVersion>'+versionId+'</DetailedVersion></Version>');
+
+    if (v3) {
+      // BCF 3.0 uses extensions.xml
+      zip.file('extensions.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<Extensions><TopicTypes><TopicType>Issue</TopicType><TopicType>Warning</TopicType><TopicType>Request</TopicType></TopicTypes><TopicStatuses><TopicStatus>Open</TopicStatus><TopicStatus>In Progress</TopicStatus><TopicStatus>Closed</TopicStatus></TopicStatuses><Priorities><Priority>Critical</Priority><Priority>High</Priority><Priority>Normal</Priority><Priority>Low</Priority></Priorities></Extensions>');
+      zip.file('project.bcfp','<?xml version="1.0" encoding="UTF-8"?>\n<ProjectInfo><Project ProjectId="'+guid()+'"><Name>ClashControl</Name></Project></ProjectInfo>');
+    } else {
+      zip.file('project.bcfp','<?xml version="1.0" encoding="UTF-8"?>\n<ProjectExtension><Project ProjectId="'+guid()+'"><Name>ClashControl</Name></Project></ProjectExtension>');
+    }
+
+    items.forEach(function(it) {
+      var g = it.bcfGuid || guid(), f = zip.folder(g);
+      var type = it.type==='hard'?'Issue':it.type==='soft'?'Warning':'Request';
+      var st = it.status==='resolved'||it.status==='closed'?'Closed':it.status==='in_progress'?'In Progress':'Open';
+      var priority = it.priority || (it.type==='hard'?'Critical':'Normal');
+      priority = priority.charAt(0).toUpperCase() + priority.slice(1);
+
+      // Find matching viewpoint for this item
+      var vp = null;
+      if (viewpoints) {
+        vp = viewpoints.find(function(v){ return v.linkedId === it.id; });
+      }
+
+      var markup = '<?xml version="1.0" encoding="UTF-8"?>\n<Markup>\n';
+      if (v3) {
+        markup += '  <Header><Files><File IfcProject=""><Filename>ClashControl</Filename></File></Files></Header>\n';
+      }
+      markup += '  <Topic Guid="'+g+'" TopicType="'+type+'" TopicStatus="'+st+'">\n';
+      markup += '    <Title>'+esc(it.title)+'</Title>\n';
+      markup += '    <CreationDate>'+(it.createdAt||new Date().toISOString())+'</CreationDate>\n';
+      markup += '    <Description>'+esc(it.description||'')+'</Description>\n';
+      markup += '    <Priority>'+priority+'</Priority>\n';
+      if (it.assignee) markup += '    <AssignedTo>'+esc(it.assignee)+'</AssignedTo>\n';
+      if (it.dueDate) markup += '    <DueDate>'+esc(it.dueDate)+'</DueDate>\n';
+      markup += '  </Topic>\n';
+
+      // Add viewpoint reference if available
+      if (vp) {
+        var vpGuid = guid();
+        markup += '  <Viewpoints Guid="'+vpGuid+'">\n';
+        markup += '    <Viewpoint>'+vpGuid+'.bcfv</Viewpoint>\n';
+        if (vp.snapshot) markup += '    <Snapshot>'+vpGuid+'.png</Snapshot>\n';
+        markup += '  </Viewpoints>\n';
+
+        // Write viewpoint file
+        var vpXml = '<?xml version="1.0" encoding="UTF-8"?>\n<VisualizationInfo Guid="'+vpGuid+'">\n';
+        vpXml += '  <PerspectiveCamera>\n';
+        vpXml += '    <CameraViewPoint><X>'+vp.camera.px+'</X><Y>'+vp.camera.py+'</Y><Z>'+vp.camera.pz+'</Z></CameraViewPoint>\n';
+        vpXml += '    <CameraDirection><X>'+vp.camera.dx+'</X><Y>'+vp.camera.dy+'</Y><Z>'+vp.camera.dz+'</Z></CameraDirection>\n';
+        vpXml += '    <CameraUpVector><X>'+vp.camera.ux+'</X><Y>'+vp.camera.uy+'</Y><Z>'+vp.camera.uz+'</Z></CameraUpVector>\n';
+        vpXml += '    <FieldOfView>60</FieldOfView>\n';
+        vpXml += '  </PerspectiveCamera>\n';
+        vpXml += '</VisualizationInfo>';
+        f.file(vpGuid+'.bcfv', vpXml);
+
+        // Write snapshot if available
+        if (vp.snapshot) {
+          var snapData = vp.snapshot.replace(/^data:image\/png;base64,/, '');
+          f.file(vpGuid+'.png', snapData, {base64:true});
+        }
+      }
+
+      markup += '</Markup>';
+      f.file('markup.bcf', markup);
+    });
+
     zip.generateAsync({type:'blob'}).then(function(blob) {
       var a = document.createElement('a');
       a.href = URL.createObjectURL(blob);
-      a.download = 'clashcontrol-'+new Date().toISOString().slice(0,10)+'.bcf';
+      a.download = 'clashcontrol-'+versionId+'-'+new Date().toISOString().slice(0,10)+'.bcf';
       a.click();
     });
   }
@@ -704,10 +879,14 @@ function startApp() {
     var hoverRef = useRef(null); // hover highlight mesh
     var clashMarkersRef = useRef(null); // group of clash markers
     var foundMarkersRef = useRef([]); // items finder highlights
+    var measureObjsRef = useRef([]); // measurement 3D objects
+    var measurePtsRef = useRef([]); // current measurement click points
     var modelsRef = useRef(s.models);
     modelsRef.current = s.models;
     var prefsRef = useRef(s.prefs);
     prefsRef.current = s.prefs;
+    var measureModeRef = useRef(s.measureMode);
+    measureModeRef.current = s.measureMode;
 
     // Init scene
     useEffect(function() {
@@ -940,6 +1119,80 @@ function startApp() {
         mouse.y = -((e.clientY-rect.top)/rect.height)*2+1;
         raycaster.setFromCamera(mouse, camera);
         var hits = raycaster.intersectObjects(S.mg.children, true);
+
+        // ── Measurement mode: intercept clicks ──
+        if(measureModeRef.current && hits.length>0) {
+          var hitPt = hits[0].point.clone();
+          measurePtsRef.current.push(hitPt);
+          // Add a small sphere at click point
+          var dotGeo = new THREE.SphereGeometry(0.08, 8, 8);
+          var dotMat = new THREE.MeshBasicMaterial({color:0x22c55e});
+          var dot = new THREE.Mesh(dotGeo, dotMat);
+          dot.position.copy(hitPt);
+          scene.add(dot);
+          measureObjsRef.current.push(dot);
+
+          var mode = measureModeRef.current;
+          var pts = measurePtsRef.current;
+
+          if(mode==='length' && pts.length===2) {
+            // Draw line and label
+            var lineMat = new THREE.LineBasicMaterial({color:0x22c55e, linewidth:2});
+            var lineGeo = new THREE.BufferGeometry().setFromPoints([pts[0], pts[1]]);
+            var line = new THREE.Line(lineGeo, lineMat);
+            scene.add(line);
+            measureObjsRef.current.push(line);
+            var dist = pts[0].distanceTo(pts[1]);
+            var mid = pts[0].clone().add(pts[1]).multiplyScalar(0.5);
+            var label = dist < 1 ? (dist*1000).toFixed(0)+' mm' : dist.toFixed(3)+' m';
+            d({t:'ADD_MEASUREMENT', v:{id:uid(), type:'length', value:dist, label:label, points:pts.map(function(p){return [p.x,p.y,p.z]})}});
+            measurePtsRef.current = [];
+          }
+          else if(mode==='angle' && pts.length===3) {
+            // Draw two lines and compute angle
+            var lineMat2 = new THREE.LineBasicMaterial({color:0xf59e0b, linewidth:2});
+            var lineGeo1 = new THREE.BufferGeometry().setFromPoints([pts[0], pts[1]]);
+            var lineGeo2 = new THREE.BufferGeometry().setFromPoints([pts[1], pts[2]]);
+            scene.add(new THREE.Line(lineGeo1, lineMat2));
+            scene.add(new THREE.Line(lineGeo2, lineMat2));
+            measureObjsRef.current.push(scene.children[scene.children.length-1]);
+            measureObjsRef.current.push(scene.children[scene.children.length-2]);
+            var v1 = pts[0].clone().sub(pts[1]).normalize();
+            var v2 = pts[2].clone().sub(pts[1]).normalize();
+            var angle = Math.acos(Math.max(-1,Math.min(1,v1.dot(v2))));
+            var deg = (angle*180/Math.PI).toFixed(1);
+            d({t:'ADD_MEASUREMENT', v:{id:uid(), type:'angle', value:angle, label:deg+'°', points:pts.map(function(p){return [p.x,p.y,p.z]})}});
+            measurePtsRef.current = [];
+          }
+          else if(mode==='area' && pts.length>=3) {
+            // Check if user double-clicked (last two points very close) to close polygon
+            if(pts.length>3 && pts[pts.length-1].distanceTo(pts[pts.length-2])<0.05) {
+              pts.pop(); // remove duplicate
+              // Draw polygon outline
+              var polyMat = new THREE.LineBasicMaterial({color:0x60a5fa, linewidth:2});
+              var polyPts = pts.concat([pts[0]]);
+              var polyGeo = new THREE.BufferGeometry().setFromPoints(polyPts);
+              var polyLine = new THREE.Line(polyGeo, polyMat);
+              scene.add(polyLine);
+              measureObjsRef.current.push(polyLine);
+              // Compute area using Shoelace formula (projected to best-fit plane)
+              var normal2 = new THREE.Vector3();
+              for(var ai=0;ai<pts.length;ai++){
+                var cur2=pts[ai], next2=pts[(ai+1)%pts.length];
+                normal2.x += (cur2.y-next2.y)*(cur2.z+next2.z);
+                normal2.y += (cur2.z-next2.z)*(cur2.x+next2.x);
+                normal2.z += (cur2.x-next2.x)*(cur2.y+next2.y);
+              }
+              var area2 = normal2.length()/2;
+              var areaLabel = area2 < 1 ? (area2*10000).toFixed(0)+' cm²' : area2.toFixed(3)+' m²';
+              d({t:'ADD_MEASUREMENT', v:{id:uid(), type:'area', value:area2, label:areaLabel, points:pts.map(function(p){return [p.x,p.y,p.z]})}});
+              measurePtsRef.current = [];
+            }
+            // Otherwise keep collecting points
+          }
+          return; // Don't do element picking when measuring
+        }
+
         if(hits.length>0) {
           var hit = hits[0].object;
           var eid = hit.userData.expressID;
@@ -996,6 +1249,33 @@ function startApp() {
           setCtxMenu(null);
         }
       });
+
+      // ── Viewpoint capture/restore ──
+      _captureViewpoint = function(name, linkedId) {
+        var dir = new THREE.Vector3();
+        camera.getWorldDirection(dir);
+        var up = camera.up.clone();
+        renderer.render(scene, camera);
+        var snapshot = renderer.domElement.toDataURL('image/png');
+        return {
+          id:uid(), name:name||'Viewpoint', linkedId:linkedId||null,
+          createdAt:new Date().toISOString(), snapshot:snapshot,
+          camera:{
+            px:+camera.position.x.toFixed(4), py:+camera.position.y.toFixed(4), pz:+camera.position.z.toFixed(4),
+            dx:+dir.x.toFixed(4), dy:+dir.y.toFixed(4), dz:+dir.z.toFixed(4),
+            ux:+up.x.toFixed(4), uy:+up.y.toFixed(4), uz:+up.z.toFixed(4),
+            tx:+S.orbit.target.x.toFixed(4), ty:+S.orbit.target.y.toFixed(4), tz:+S.orbit.target.z.toFixed(4)
+          }
+        };
+      };
+      _restoreViewpoint = function(vp) {
+        if(!vp||!vp.camera) return;
+        var c = vp.camera;
+        camera.position.set(c.px, c.py, c.pz);
+        if(c.tx!=null) S.orbit.target.set(c.tx, c.ty, c.tz);
+        else S.orbit.target.set(c.px+c.dx*10, c.py+c.dy*10, c.pz+c.dz*10);
+        S.orbit.sync(); S.orbit.apply();
+      };
 
       scene.add(new THREE.AmbientLight(0xffffff,0.5));
       var sun = new THREE.DirectionalLight(0xfff8f0,1.0);
@@ -1100,6 +1380,20 @@ function startApp() {
         _clearClashMarkers();
       }
     }, [s.clashes, s.prefs.showClashMarkers]);
+
+    // Clear measurement 3D objects when measurements list is cleared
+    useEffect(function(){
+      if(s.measurements.length===0 && measureObjsRef.current.length>0) {
+        var S = state3d.current;
+        measureObjsRef.current.forEach(function(obj){
+          if(S.scene) S.scene.remove(obj);
+          if(obj.geometry) obj.geometry.dispose();
+          if(obj.material) obj.material.dispose();
+        });
+        measureObjsRef.current = [];
+        measurePtsRef.current = [];
+      }
+    }, [s.measurements.length]);
 
     // Prefs: grid & axes visibility
     useEffect(function(){
@@ -1209,6 +1503,44 @@ function startApp() {
           </div>`;
         })}
       </div>`}
+      <div style=${{position:'absolute',bottom:'.75rem',right:'.75rem',pointerEvents:'auto',display:'flex',flexDirection:'column',gap:'.3rem',alignItems:'flex-end'}}>
+        <div style=${{display:'flex',gap:'.2rem',background:'rgba(15,23,42,.92)',border:'1px solid #334155',borderRadius:8,padding:'.3rem'}}>
+          <span style=${{fontSize:'.6rem',color:'#64748b',alignSelf:'center',marginRight:'.2rem'}}>Measure:</span>
+          ${['length','angle','area'].map(function(m){return html`<button key=${m} onClick=${function(){d({t:'MEASURE_MODE',v:s.measureMode===m?null:m});measurePtsRef.current=[];}}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .4rem',background:s.measureMode===m?'#2563eb':'#1e293b',color:s.measureMode===m?'#fff':'#94a3b8'}}>${m.charAt(0).toUpperCase()+m.slice(1)}</button>`})}
+          ${s.measurements.length>0 && html`<button onClick=${function(){d({t:'CLEAR_MEASUREMENTS'});}}
+            style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .3rem',background:'#450a0a',color:'#fca5a5'}}>Clear (${s.measurements.length})</button>`}
+        </div>
+        ${s.measureMode && html`<div style=${{fontSize:'.55rem',color:'#93c5fd',background:'rgba(30,58,138,.85)',padding:'.2rem .5rem',borderRadius:6}}>
+          ${s.measureMode==='length'?'Click 2 points to measure distance':s.measureMode==='angle'?'Click 3 points: start, vertex, end':'Click points to define area, double-click to close'}
+        </div>`}
+        ${s.measurements.length>0 && html`<div style=${{background:'rgba(15,23,42,.92)',border:'1px solid #334155',borderRadius:8,padding:'.3rem',maxHeight:120,overflowY:'auto',width:200}}>
+          ${s.measurements.map(function(m){return html`<div key=${m.id} style=${{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'.15rem .2rem',fontSize:'.6rem',borderBottom:'1px solid #1e293b'}}>
+            <span style=${{color:m.type==='length'?'#22c55e':m.type==='angle'?'#f59e0b':'#60a5fa'}}>${m.type}</span>
+            <span style=${{color:'#e2e8f0',fontWeight:600}}>${m.label}</span>
+            <button onClick=${function(){d({t:'DEL_MEASUREMENT',id:m.id})}} style=${{...S_BTN,padding:'0 3px',background:'none',color:'#475569',fontSize:'.5rem'}}>✕</button>
+          </div>`})}
+        </div>`}
+        <div style=${{display:'flex',gap:'.2rem'}}>
+          <button onClick=${function(){if(_captureViewpoint){var vp=_captureViewpoint('Viewpoint '+(s.viewpoints.length+1));d({t:'ADD_VIEWPOINT',v:vp});}}}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .5rem',background:'rgba(30,41,59,.9)',color:'#94a3b8',border:'1px solid #334155'}}>
+            Save Viewpoint
+          </button>
+          ${s.viewpoints.length>0 && html`<span style=${{fontSize:'.55rem',color:'#64748b',alignSelf:'center'}}>${s.viewpoints.length} saved</span>`}
+        </div>
+        ${s.viewpoints.length>0 && html`<div style=${{background:'rgba(15,23,42,.92)',border:'1px solid #334155',borderRadius:8,padding:'.3rem',maxHeight:160,overflowY:'auto',width:220}}>
+          ${s.viewpoints.map(function(vp){return html`<div key=${vp.id} style=${{display:'flex',alignItems:'center',gap:'.3rem',padding:'.2rem',borderBottom:'1px solid #1e293b',cursor:'pointer'}}
+            onClick=${function(){if(_restoreViewpoint)_restoreViewpoint(vp);}}>
+            ${vp.snapshot && html`<img src=${vp.snapshot} style=${{width:40,height:25,borderRadius:3,objectFit:'cover',border:'1px solid #334155'}} />`}
+            <div style=${{flex:1,minWidth:0}}>
+              <div style=${{fontSize:'.6rem',color:'#e2e8f0',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${vp.name}</div>
+              <div style=${{fontSize:'.5rem',color:'#475569'}}>${new Date(vp.createdAt).toLocaleTimeString()}</div>
+            </div>
+            <button onClick=${function(e){e.stopPropagation();d({t:'DEL_VIEWPOINT',id:vp.id});}}
+              style=${{...S_BTN,padding:'0 3px',background:'none',color:'#475569',fontSize:'.5rem'}}>✕</button>
+          </div>`})}
+        </div>`}
+      </div>
       ${ctxMenu && html`<div onClick=${function(){setCtxMenu(null)}} style=${{position:'absolute',inset:0,zIndex:10}}>
         <div style=${{position:'absolute',left:ctxMenu.x,top:ctxMenu.y,background:'#1e293b',border:'1px solid #334155',borderRadius:8,boxShadow:'0 8px 24px rgba(0,0,0,.6)',overflow:'hidden',minWidth:160,zIndex:11}}
           onClick=${function(e){e.stopPropagation();}}>
@@ -1241,7 +1573,7 @@ function startApp() {
     return html`<header style=${{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'.5rem 1rem',background:'#0f172a',borderBottom:'1px solid #1e293b',flexShrink:0}}>
       <div style=${{display:'flex',alignItems:'center',gap:'.75rem'}}>
         <div style=${{width:32,height:32,background:'#2563eb',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center'}}><span style=${{color:'#fff',fontWeight:900,fontSize:14}}>CC</span></div>
-        <div><span style=${{fontWeight:600}}>ClashControl</span><span style=${{color:'#64748b',fontSize:'.75rem',marginLeft:'.5rem'}}>v0.9</span></div>
+        <div><span style=${{fontWeight:600}}>ClashControl</span><span style=${{color:'#64748b',fontSize:'.75rem',marginLeft:'.5rem'}}>v1.0</span></div>
       </div>
       <div style=${{display:'flex',alignItems:'center',gap:'.5rem'}}>
         ${openN>0 && html`<span style=${{background:'#ef4444',color:'#fff',fontSize:'.65rem',padding:'.1rem .5rem',borderRadius:99}}>${openN} open</span>`}
@@ -1253,9 +1585,17 @@ function startApp() {
           style=${{...S_BTN,background:s.models.length||all.length?'#0f4c81':'#1e293b',color:s.models.length||all.length?'#93c5fd':'#475569',cursor:s.models.length||all.length?'pointer':'not-allowed'}}>
           ↓ Save Project
         </button>
-        <button onClick=${function(){exportBCF(all)}} disabled=${!all.length}
+        <button onClick=${function(){importBCF(d)}}
+          style=${{...S_BTN,background:'#1e293b',color:'#94a3b8',border:'1px solid #334155'}}>
+          ↑ Import BCF
+        </button>
+        <button onClick=${function(){exportBCF(all, '2.1', s.viewpoints)}} disabled=${!all.length}
           style=${{...S_BTN,background:all.length?'#2563eb':'#1e293b',color:all.length?'#fff':'#475569',cursor:all.length?'pointer':'not-allowed'}}>
-          ↓ Export BCF
+          ↓ BCF 2.1
+        </button>
+        <button onClick=${function(){exportBCF(all, '3.0', s.viewpoints)}} disabled=${!all.length}
+          style=${{...S_BTN,background:all.length?'#1d4ed8':'#1e293b',color:all.length?'#fff':'#475569',cursor:all.length?'pointer':'not-allowed'}}>
+          ↓ BCF 3.0
         </button>
         <button onClick=${function(){d({t:'SETTINGS',v:true})}}
           style=${{...S_BTN,background:'#1e293b',color:'#94a3b8',border:'1px solid #334155',fontSize:'.85rem',padding:'.3rem .5rem'}}
@@ -1389,10 +1729,51 @@ function startApp() {
 
   // ── Issue Panel ────────────────────────────────────────────────
 
+  function ClassifyPanel(props) {
+    var s=props.s, d=props.d;
+    var cls = s.classifications;
+    var cv = useState('byType'), classView=cv[0], setClassView=cv[1];
+    var hasCls = cls && Object.keys(cls).length>0;
+    // Auto-classify when models change
+    useEffect(function(){
+      if(s.models.length>0) d({t:'SET_CLASSIFICATIONS',v:classifyModels(s.models)});
+    }, [s.models]);
+    var groups = hasCls ? cls[classView] || {} : {};
+    var keys = Object.keys(groups).sort(function(a,b){return (groups[b].count||0)-(groups[a].count||0)});
+    var total = keys.reduce(function(sum,k){return sum+(groups[k].count||0)},0);
+    var VIEWS=[{id:'byType',label:'IFC Type'},{id:'byStorey',label:'Storey'},{id:'byDiscipline',label:'Discipline'},{id:'byMaterial',label:'Material'}];
+    return html`<div style=${{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      <div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
+        <div style=${{display:'flex',gap:'.2rem',flexWrap:'wrap'}}>
+          ${VIEWS.map(function(v){return html`<button key=${v.id} onClick=${function(){setClassView(v.id)}}
+            style=${{...S_BTN,fontSize:'.55rem',padding:'.15rem .35rem',background:classView===v.id?'#2563eb':'#1e293b',color:classView===v.id?'#fff':'#475569'}}>${v.label}</button>`})}
+        </div>
+        ${total>0 && html`<div style=${{fontSize:'.55rem',color:'#475569',marginTop:'.3rem'}}>${keys.length} groups · ${total} elements</div>`}
+      </div>
+      <div style=${{flex:1,overflowY:'auto'}}>
+        ${!hasCls && html`<div style=${{textAlign:'center',color:'#334155',fontSize:'.75rem',padding:'2rem 1rem'}}>Load models to see classification</div>`}
+        ${keys.map(function(k){
+          var grp = groups[k];
+          var pct = total>0 ? Math.round(grp.count/total*100) : 0;
+          return html`<div key=${k} style=${{padding:'.4rem .6rem',borderBottom:'1px solid #1e293b'}}>
+            <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.2rem'}}>
+              <span style=${{fontSize:'.7rem',color:'#e2e8f0',fontWeight:500}}>${grp.label}</span>
+              <span style=${{fontSize:'.6rem',color:'#64748b'}}>${grp.count} (${pct}%)</span>
+            </div>
+            <div style=${{height:4,background:'#1e293b',borderRadius:2,overflow:'hidden'}}>
+              <div style=${{height:'100%',width:pct+'%',background:classView==='byDiscipline'?'#60a5fa':classView==='byType'?'#c084fc':classView==='byStorey'?'#34d399':'#fbbf24',borderRadius:2,transition:'width .3s'}}></div>
+            </div>
+          </div>`;
+        })}
+      </div>
+    </div>`;
+  }
+
   function IssuePanel(props) {
     var s=props.s, d=props.d, f=s.filters;
     var fo=useState(false), filtersOpen=fo[0], setFiltersOpen=fo[1];
     var isClashTab = s.tab==='clashes';
+    var isClassifyTab = s.tab==='classify';
     var rawItems = isClashTab ? s.clashes : s.issues;
 
     // Collect unique values for dynamic filter dropdowns
@@ -1458,21 +1839,22 @@ function startApp() {
 
     return html`<aside style=${{...S_PANELR,width:280}}>
       <div style=${{display:'flex',borderBottom:'1px solid #1e293b',flexShrink:0}}>
-        ${[{id:'clashes',label:'Clashes',n:oC,bg:'#ef4444'},{id:'issues',label:'Issues',n:oI,bg:'#f59e0b'}].map(function(t){return html`
+        ${[{id:'clashes',label:'Clashes',n:oC,bg:'#ef4444'},{id:'issues',label:'Issues',n:oI,bg:'#f59e0b'},{id:'classify',label:'Classify',n:0,bg:'#3b82f6'}].map(function(t){return html`
           <button key=${t.id} onClick=${function(){d({t:'TAB',v:t.id})}}
             style=${{...S_BTN,flex:1,background:'none',borderRadius:0,padding:'.6rem',color:s.tab===t.id?'#e2e8f0':'#475569',borderBottom:s.tab===t.id?'2px solid #3b82f6':'2px solid transparent'}}>
             ${t.label}${t.n>0?html`<span style=${{marginLeft:'.3rem',background:t.bg,color:'#fff',fontSize:'.6rem',padding:'.05rem .35rem',borderRadius:99}}>${t.n}</span>`:''}
           </button>`})}
       </div>
-      <div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0,display:'flex',gap:'.3rem'}}>
+      ${isClassifyTab && html`<${ClassifyPanel} s=${s} d=${d} />`}
+      ${!isClassifyTab && html`<div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0,display:'flex',gap:'.3rem'}}>
         <input type="text" placeholder="Search…" value=${f.search} onInput=${function(e){d({t:'UPD_FILTERS',u:{search:e.target.value}})}}
           style=${{...S_INPUT,fontSize:'.7rem',padding:'.25rem .4rem',flex:1}} />
         <button onClick=${function(){setFiltersOpen(!filtersOpen)}}
           style=${{...S_BTN,padding:'.25rem .4rem',background:filtersOpen||activeCount>0?'#1e3a5f':'#1e293b',color:filtersOpen||activeCount>0?'#93c5fd':'#475569',border:'1px solid #334155',fontSize:'.65rem',whiteSpace:'nowrap'}}>
           ⚙ ${activeCount>0?activeCount:''}
         </button>
-      </div>
-      ${filtersOpen && html`<div style=${{padding:'.5rem',borderBottom:'1px solid #1e293b',flexShrink:0,display:'flex',flexDirection:'column',gap:'.4rem',background:'#0c1222'}}>
+      </div>`}
+      ${!isClassifyTab && filtersOpen && html`<div style=${{padding:'.5rem',borderBottom:'1px solid #1e293b',flexShrink:0,display:'flex',flexDirection:'column',gap:'.4rem',background:'#0c1222'}}>
         <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
           <span style=${{fontSize:'.65rem',fontWeight:600,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em'}}>Filters</span>
           <button onClick=${function(){d({t:'RESET_FILTERS'})}} style=${{...S_BTN,fontSize:'.55rem',padding:'.1rem .3rem',background:'none',color:'#475569',textDecoration:'underline'}}>Clear all</button>
@@ -1561,16 +1943,16 @@ function startApp() {
 
         <div style=${{fontSize:'.6rem',color:'#334155',textAlign:'right'}}>${items.length} / ${rawItems.length} shown</div>
       </div>`}
-      ${s.tab==='issues' && html`<div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
+      ${!isClassifyTab && s.tab==='issues' && html`<div style=${{padding:'.4rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
         <button onClick=${function(){d({t:'MODAL',v:true})}} style=${{...S_BTN,width:'100%',background:'#2563eb',color:'#fff'}}>+ New Issue</button>
       </div>`}
-      <div style=${{flex:1,overflowY:'auto'}}>
+      ${!isClassifyTab && html`<div style=${{flex:1,overflowY:'auto'}}>
         ${items.length===0 && html`<div style=${{textAlign:'center',color:'#334155',fontSize:'.75rem',padding:'2.5rem 1rem'}}>
           <div style=${{fontSize:'2rem',marginBottom:'.3rem'}}>${isClashTab?'✅':'📋'}</div>
           ${activeCount>0||f.search?'No matches':'No '+(isClashTab?'clashes found yet':'issues yet')}
         </div>`}
         ${items.map(function(it){return html`<${IssueRow} key=${it.id} item=${it} active=${s.activeId===it.id} d=${d} isClash=${isClashTab} prefs=${s.prefs} />`})}
-      </div>
+      </div>`}
     </aside>`;
   }
 
