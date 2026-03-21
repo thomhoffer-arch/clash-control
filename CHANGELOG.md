@@ -3,10 +3,13 @@
 ## v1.2.14 (2026-03-21)
 - Fix critical crash on element click and multiple viewer bugs
 
+## v1.2.13 (2026-03-21)
+- Fix license docs and correct IFC parser description
+
 ## v1.2.12 (2026-03-21)
 - Auto version bumping with changelog and README updates on every commit
 - Lazy rendering for unused UI components (modals, overlays, panels)
-- Security hardening: removed session traces and added CSP meta tag
+- Security hardening: removed session traces
 
 ## v1.2.11 (2026-03-21)
 - Render on demand: GPU only draws frames when something actually changes

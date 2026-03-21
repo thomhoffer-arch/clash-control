@@ -4,12 +4,18 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>ClashControl — Open BIM Clash Detection</title>
+  <link rel="manifest" href="manifest.json">
+  <meta name="theme-color" content="#0f172a">
 
-  <!-- Only 3 CDN deps: React, Three.js, JSZip — all UMD, all cdnjs -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <!-- CSP: restrict resource loading to known CDN origins -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://esm.sh https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src https://esm.sh https://cdn.jsdelivr.net blob:; worker-src blob:; img-src 'self' blob: data:;">
+
+  <!-- CDN deps: React, Three.js, JSZip — all UMD, all cdnjs -->
+  <!-- SRI hashes: regenerate with `node scripts/generate-sri.js` if you change versions -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js" crossorigin="anonymous"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js" crossorigin="anonymous"></script>
 
   <!-- htm — tagged template to React.createElement (hand-written, tested, 11/11 pass) -->
   <script>
@@ -139,6 +145,21 @@
 // =====================================================================
 // Boot: wait for page, check globals, then launch app
 // =====================================================================
+// Global error handlers — catch uncaught exceptions and promise rejections
+window.addEventListener('error', function(e) {
+  console.error('[ClashControl] Uncaught error:', e.error || e.message);
+});
+window.addEventListener('unhandledrejection', function(e) {
+  console.error('[ClashControl] Unhandled promise rejection:', e.reason);
+});
+
+// Service worker registration (PWA offline support)
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('./sw.js').catch(function(e) {
+    console.warn('[ClashControl] SW registration failed:', e);
+  });
+}
+
 window.onload = function() {
   try { startApp(); }
   catch(e) {
@@ -2535,7 +2556,7 @@ function startApp() {
       ${perfOpen && html`<div style=${{position:'absolute',top:'2.2rem',left:'.75rem',background:'rgba(15,23,42,.95)',border:'1px solid #334155',borderRadius:8,padding:'.5rem',pointerEvents:'auto',fontSize:'.6rem',color:'#94a3b8',minWidth:170,boxShadow:'0 4px 12px rgba(0,0,0,.4)'}}>
         <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.3rem'}}>
           <span style=${{fontWeight:600,color:'#e2e8f0',fontSize:'.65rem'}}>Performance</span>
-          <button onClick=${function(){setPerfOpen(false)}} style=${{...S_BTN,padding:'0 3px',background:'none',color:'#475569',fontSize:'.6rem'}}>✕</button>
+          <button onClick=${function(){setPerfOpen(false)}} style=${{...S_BTN,padding:'0 3px',background:'none',color:'#475569',fontSize:'.6rem'}} aria-label="Close performance stats">✕</button>
         </div>
         <div style=${{display:'flex',justifyContent:'space-between',padding:'.1rem 0'}}>
           <span>FPS</span>
@@ -2616,12 +2637,12 @@ function startApp() {
       ${(s.sectionAxis||s.sectionCustom) && html`<div style=${{...P,top:'7.5rem',right:'.75rem',background:'rgba(30,58,138,.9)',color:'#93c5fd',pointerEvents:'auto',cursor:'pointer',display:'flex',alignItems:'center',gap:'.4rem'}}
         onClick=${function(){d({t:'SECTION',axis:null})}}>
         <span>Section ${s.sectionAxis?(s.sectionAxis==='y'?'Z':s.sectionAxis==='z'?'Y':s.sectionAxis.toUpperCase()):'Surface'} · ${Math.round(s.sectionPos*100)}%</span>
-        <span style=${{fontSize:'.6rem',opacity:.7}} title="Clear section">✕</span>
+        <span style=${{fontSize:'.6rem',opacity:.7}} title="Clear section" aria-label="Clear section view">✕</span>
       </div>`}
       ${s.floorPlan && html`<div style=${{...P,top:'7.5rem',right:'.75rem',background:'rgba(91,33,182,.9)',color:'#c084fc',pointerEvents:'auto',cursor:'pointer',display:'flex',alignItems:'center',gap:'.4rem'}}
         onClick=${function(){d({t:'FLOOR_PLAN',v:null})}}>
         <span>3D Section: ${s.floorPlan.storeyName} · ${(s.floorPlan.elevation+(s.floorPlan.cutHeight||1.2)).toFixed(1)}m</span>
-        <span style=${{fontSize:'.6rem',opacity:.7}} title="Exit 3D section">✕</span>
+        <span style=${{fontSize:'.6rem',opacity:.7}} title="Exit 3D section" aria-label="Exit floor plan view">✕</span>
       </div>`}
       ${selectedEl && function(){ try {
         // ── Clean element property panel ──
@@ -2667,9 +2688,9 @@ function startApp() {
               <button onClick=${function(){d({t:'MODAL',v:true,el:selectedEl});d({t:'TAB',v:'issues'});}}
                 style=${{...S_BTN,padding:'.15rem .35rem',background:'#2563eb',color:'#fff',fontSize:'.6rem',borderRadius:4}}>Issue</button>
               <button onClick=${function(){if(_sboxAroundElements)_sboxAroundElements([selectedEl.expressId]);}}
-                style=${{...S_BTN,padding:'.15rem .25rem',background:'#3b0764',color:'#c084fc',fontSize:'.6rem',borderRadius:4}} title="Section box around element">Box</button>
+                style=${{...S_BTN,padding:'.15rem .25rem',background:'#3b0764',color:'#c084fc',fontSize:'.6rem',borderRadius:4}} title="Section box around element" aria-label="Section box around element">Box</button>
               <button onClick=${function(){setSelectedEl(null);if(_unghostAll)_unghostAll();if(hlRef.current&&state3d.current.scene){if(hlRef.current.isGroup)hlRef.current.traverse(function(c){if(c.isMesh||c.isLine||c.isLineSegments){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();}});state3d.current.scene.remove(hlRef.current);hlRef.current=null;}if(outlineRef.current&&state3d.current.scene){state3d.current.scene.remove(outlineRef.current);outlineRef.current=null;}}}
-                style=${{...S_BTN,padding:'0 4px',background:'none',color:'#475569',fontSize:'.7rem'}}>✕</button>
+                style=${{...S_BTN,padding:'0 4px',background:'none',color:'#475569',fontSize:'.7rem'}} aria-label="Deselect element">✕</button>
             </div>
           </div>
 
@@ -2754,7 +2775,7 @@ function startApp() {
           ${s.measurements.map(function(m){return html`<div key=${m.id} style=${{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'.15rem .2rem',fontSize:'.6rem',borderBottom:'1px solid #1e293b'}}>
             <span style=${{color:m.type==='length'?'#22c55e':m.type==='angle'?'#f59e0b':'#60a5fa'}}>${m.type}</span>
             <span style=${{color:'#e2e8f0',fontWeight:600}}>${m.label}</span>
-            <button onClick=${function(){d({t:'DEL_MEASUREMENT',id:m.id})}} style=${{...S_BTN,padding:'0 3px',background:'none',color:'#475569',fontSize:'.5rem'}}>✕</button>
+            <button onClick=${function(){d({t:'DEL_MEASUREMENT',id:m.id})}} style=${{...S_BTN,padding:'0 3px',background:'none',color:'#475569',fontSize:'.5rem'}} aria-label="Delete measurement">✕</button>
           </div>`})}
         </div>`}
         <div style=${{display:'flex',gap:'.2rem'}}>
@@ -2778,7 +2799,7 @@ function startApp() {
               <div style=${{fontSize:'.5rem',color:'#475569'}}>${new Date(vp.createdAt).toLocaleTimeString()}</div>
             </div>
             <button onClick=${function(e){e.stopPropagation();d({t:'DEL_VIEWPOINT',id:vp.id});}}
-              style=${{...S_BTN,padding:'0 3px',background:'none',color:'#475569',fontSize:'.5rem'}}>✕</button>
+              style=${{...S_BTN,padding:'0 3px',background:'none',color:'#475569',fontSize:'.5rem'}} aria-label="Delete viewpoint">✕</button>
           </div>`})}
         </div>`}
       </div>
@@ -2977,10 +2998,10 @@ function startApp() {
         </button>
         <button onClick=${function(){d({t:'UPD_PREFS',u:{theme:isDark?'light':'dark'}})}}
           style=${{...S_BTN,background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',fontSize:'.8rem',padding:'.3rem .5rem'}}
-          title=${isDark?'Switch to light mode':'Switch to dark mode'}>${isDark?'☀':'☾'}</button>
+          title=${isDark?'Switch to light mode':'Switch to dark mode'} aria-label=${isDark?'Switch to light mode':'Switch to dark mode'}>${isDark?'☀':'☾'}</button>
         <button onClick=${function(){d({t:'SETTINGS',v:true})}}
           style=${{...S_BTN,background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',fontSize:'.85rem',padding:'.3rem .5rem'}}
-          title="Settings">⚙</button>
+          title="Settings" aria-label="Open settings">⚙</button>
       </div>
     </header>`;
   }
@@ -3522,9 +3543,9 @@ function startApp() {
     var SELSTYLE={fontSize:'.65rem',padding:'.2rem .3rem',borderRadius:4,background:'#1e293b',color:'#94a3b8',border:'1px solid #334155',width:'100%'};
 
     return html`<aside style=${{...S_PANELR,width:280}}>
-      <div style=${{display:'flex',borderBottom:'1px solid #1e293b',flexShrink:0}}>
+      <div style=${{display:'flex',borderBottom:'1px solid #1e293b',flexShrink:0}} role="tablist">
         ${[{id:'clashes',label:'Clashes',n:oC,bg:'#ef4444'},{id:'issues',label:'Issues',n:oI,bg:'#f59e0b'},{id:'explorer',label:'Explorer',n:0,bg:'#34d399'}].map(function(t){return html`
-          <button key=${t.id} onClick=${function(){d({t:'TAB',v:t.id})}}
+          <button key=${t.id} onClick=${function(){d({t:'TAB',v:t.id})}} role="tab" aria-selected=${s.tab===t.id}
             style=${{...S_BTN,flex:1,background:'none',borderRadius:0,padding:'.6rem',color:s.tab===t.id?'#e2e8f0':'#475569',borderBottom:s.tab===t.id?'2px solid #3b82f6':'2px solid transparent'}}>
             ${t.label}${t.n>0?html`<span style=${{marginLeft:'.3rem',background:t.bg,color:'#fff',fontSize:'.6rem',padding:'.05rem .35rem',borderRadius:99}}>${t.n}</span>`:''}
           </button>`})}
@@ -3534,7 +3555,7 @@ function startApp() {
         <input type="text" placeholder="Search…" value=${f.search} onInput=${function(e){d({t:'UPD_FILTERS',u:{search:e.target.value}})}}
           style=${{...S_INPUT,fontSize:'.7rem',padding:'.25rem .4rem',flex:1}} />
         <button onClick=${function(){setFiltersOpen(!filtersOpen)}}
-          style=${{...S_BTN,padding:'.25rem .4rem',background:filtersOpen||activeCount>0?'#1e3a5f':'#1e293b',color:filtersOpen||activeCount>0?'#93c5fd':'#475569',border:'1px solid #334155',fontSize:'.65rem',whiteSpace:'nowrap'}}>
+          style=${{...S_BTN,padding:'.25rem .4rem',background:filtersOpen||activeCount>0?'#1e3a5f':'#1e293b',color:filtersOpen||activeCount>0?'#93c5fd':'#475569',border:'1px solid #334155',fontSize:'.65rem',whiteSpace:'nowrap'}} aria-label="Toggle filters">
           ⚙ ${activeCount>0?activeCount:''}
         </button>
       </div>`}
@@ -3915,10 +3936,10 @@ function startApp() {
     var LBL={fontSize:'.7rem',color:'#64748b',display:'block',marginBottom:'.2rem'};
     var ROW={display:'flex',justifyContent:'space-between',padding:'.1rem 0'};
     var LS={fontSize:'.6rem',color:'#64748b'}; var VS={fontSize:'.6rem',color:'#cbd5e1'};
-    return html`<div style=${MS}><div style=${MX}>
+    return html`<div style=${MS} role="dialog" aria-label=${hasEl?'New Element Issue':'New Issue'}><div style=${MX}>
       <div style=${{display:'flex',justifyContent:'space-between',padding:'.8rem 1rem',borderBottom:'1px solid #334155'}}>
         <span style=${{fontWeight:600,fontSize:'.875rem'}}>${hasEl?'New Element Issue':'New Issue'}</span>
-        <button onClick=${function(){d({t:'MODAL',v:false})}} style=${{...S_BTN,background:'none',color:'#64748b',fontSize:'1.1rem',padding:0}}>✕</button>
+        <button onClick=${function(){d({t:'MODAL',v:false})}} style=${{...S_BTN,background:'none',color:'#64748b',fontSize:'1.1rem',padding:0}} aria-label="Close modal">✕</button>
       </div>
       ${hasEl && html`<div style=${{padding:'.6rem 1rem',borderBottom:'1px solid #334155',background:'#0f172a'}}>
         <div style=${{fontSize:'.65rem',fontWeight:600,color:'#93c5fd',marginBottom:'.3rem'}}>Linked Element</div>
@@ -3984,14 +4005,14 @@ function startApp() {
     // Toggle switch style
     function Toggle(tp) {
       var on=tp.on;
-      return html`<div onClick=${tp.onToggle} style=${{width:36,height:20,borderRadius:10,background:on?'var(--accent)':'var(--text-faint)',cursor:'pointer',position:'relative',transition:'background .2s',flexShrink:0}}>
+      return html`<div onClick=${tp.onToggle} role="switch" aria-checked=${on} tabindex="0" onKeyDown=${function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();tp.onToggle();}}} style=${{width:36,height:20,borderRadius:10,background:on?'var(--accent)':'var(--text-faint)',cursor:'pointer',position:'relative',transition:'background .2s',flexShrink:0}}>
         <div style=${{width:16,height:16,borderRadius:8,background:'#fff',position:'absolute',top:2,left:on?18:2,transition:'left .2s'}}></div>
       </div>`;
     }
-    return html`<div style=${MS}><div style=${MX}>
+    return html`<div style=${MS} role="dialog" aria-label="Settings"><div style=${MX}>
       <div style=${{display:'flex',justifyContent:'space-between',padding:'.8rem 1rem',borderBottom:'1px solid var(--border)'}}>
         <span style=${{fontWeight:600,fontSize:'.875rem'}}>Settings</span>
-        <button onClick=${function(){d({t:'SETTINGS',v:false})}} style=${{...S_BTN,background:'none',color:'var(--text-muted)',fontSize:'1.1rem',padding:0}}>✕</button>
+        <button onClick=${function(){d({t:'SETTINGS',v:false})}} style=${{...S_BTN,background:'none',color:'var(--text-muted)',fontSize:'1.1rem',padding:0}} aria-label="Close settings">✕</button>
       </div>
       <div style=${{padding:'0 1rem .8rem 1rem'}}>
         <div style=${SEC}>Appearance</div>
