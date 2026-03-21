@@ -124,7 +124,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.1',hash:'7b94747',date:'2026-03-20T22:37:13Z'};
+  var CC_VERSION = {v:'1.2.4',hash:'60164be',date:'2026-03-21T07:55:42Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -196,7 +196,8 @@ function startApp() {
     // Model tree
     treeOpen:false,
     // Floor plan cut
-    floorPlan:null // {storeyName, elevation, cutHeight} or null
+    floorPlan:null, // {storeyName, elevation, cutHeight} or null
+    _highlightedStorey:null
   };
   function reducer(s,a) {
     switch(a.t) {
@@ -235,6 +236,7 @@ function startApp() {
 
       case 'TREE':         return Object.assign({},s,{treeOpen:a.v});
       case 'FLOOR_PLAN':   return Object.assign({},s,{floorPlan:a.v, sectionAxis:null, sectionCustom:null, sectionBox:null});
+      case 'SET_HIGHLIGHTED_STOREY': return Object.assign({},s,{_highlightedStorey:a.v});
       default:            return s;
     }
   }
@@ -834,14 +836,15 @@ function startApp() {
     var v3 = version === '3.0';
     var zip = new JSZip();
     var versionId = v3 ? '3.0' : '2.1';
-    zip.file('bcf.version','<?xml version="1.0" encoding="UTF-8"?>\n<Version VersionId="'+versionId+'"><DetailedVersion>'+versionId+'</DetailedVersion></Version>');
+    // bcf.version with proper xmlns for Solibri/BIMcollab compatibility
+    var versionXmlns = v3 ? 'http://www.buildingsmart-tech.org/bcf/version/3.0' : 'http://www.buildingsmart-tech.org/bcf/version/2.1';
+    zip.file('bcf.version','<?xml version="1.0" encoding="UTF-8"?>\n<Version VersionId="'+versionId+'" xmlns="'+versionXmlns+'"><DetailedVersion>'+versionId+'</DetailedVersion></Version>');
 
     if (v3) {
-      // BCF 3.0 uses extensions.xml
-      zip.file('extensions.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<Extensions><TopicTypes><TopicType>Issue</TopicType><TopicType>Warning</TopicType><TopicType>Request</TopicType></TopicTypes><TopicStatuses><TopicStatus>Open</TopicStatus><TopicStatus>In Progress</TopicStatus><TopicStatus>Closed</TopicStatus></TopicStatuses><Priorities><Priority>Critical</Priority><Priority>High</Priority><Priority>Normal</Priority><Priority>Low</Priority></Priorities></Extensions>');
-      zip.file('project.bcfp','<?xml version="1.0" encoding="UTF-8"?>\n<ProjectInfo><Project ProjectId="'+guid()+'"><Name>ClashControl</Name></Project></ProjectInfo>');
+      zip.file('extensions.xml', '<?xml version="1.0" encoding="UTF-8"?>\n<Extensions xmlns="http://www.buildingsmart-tech.org/bcf/extensions/3.0"><TopicTypes><TopicType>Issue</TopicType><TopicType>Warning</TopicType><TopicType>Request</TopicType></TopicTypes><TopicStatuses><TopicStatus>Open</TopicStatus><TopicStatus>In Progress</TopicStatus><TopicStatus>Closed</TopicStatus></TopicStatuses><Priorities><Priority>Critical</Priority><Priority>High</Priority><Priority>Normal</Priority><Priority>Low</Priority></Priorities></Extensions>');
+      zip.file('project.bcfp','<?xml version="1.0" encoding="UTF-8"?>\n<ProjectInfo xmlns="http://www.buildingsmart-tech.org/bcf/project/3.0"><Project ProjectId="'+guid()+'"><Name>ClashControl</Name></Project></ProjectInfo>');
     } else {
-      zip.file('project.bcfp','<?xml version="1.0" encoding="UTF-8"?>\n<ProjectExtension><Project ProjectId="'+guid()+'"><Name>ClashControl</Name></Project></ProjectExtension>');
+      zip.file('project.bcfp','<?xml version="1.0" encoding="UTF-8"?>\n<ProjectExtension xmlns="http://www.buildingsmart-tech.org/bcf/project/2.1"><Project ProjectId="'+guid()+'"><Name>ClashControl</Name></Project><ExtensionSchema/></ProjectExtension>');
     }
 
     items.forEach(function(it) {
@@ -856,14 +859,18 @@ function startApp() {
       if (viewpoints) {
         vp = viewpoints.find(function(v){ return v.linkedId === it.id; });
       }
+      var vpGuid = vp ? guid() : null;
 
-      var markup = '<?xml version="1.0" encoding="UTF-8"?>\n<Markup>\n';
-      if (v3) {
-        markup += '  <Header><Files><File IfcProject=""><Filename>ClashControl</Filename></File></Files></Header>\n';
-      }
+      var markupXmlns = v3 ? 'http://www.buildingsmart-tech.org/bcf/markup/3.0' : 'http://www.buildingsmart-tech.org/bcf/markup/2.1';
+      var markup = '<?xml version="1.0" encoding="UTF-8"?>\n<Markup xmlns="'+markupXmlns+'">\n';
+      // Header section (required by Solibri)
+      markup += '  <Header>\n    <File IfcProject="" IfcSpatialStructureElement="" isExternal="true">\n      <Filename>ClashControl</Filename>\n      <Date>'+(it.createdAt||new Date().toISOString())+'</Date>\n    </File>\n  </Header>\n';
       markup += '  <Topic Guid="'+g+'" TopicType="'+type+'" TopicStatus="'+st+'">\n';
       markup += '    <Title>'+esc(it.title)+'</Title>\n';
       markup += '    <CreationDate>'+(it.createdAt||new Date().toISOString())+'</CreationDate>\n';
+      markup += '    <CreationAuthor>ClashControl</CreationAuthor>\n';
+      markup += '    <ModifiedDate>'+new Date().toISOString()+'</ModifiedDate>\n';
+      markup += '    <ModifiedAuthor>ClashControl</ModifiedAuthor>\n';
       markup += '    <Description>'+esc(it.description||'')+'</Description>\n';
       markup += '    <Priority>'+priority+'</Priority>\n';
       if (it.assignee) markup += '    <AssignedTo>'+esc(it.assignee)+'</AssignedTo>\n';
@@ -871,19 +878,19 @@ function startApp() {
       markup += '  </Topic>\n';
 
       // Add viewpoint reference if available
-      if (vp) {
-        var vpGuid = guid();
+      if (vp && vpGuid) {
         markup += '  <Viewpoints Guid="'+vpGuid+'">\n';
         markup += '    <Viewpoint>'+vpGuid+'.bcfv</Viewpoint>\n';
         if (vp.snapshot) markup += '    <Snapshot>'+vpGuid+'.png</Snapshot>\n';
         markup += '  </Viewpoints>\n';
 
-        // Write viewpoint file
-        var vpXml = '<?xml version="1.0" encoding="UTF-8"?>\n<VisualizationInfo Guid="'+vpGuid+'">\n';
+        // Write viewpoint file with proper xmlns
+        var visXmlns = v3 ? 'http://www.buildingsmart-tech.org/bcf/visualizationinfo/3.0' : 'http://www.buildingsmart-tech.org/bcf/visualizationinfo/2.1';
+        var vpXml = '<?xml version="1.0" encoding="UTF-8"?>\n<VisualizationInfo Guid="'+vpGuid+'" xmlns="'+visXmlns+'">\n';
         vpXml += '  <PerspectiveCamera>\n';
-        vpXml += '    <CameraViewPoint><X>'+vp.camera.px+'</X><Y>'+vp.camera.py+'</Y><Z>'+vp.camera.pz+'</Z></CameraViewPoint>\n';
-        vpXml += '    <CameraDirection><X>'+vp.camera.dx+'</X><Y>'+vp.camera.dy+'</Y><Z>'+vp.camera.dz+'</Z></CameraDirection>\n';
-        vpXml += '    <CameraUpVector><X>'+vp.camera.ux+'</X><Y>'+vp.camera.uy+'</Y><Z>'+vp.camera.uz+'</Z></CameraUpVector>\n';
+        vpXml += '    <CameraViewPoint><X>'+vp.camera.px.toFixed(6)+'</X><Y>'+vp.camera.py.toFixed(6)+'</Y><Z>'+vp.camera.pz.toFixed(6)+'</Z></CameraViewPoint>\n';
+        vpXml += '    <CameraDirection><X>'+vp.camera.dx.toFixed(6)+'</X><Y>'+vp.camera.dy.toFixed(6)+'</Y><Z>'+vp.camera.dz.toFixed(6)+'</Z></CameraDirection>\n';
+        vpXml += '    <CameraUpVector><X>'+vp.camera.ux.toFixed(6)+'</X><Y>'+vp.camera.uy.toFixed(6)+'</Y><Z>'+vp.camera.uz.toFixed(6)+'</Z></CameraUpVector>\n';
         vpXml += '    <FieldOfView>60</FieldOfView>\n';
         vpXml += '  </PerspectiveCamera>\n';
         vpXml += '</VisualizationInfo>';
@@ -1199,21 +1206,35 @@ function startApp() {
           if(obj.isMesh && obj.userData.expressID===expressId && !found) found=obj;
         });
         if(found){
-          var box = new THREE.BoxHelper(found, 0x3b82f6);
-          box.material.linewidth = 2;
-          scene.add(box);
-          hlRef.current = box;
-          // Outliner: add a glowing back-face scaled clone
+          // Architectural edge outline (clean lines like a drawing)
+          try {
+            var edgeGeo = new THREE.EdgesGeometry(found.geometry, 30); // 30° threshold for hard edges only
+            var edgeMat = new THREE.LineBasicMaterial({color:0x3b82f6, transparent:true, opacity:0.9, depthTest:false});
+            var edgeLines = new THREE.LineSegments(edgeGeo, edgeMat);
+            edgeLines.applyMatrix4(found.matrixWorld);
+            edgeLines.renderOrder = 998;
+            scene.add(edgeLines);
+            hlRef.current = edgeLines;
+          } catch(e){
+            // Fallback: simple wireframe
+            var wfGeo = new THREE.WireframeGeometry(found.geometry);
+            var wfMat = new THREE.LineBasicMaterial({color:0x3b82f6, transparent:true, opacity:0.5});
+            var wf = new THREE.LineSegments(wfGeo, wfMat);
+            wf.applyMatrix4(found.matrixWorld);
+            scene.add(wf);
+            hlRef.current = wf;
+          }
+          // Subtle back-face glow outline
           if(prefsRef.current.outlineSelected!==false){
             try {
               var outGeo = found.geometry.clone();
-              var outMat = new THREE.MeshBasicMaterial({color:0x3b82f6, side:THREE.BackSide, transparent:true, opacity:0.35});
+              var outMat = new THREE.MeshBasicMaterial({color:0x3b82f6, side:THREE.BackSide, transparent:true, opacity:0.25});
               var outMesh = new THREE.Mesh(outGeo, outMat);
               outMesh.applyMatrix4(found.matrixWorld);
               var outBox = new THREE.Box3().setFromObject(outMesh);
               var outCtr = outBox.getCenter(new THREE.Vector3());
-              outMesh.position.sub(outCtr).multiplyScalar(1.05).add(outCtr);
-              outMesh.scale.multiplyScalar(1.05);
+              outMesh.position.sub(outCtr).multiplyScalar(1.03).add(outCtr);
+              outMesh.scale.multiplyScalar(1.03);
               outMesh.renderOrder = -1;
               scene.add(outMesh);
               outlineRef.current = outMesh;
@@ -1686,12 +1707,22 @@ function startApp() {
                 if(els[ei].expressId===eid){ found={el:els[ei],model:curModels[mi]}; break; }
               }
             }
-            // Highlight
+            // Highlight with architectural edge outline
             if(hlRef.current){scene.remove(hlRef.current);hlRef.current=null;}
-            var box = new THREE.BoxHelper(hit, 0x3b82f6);
-            box.material.linewidth = 2;
-            scene.add(box);
-            hlRef.current = box;
+            try {
+              var edgeGeo2 = new THREE.EdgesGeometry(hit.geometry, 30);
+              var edgeMat2 = new THREE.LineBasicMaterial({color:0x3b82f6, transparent:true, opacity:0.9, depthTest:false});
+              var edgeLines2 = new THREE.LineSegments(edgeGeo2, edgeMat2);
+              edgeLines2.applyMatrix4(hit.matrixWorld);
+              edgeLines2.renderOrder = 998;
+              scene.add(edgeLines2);
+              hlRef.current = edgeLines2;
+            } catch(e){
+              var box = new THREE.BoxHelper(hit, 0x3b82f6);
+              box.material.linewidth = 2;
+              scene.add(box);
+              hlRef.current = box;
+            }
             var hitBox = new THREE.Box3().setFromObject(hit);
             var hitCtr = hitBox.getCenter(new THREE.Vector3());
             var hitPt = [hitCtr.x, hitCtr.y, hitCtr.z];
@@ -1710,13 +1741,13 @@ function startApp() {
             if(prefsRef.current.outlineSelected!==false){
               try {
                 var outGeo = hit.geometry.clone();
-                var outMat = new THREE.MeshBasicMaterial({color:0x3b82f6, side:THREE.BackSide, transparent:true, opacity:0.35});
+                var outMat = new THREE.MeshBasicMaterial({color:0x3b82f6, side:THREE.BackSide, transparent:true, opacity:0.25});
                 var outMesh = new THREE.Mesh(outGeo, outMat);
                 outMesh.applyMatrix4(hit.matrixWorld);
                 var ob = new THREE.Box3().setFromObject(outMesh);
                 var oc = ob.getCenter(new THREE.Vector3());
-                outMesh.position.sub(oc).multiplyScalar(1.05).add(oc);
-                outMesh.scale.multiplyScalar(1.05);
+                outMesh.position.sub(oc).multiplyScalar(1.03).add(oc);
+                outMesh.scale.multiplyScalar(1.03);
                 outMesh.renderOrder = -1;
                 scene.add(outMesh);
                 outlineRef.current = outMesh;
@@ -1809,8 +1840,56 @@ function startApp() {
 
       // FPS tracking
       S.perf = {fps:0, frameCount:0, lastTime:performance.now(), tris:0, meshCount:0, drawCalls:0};
+      // ── Frustum culling + distance-based LOD ──
+      var frustum = new THREE.Frustum();
+      var projScreenMatrix = new THREE.Matrix4();
+      var tmpBox = new THREE.Box3();
+      var tmpSphere = new THREE.Sphere();
+      var cullEvery = 4; // re-evaluate culling every N frames
+      var cullFrame = 0;
+      var lodDistSq = 2500; // 50m squared — beyond this, skip small objects
+      var lodSmallThreshold = 0.5; // objects smaller than 0.5m bounding sphere radius
+
+      function updateCulling(){
+        projScreenMatrix.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+        frustum.setFromProjectionMatrix(projScreenMatrix);
+        var camPos = camera.position;
+        S.mg.traverse(function(obj){
+          if(!obj.isMesh) return;
+          // Skip non-IFC meshes (helpers etc)
+          if(obj.userData.expressID==null) return;
+          // Don't override storey/user visibility (marked by _storeyHidden)
+          if(obj.userData._storeyHidden) return;
+          // Compute bounding sphere if not cached
+          if(!obj.geometry.boundingSphere) obj.geometry.computeBoundingSphere();
+          var bs = obj.geometry.boundingSphere;
+          tmpSphere.copy(bs).applyMatrix4(obj.matrixWorld);
+          // Frustum test
+          if(!frustum.intersectsSphere(tmpSphere)){
+            obj.visible = false;
+            obj.userData._frustumCulled = true;
+            return;
+          }
+          // Distance-based LOD: hide very small objects that are far away
+          var distSq = camPos.distanceToSquared(tmpSphere.center);
+          if(tmpSphere.radius < lodSmallThreshold && distSq > lodDistSq){
+            obj.visible = false;
+            obj.userData._frustumCulled = true;
+            return;
+          }
+          obj.userData._frustumCulled = false;
+          obj.visible = true;
+        });
+      }
+
       function tick(){
         S.raf=requestAnimationFrame(tick);
+        // Frustum culling (every N frames for performance)
+        cullFrame++;
+        if(cullFrame >= cullEvery && S.mg && S.mg.children.length > 0){
+          cullFrame = 0;
+          updateCulling();
+        }
         // Main render
         renderer.setViewport(0,0,el.clientWidth,el.clientHeight);
         renderer.setScissorTest(false);
@@ -1880,7 +1959,9 @@ function startApp() {
             S.map[model.id].traverse(function(obj){
               if(obj.isMesh && obj.userData.expressID!=null){
                 var st = em[obj.userData.expressID]||'';
-                obj.visible = !hs[st];
+                var hidden = !!hs[st];
+                obj.visible = !hidden;
+                obj.userData._storeyHidden = hidden;
               }
             });
           }
@@ -2002,19 +2083,20 @@ function startApp() {
       });
       S._sboxFacePanels=facePanels;
 
-      // --- 6 face-center drag handles (spheres) ---
+      // --- 6 face-center drag handles (spheres) on OUTSIDE of box ---
       var handleSize=Math.max(hx,hy,hz)*0.06;
       handleSize=Math.max(0.05,Math.min(handleSize,0.5));
+      var handleOffset=handleSize*2.5; // push handles outside the box face
       var handleGeo=new THREE.SphereGeometry(handleSize,8,8);
       var handles=[];
-      // Face handle definitions: axis (0=x,1=y,2=z), side (min/max), position
+      // Face handle definitions: axis (0=x,1=y,2=z), side (min/max), position offset outward
       var handleDefs=[
-        {axis:0,side:'max',pos:ctr.clone().addScaledVector(axX,hx),color:0xef4444,dir:axX},   // +X red
-        {axis:0,side:'min',pos:ctr.clone().addScaledVector(axX,-hx),color:0xef4444,dir:axX},   // -X red
-        {axis:1,side:'max',pos:ctr.clone().addScaledVector(axY,hy),color:0x22c55e,dir:axY},    // +Y green
-        {axis:1,side:'min',pos:ctr.clone().addScaledVector(axY,-hy),color:0x22c55e,dir:axY},   // -Y green
-        {axis:2,side:'max',pos:ctr.clone().addScaledVector(axZ,hz),color:0x3b82f6,dir:axZ},    // +Z blue
-        {axis:2,side:'min',pos:ctr.clone().addScaledVector(axZ,-hz),color:0x3b82f6,dir:axZ}    // -Z blue
+        {axis:0,side:'max',pos:ctr.clone().addScaledVector(axX,hx+handleOffset),color:0xef4444,dir:axX},   // +X red
+        {axis:0,side:'min',pos:ctr.clone().addScaledVector(axX,-(hx+handleOffset)),color:0xef4444,dir:axX},   // -X red
+        {axis:1,side:'max',pos:ctr.clone().addScaledVector(axY,hy+handleOffset),color:0x22c55e,dir:axY},    // +Y green
+        {axis:1,side:'min',pos:ctr.clone().addScaledVector(axY,-(hy+handleOffset)),color:0x22c55e,dir:axY},   // -Y green
+        {axis:2,side:'max',pos:ctr.clone().addScaledVector(axZ,hz+handleOffset),color:0x3b82f6,dir:axZ},    // +Z blue
+        {axis:2,side:'min',pos:ctr.clone().addScaledVector(axZ,-(hz+handleOffset)),color:0x3b82f6,dir:axZ}    // -Z blue
       ];
       handleDefs.forEach(function(hd){
         var mat=new THREE.MeshBasicMaterial({color:hd.color,transparent:true,opacity:0.8,depthTest:false});
@@ -2031,17 +2113,33 @@ function startApp() {
 
       S._sboxHandles=handles;
 
-      // --- Rotation ring on top face ---
-      var ringRadius=Math.max(hx,hz)*0.7;
-      var ringGeo=new THREE.TorusGeometry(ringRadius,handleSize*0.35,8,32);
-      var ringMat=new THREE.MeshBasicMaterial({color:0xf59e0b,transparent:true,opacity:0.6,depthTest:false});
+      // --- Rotation ring floating above top face with constant size ---
+      var ringRadius=1.2; // constant size, independent of box dimensions
+      var ringTubeRadius=0.04;
+      var ringFloatHeight=Math.max(hy*0.3,0.5); // float above box
+      var ringGeo=new THREE.TorusGeometry(ringRadius,ringTubeRadius,8,48);
+      var ringMat=new THREE.MeshBasicMaterial({color:0xf59e0b,transparent:true,opacity:0.7,depthTest:false});
       var ring=new THREE.Mesh(ringGeo,ringMat);
-      ring.position.copy(ctr).addScaledVector(axY,hy);
+      var ringY=hy+ringFloatHeight;
+      ring.position.copy(ctr).addScaledVector(axY,ringY);
       ring.rotation.x=Math.PI/2; // lay flat
       ring.userData._sboxRotation=true;
       ring.renderOrder=999;
       S.scene.add(ring);
       S._sboxRotRing=ring;
+
+      // --- Connecting line from box top to rotation ring ---
+      var lineGeo=new THREE.BufferGeometry().setFromPoints([
+        ctr.clone().addScaledVector(axY,hy),
+        ctr.clone().addScaledVector(axY,ringY)
+      ]);
+      var lineMat2=new THREE.LineBasicMaterial({color:0xf59e0b,transparent:true,opacity:0.35});
+      var connLine=new THREE.Line(lineGeo,lineMat2);
+      connLine.userData._sboxPart=true;
+      connLine.renderOrder=999;
+      S.scene.add(connLine);
+      if(!S._sboxFacePanels) S._sboxFacePanels=[];
+      S._sboxFacePanels.push(connLine); // cleaned up with face panels
     }, [s.sectionBox]);
 
     // Floor plan: Dalux-style 3D section cut (single clip from above, angled 3D view)
@@ -2414,14 +2512,17 @@ function startApp() {
       </div>`}
       <div style=${{position:'absolute',bottom:'.75rem',right:'.75rem',pointerEvents:'auto',display:'flex',flexDirection:'column',gap:'.3rem',alignItems:'flex-end'}}>
         <div style=${{display:'flex',gap:'.2rem',background:'rgba(15,23,42,.92)',border:'1px solid #334155',borderRadius:8,padding:'.3rem'}}>
-          <span style=${{fontSize:'.6rem',color:'#64748b',alignSelf:'center',marginRight:'.2rem'}}>Measure:</span>
-          ${['length','angle','area'].map(function(m){return html`<button key=${m} onClick=${function(){d({t:'MEASURE_MODE',v:s.measureMode===m?null:m});measurePtsRef.current=[];}}
-            style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .4rem',background:s.measureMode===m?'#2563eb':'#1e293b',color:s.measureMode===m?'#fff':'#94a3b8'}}>${m.charAt(0).toUpperCase()+m.slice(1)}</button>`})}
+          <button onClick=${function(){d({t:'MEASURE_MODE',v:s.measureMode?null:'length'});measurePtsRef.current=[];}}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .5rem',background:s.measureMode?'#2563eb':'#1e293b',color:s.measureMode?'#fff':'#94a3b8',border:'1px solid '+(s.measureMode?'#3b82f6':'#334155')}}>
+            ${s.measureMode?'Measuring':'Measure'}
+          </button>
+          ${s.measureMode && ['length','angle','area'].map(function(m){return html`<button key=${m} onClick=${function(){d({t:'MEASURE_MODE',v:m});measurePtsRef.current=[];}}
+            style=${{...S_BTN,fontSize:'.55rem',padding:'.15rem .35rem',background:s.measureMode===m?'#1e3a5f':'transparent',color:s.measureMode===m?'#93c5fd':'#64748b',border:'1px solid '+(s.measureMode===m?'#1e3a5f':'transparent')}}>${m.charAt(0).toUpperCase()+m.slice(1)}</button>`})}
           ${s.measurements.length>0 && html`<button onClick=${function(){d({t:'CLEAR_MEASUREMENTS'});}}
             style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .3rem',background:'#450a0a',color:'#fca5a5'}}>Clear (${s.measurements.length})</button>`}
         </div>
         ${s.measureMode && html`<div style=${{fontSize:'.55rem',color:'#93c5fd',background:'rgba(30,58,138,.85)',padding:'.2rem .5rem',borderRadius:6}}>
-          ${s.measureMode==='length'?'Click 2 points to measure distance':s.measureMode==='angle'?'Click 3 points: start, vertex, end':'Click points to define area, double-click to close'}
+          ${s.measureMode==='length'?'Click 2 points to measure 3D distance':s.measureMode==='angle'?'Click 3 points: start, vertex, end':'Click points to define area, double-click to close'}
         </div>`}
         ${s.measurements.length>0 && html`<div style=${{background:'rgba(15,23,42,.92)',border:'1px solid #334155',borderRadius:8,padding:'.3rem',maxHeight:120,overflowY:'auto',width:200}}>
           ${s.measurements.map(function(m){return html`<div key=${m.id} style=${{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'.15rem .2rem',fontSize:'.6rem',borderBottom:'1px solid #1e293b'}}>
@@ -2552,14 +2653,14 @@ function startApp() {
       });
       // Render loop sync
       var cubeRAF;
+      var _cubeQ = new THREE.Quaternion();
       function renderCube(){
         cubeRAF=requestAnimationFrame(renderCube);
         var S=state3d.current;
-        if(!S||!S.camera) return;
-        // Mirror main camera orientation onto cube camera
-        var mainDir=new THREE.Vector3();
-        S.camera.getWorldDirection(mainDir);
-        cubeCamera.position.copy(mainDir.negate().multiplyScalar(5));
+        if(!S||!S.camera||!S.orbit) return;
+        // Mirror main camera orientation: rotate cube group to match camera view
+        var relPos = S.camera.position.clone().sub(S.orbit.target).normalize().multiplyScalar(5);
+        cubeCamera.position.copy(relPos);
         cubeCamera.lookAt(0,0,0);
         cubeRenderer.render(cubeScene,cubeCamera);
       }
@@ -2595,7 +2696,7 @@ function startApp() {
     return html`<div style=${{marginTop:'.4rem'}}>
       <button onClick=${toggleSectionBox}
         style=${{...S_BTN,width:'100%',padding:'.25rem',background:active?'#7c3aed':'#1e293b',color:active?'#fff':'#64748b',border:'1px solid '+(active?'#7c3aed':'#334155'),marginBottom:active?'.4rem':0}}>
-        ${active?'Section Box ON':'Section Box'}
+        ${active?'Section Box OFF':'Section Box'}
       </button>
       ${active && html`<div style=${{fontSize:'.55rem',color:'#64748b',padding:'.2rem 0'}}>
         <div style=${{marginBottom:'.2rem'}}>Drag handles to resize · Ring to rotate</div>
@@ -2628,8 +2729,7 @@ function startApp() {
         <div style=${{width:32,height:32,background:'#2563eb',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center'}}><span style=${{color:'#fff',fontWeight:900,fontSize:14}}>CC</span></div>
         <div>
           <span style=${{fontWeight:600}}>ClashControl</span>
-          <span style=${{color:'#64748b',fontSize:'.7rem',marginLeft:'.4rem'}}>v${CC_VERSION.v}</span>
-          <span style=${{color:'#334155',fontSize:'.55rem',marginLeft:'.3rem'}} title=${'Build: '+CC_VERSION.date+' ('+CC_VERSION.hash+')'}>${CC_VERSION.hash}</span>
+          <span style=${{color:'#64748b',fontSize:'.7rem',marginLeft:'.4rem',cursor:'default'}} title=${'Released: '+new Date(CC_VERSION.date).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})+' at '+new Date(CC_VERSION.date).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})+'\nBuild: '+CC_VERSION.hash}>v${CC_VERSION.v}</span>
         </div>
       </div>
       <div style=${{display:'flex',alignItems:'center',gap:'.5rem'}}>
@@ -2722,6 +2822,23 @@ function startApp() {
     function onDragOver(e){e.preventDefault();e.stopPropagation();setDragging(true);}
     function onDragLeave(e){e.preventDefault();e.stopPropagation();setDragging(false);}
 
+    var splitSt = useState(50), splitPct=splitSt[0], setSplitPct=splitSt[1];
+    var splitDrag = useRef(null);
+    function onSplitDown(e){
+      e.preventDefault();
+      splitDrag.current={startY:e.clientY,startPct:splitPct};
+      function onMove(ev){
+        if(!splitDrag.current) return;
+        var dy=ev.clientY-splitDrag.current.startY;
+        var aside=ev.target.closest?ev.target.closest('aside'):null;
+        var h=aside?aside.offsetHeight:500;
+        var newPct=splitDrag.current.startPct+(dy/h)*100;
+        setSplitPct(Math.max(15,Math.min(85,newPct)));
+      }
+      function onUp(){splitDrag.current=null;window.removeEventListener('mousemove',onMove);window.removeEventListener('mouseup',onUp);}
+      window.addEventListener('mousemove',onMove);
+      window.addEventListener('mouseup',onUp);
+    }
     return html`<aside style=${{...S_PANEL,width:240}} onDrop=${onDrop} onDragOver=${onDragOver} onDragLeave=${onDragLeave}>
       <div style=${{padding:'.75rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
         <div style=${{display:'flex',justifyContent:'space-between',marginBottom:'.4rem'}}>
@@ -2735,9 +2852,13 @@ function startApp() {
         </button>
         ${err && html`<div style=${{marginTop:'.4rem',padding:'.4rem',background:'#450a0a',border:'1px solid #7f1d1d',borderRadius:6,fontSize:'.7rem',color:'#fca5a5',whiteSpace:'pre-line'}}>${err}</div>`}
       </div>
-      <div style=${{flex:1,overflowY:'auto',padding:'.4rem',display:'flex',flexDirection:'column',gap:'.25rem'}}>
+      <div style=${{flex:splitPct,overflowY:'auto',padding:'.4rem',display:'flex',flexDirection:'column',gap:'.25rem',minHeight:0}}>
         ${s.models.length===0 && html`<div style=${{textAlign:'center',color:'#334155',fontSize:'.75rem',padding:'2rem 0'}}><div style=${{fontSize:'2rem',marginBottom:'.3rem'}}>📁</div>No models loaded</div>`}
         ${s.models.map(function(m){return html`<${ModelCard} key=${m.id} m=${m} d=${d} />`})}
+      </div>
+      <div onMouseDown=${onSplitDown}
+        style=${{height:6,flexShrink:0,cursor:'row-resize',background:'#1e293b',borderTop:'1px solid #334155',borderBottom:'1px solid #334155',display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <span style=${{width:20,height:2,background:'#475569',borderRadius:1}}></span>
       </div>
       ${function(){
         // Collect all unique storeys across all models for global toggle + floor plan cuts
@@ -2756,7 +2877,7 @@ function startApp() {
         var stKeys = Object.keys(allStoreys).sort(function(a,b){return (elevMap[a]||0)-(elevMap[b]||0)});
         if(stKeys.length===0) return null;
         var activePlan = s.floorPlan;
-        return html`<div style=${{padding:'.5rem .75rem',borderTop:'1px solid #1e293b',flexShrink:0,maxHeight:180,overflowY:'auto'}}>
+        return html`<div style=${{padding:'.5rem .75rem',flex:100-splitPct,overflowY:'auto',minHeight:0}}>
           <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.3rem'}}>
             <span style=${{fontSize:'.65rem',fontWeight:600,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em'}}>Levels</span>
             <div style=${{display:'flex',gap:'.2rem'}}>
@@ -2769,26 +2890,36 @@ function startApp() {
             </div>
           </div>
           ${stKeys.map(function(st){
-            var hidden = s.models.every(function(m){return m.hiddenStoreys&&m.hiddenStoreys[st]});
             var elev = elevMap[st];
             var hasElev = elev!=null;
             var isPlanActive = activePlan && activePlan.storeyName===st;
-            return html`<div key=${st} style=${{display:'flex',alignItems:'center',gap:'.25rem',padding:'.1rem 0'}}>
-              <span onClick=${function(e){e.preventDefault();s.models.forEach(function(m){
-                if((m.storeys||[]).indexOf(st)!==-1) d({t:'TOGGLE_STOREY',id:m.id,storey:st});
-              });}}
-                style=${{width:11,height:11,borderRadius:2,border:'2px solid '+(hidden?'#475569':'#34d399'),background:hidden?'transparent':'#34d399',cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                ${!hidden && html`<span style=${{color:'#fff',fontSize:7}}>✓</span>`}
-              </span>
-              <span style=${{fontSize:'.6rem',color:hidden?'#475569':'#e2e8f0',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title=${st+(hasElev?' ('+elev.toFixed(1)+'m)':'')}>${st}</span>
-              ${hasElev && html`<span style=${{fontSize:'.55rem',color:'#475569',flexShrink:0}}>${elev.toFixed(1)}m</span>`}
-              ${hasElev && html`<button onClick=${function(e){
-                e.stopPropagation();
+            var isHighlighted = s._highlightedStorey===st;
+            return html`<div key=${st}
+              onClick=${function(e){
+                e.preventDefault();
+                // Single click: highlight all elements on this storey
+                var ids=[];
+                s.models.forEach(function(m){
+                  (m.elements||[]).forEach(function(el){
+                    if(el.props&&el.props.storey===st) ids.push(el.expressId);
+                  });
+                });
+                if(ids.length){
+                  if(_ghostOthers) _ghostOthers(ids);
+                  if(_flyToElements) _flyToElements(ids);
+                }
+                d({t:'SET_HIGHLIGHTED_STOREY',v:isHighlighted?null:st});
+              }}
+              onDblClick=${function(e){
+                e.preventDefault(); e.stopPropagation();
+                if(!hasElev) return;
+                // Double click: toggle floor plan cut
                 if(isPlanActive){d({t:'FLOOR_PLAN',v:null});}
                 else{d({t:'FLOOR_PLAN',v:{storeyName:st,elevation:elev,cutHeight:1.2}});}
               }}
-                style=${{...S_BTN,fontSize:'.55rem',padding:'.1rem .25rem',background:isPlanActive?'#7c3aed':'#1e293b',color:isPlanActive?'#fff':'#a78bfa',border:'1px solid '+(isPlanActive?'#7c3aed':'#334155'),flexShrink:0}}
-                title=${'3D section cut at '+st}>${isPlanActive?'Exit':'Cut'}</button>`}
+              style=${{display:'flex',alignItems:'center',gap:'.25rem',padding:'.2rem .3rem',cursor:'pointer',borderRadius:4,background:isPlanActive?'#2d1a4e':isHighlighted?'#1e293b':'transparent',transition:'background .15s'}}>
+              <span style=${{fontSize:'.6rem',color:isPlanActive?'#c084fc':isHighlighted?'#38bdf8':'#e2e8f0',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:isHighlighted||isPlanActive?600:400}} title=${st+(hasElev?' ('+elev.toFixed(1)+'m)':'')}>${st}</span>
+              ${hasElev && html`<span style=${{fontSize:'.55rem',color:isPlanActive?'#a78bfa':'#475569',flexShrink:0}}>${elev.toFixed(1)}m</span>`}
             </div>`;
           })}
           ${activePlan && html`<div style=${{marginTop:'.3rem',padding:'.3rem',background:'#1e1338',border:'1px solid #3b0764',borderRadius:6}}>
@@ -2936,15 +3067,19 @@ function startApp() {
           </div>
         </div>`}
         ${classView && total>0 && html`<div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'.15rem'}}>
-          <span style=${{fontSize:'.55rem',color:'#475569'}}>${keys.length} groups · ${total} elements</span>
+          <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
+            <span onClick=${function(){if(hiddenCount>0){d({t:'SHOW_ALL_CLASSES'})}else{d({t:'HIDE_ALL_CLASSES',view:classView})}}}
+              style=${{width:12,height:12,borderRadius:2,border:'2px solid '+(hiddenCount===0?'#3b82f6':hiddenCount<keys.length?'#64748b':'#475569'),background:hiddenCount===0?'#3b82f6':hiddenCount<keys.length?'#334155':'transparent',cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}
+              title=${hiddenCount>0?'Show all':'Hide all'}>
+              ${hiddenCount===0 && html`<span style=${{color:'#fff',fontSize:8}}>✓</span>`}
+              ${hiddenCount>0 && hiddenCount<keys.length && html`<span style=${{color:'#fff',fontSize:8}}>-</span>`}
+            </span>
+            <span style=${{fontSize:'.55rem',color:'#475569'}}>${keys.length} groups · ${total} elements</span>
+          </div>
           <div style=${{display:'flex',gap:'.2rem'}}>
             <button onClick=${function(){d({t:'COLOR_BY_CLASS',v:classView})}}
               style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:s.colorByClass===classView?'#7c3aed':'#1e293b',color:s.colorByClass===classView?'#fff':'#475569'}}
               title="Color elements by this classification">Color</button>
-            <button onClick=${function(){d({t:'SHOW_ALL_CLASSES'})}}
-              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Show all</button>
-            <button onClick=${function(){d({t:'HIDE_ALL_CLASSES',view:classView})}}
-              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Hide all</button>
           </div>
         </div>`}
         ${classView && hiddenCount>0 && html`<div style=${{fontSize:'.5rem',color:'#f59e0b',marginTop:'.15rem'}}>${hiddenCount} group${hiddenCount>1?'s':''} hidden</div>`}
