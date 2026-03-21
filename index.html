@@ -124,7 +124,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.4',hash:'60164be',date:'2026-03-21T07:55:42Z'};
+  var CC_VERSION = {v:'1.2.6',hash:'e5afd2b',date:'2026-03-21T08:18:01Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -1066,34 +1066,30 @@ function startApp() {
         var d2 = dist || 15;
         var endTarget = new THREE.Vector3(pt[0],pt[1],pt[2]);
 
-        // Compute smart camera offset: use hint, or direction from model center outward
-        var dir = new THREE.Vector3(0.6, 0.4, 0.6).normalize();
+        // Default: PRESERVE current camera direction for calm, consistent navigation
+        // This prevents dizzying rotations when flying between nearby elements
+        var dir = startPos.clone().sub(startTarget);
+        if(dir.length() < 0.01) dir.set(0.6, 0.4, 0.6);
+        dir.normalize();
+
         if(hint && hint.normal) {
-          // Place camera on the side the surface faces
-          dir.set(hint.normal[0], hint.normal[1], hint.normal[2]).normalize();
+          // Only override direction when explicitly given a surface normal
+          var hintDir = new THREE.Vector3(hint.normal[0], hint.normal[1], hint.normal[2]).normalize();
           // For top-facing surfaces (floors/slabs), use angled view not straight down
-          if(Math.abs(dir.y) > 0.9) {
-            dir.set(0.5, 0.7, 0.5).normalize();
+          if(Math.abs(hintDir.y) > 0.9) {
+            hintDir.set(0.5, 0.7, 0.5).normalize();
           } else {
-            // Bias slightly upward so we get a nice viewing angle
-            dir.y = Math.max(dir.y, 0.25);
+            hintDir.y = Math.max(hintDir.y, 0.25);
+            hintDir.normalize();
           }
-          dir.normalize();
-        } else if(S.mg && S.mg.children.length > 0) {
-          // Direction from model center to target element — camera goes on the outside
-          var modelBox = new THREE.Box3().setFromObject(S.mg);
-          var modelCtr = modelBox.getCenter(new THREE.Vector3());
-          dir.subVectors(endTarget, modelCtr);
-          if(dir.length() < 0.01) dir.set(0.6, 0.4, 0.6);
-          dir.normalize();
-          // Bias upward for a better viewing angle
-          dir.y = Math.max(dir.y, 0.3);
-          dir.normalize();
+          // Blend 70% hint with 30% current direction for smoother transitions
+          dir.lerp(hintDir, 0.7).normalize();
         }
+
         var endPos = endTarget.clone().addScaledVector(dir, d2);
 
         var startTime = performance.now();
-        var duration = 1500;
+        var duration = 1200; // slightly faster for snappier feel
         function animate(){
           var elapsed = performance.now()-startTime;
           var t = Math.min(elapsed/duration,1);
@@ -1199,47 +1195,63 @@ function startApp() {
 
       _highlightById = function(expressId, alsoGhost) {
         if(!expressId||!S.mg) return;
-        if(hlRef.current){scene.remove(hlRef.current);hlRef.current=null;}
+        if(hlRef.current){
+          if(hlRef.current.isGroup) hlRef.current.traverse(function(c){if(c.isMesh||c.isLine||c.isLineSegments){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();}});
+          scene.remove(hlRef.current);hlRef.current=null;
+        }
         if(outlineRef.current){scene.remove(outlineRef.current);outlineRef.current=null;}
         var found = null;
         S.mg.traverse(function(obj){
           if(obj.isMesh && obj.userData.expressID===expressId && !found) found=obj;
         });
         if(found){
-          // Architectural edge outline (clean lines like a drawing)
+          // Ensure visible for outline computation (may be frustum-culled)
+          var wasHidden = !found.visible;
+          if(wasHidden) found.visible = true;
+
+          var grp = new THREE.Group();
+
+          // 1. Inverted hull outline: slightly scaled back-face shell creates silhouette border
           try {
-            var edgeGeo = new THREE.EdgesGeometry(found.geometry, 30); // 30° threshold for hard edges only
-            var edgeMat = new THREE.LineBasicMaterial({color:0x3b82f6, transparent:true, opacity:0.9, depthTest:false});
+            var hullGeo = found.geometry.clone();
+            var hullMat = new THREE.MeshBasicMaterial({
+              color:0x2563eb, side:THREE.BackSide,
+              transparent:true, opacity:0.95,
+              depthTest:true, depthWrite:false
+            });
+            var hullMesh = new THREE.Mesh(hullGeo, hullMat);
+            hullMesh.applyMatrix4(found.matrixWorld);
+            // Scale outward from center for consistent border width
+            var hullBox = new THREE.Box3().setFromObject(hullMesh);
+            var hullCtr = hullBox.getCenter(new THREE.Vector3());
+            var hullSize = hullBox.getSize(new THREE.Vector3());
+            // Use absolute offset instead of percentage for consistent border width
+            var borderWidth = 0.03; // meters
+            var sx = 1 + (hullSize.x > 0.01 ? borderWidth*2/hullSize.x : 0.04);
+            var sy = 1 + (hullSize.y > 0.01 ? borderWidth*2/hullSize.y : 0.04);
+            var sz = 1 + (hullSize.z > 0.01 ? borderWidth*2/hullSize.z : 0.04);
+            // Translate to origin, scale, translate back
+            hullMesh.position.sub(hullCtr);
+            hullMesh.scale.set(sx, sy, sz);
+            hullMesh.position.add(hullCtr);
+            hullMesh.renderOrder = 997;
+            grp.add(hullMesh);
+          } catch(e){}
+
+          // 2. Top hard edges only (very high angle threshold = only sharp 90° corners)
+          try {
+            var edgeGeo = new THREE.EdgesGeometry(found.geometry, 50);
+            var edgeMat = new THREE.LineBasicMaterial({color:0x60a5fa, transparent:true, opacity:0.4, depthTest:false});
             var edgeLines = new THREE.LineSegments(edgeGeo, edgeMat);
             edgeLines.applyMatrix4(found.matrixWorld);
-            edgeLines.renderOrder = 998;
-            scene.add(edgeLines);
-            hlRef.current = edgeLines;
-          } catch(e){
-            // Fallback: simple wireframe
-            var wfGeo = new THREE.WireframeGeometry(found.geometry);
-            var wfMat = new THREE.LineBasicMaterial({color:0x3b82f6, transparent:true, opacity:0.5});
-            var wf = new THREE.LineSegments(wfGeo, wfMat);
-            wf.applyMatrix4(found.matrixWorld);
-            scene.add(wf);
-            hlRef.current = wf;
-          }
-          // Subtle back-face glow outline
-          if(prefsRef.current.outlineSelected!==false){
-            try {
-              var outGeo = found.geometry.clone();
-              var outMat = new THREE.MeshBasicMaterial({color:0x3b82f6, side:THREE.BackSide, transparent:true, opacity:0.25});
-              var outMesh = new THREE.Mesh(outGeo, outMat);
-              outMesh.applyMatrix4(found.matrixWorld);
-              var outBox = new THREE.Box3().setFromObject(outMesh);
-              var outCtr = outBox.getCenter(new THREE.Vector3());
-              outMesh.position.sub(outCtr).multiplyScalar(1.03).add(outCtr);
-              outMesh.scale.multiplyScalar(1.03);
-              outMesh.renderOrder = -1;
-              scene.add(outMesh);
-              outlineRef.current = outMesh;
-            } catch(e){}
-          }
+            edgeLines.renderOrder = 999;
+            grp.add(edgeLines);
+          } catch(e){}
+
+          scene.add(grp);
+          hlRef.current = grp;
+
+          if(wasHidden && found.userData._frustumCulled) found.visible = false;
         }
         // Ghost non-selected elements
         if(alsoGhost!==false) ghostOthers([expressId]);
@@ -1336,7 +1348,12 @@ function startApp() {
           if(obj.isMesh && obj.userData.expressID===expressId && !found) found=obj;
         });
         if(!found) return;
+        // Ensure mesh is visible for bounding box computation (may be frustum-culled)
+        var wasHidden = !found.visible;
+        if(wasHidden) found.visible = true;
         var box = new THREE.Box3().setFromObject(found);
+        if(wasHidden && found.userData._frustumCulled) found.visible = false;
+        if(box.isEmpty()) return;
         var ctr = box.getCenter(new THREE.Vector3());
         var sz = box.getSize(new THREE.Vector3());
         var maxDim = Math.max(sz.x,sz.y,sz.z,0.5);
@@ -1356,14 +1373,18 @@ function startApp() {
         }
         var box = new THREE.Box3();
         var foundAny = false;
+        var hiddenMeshes = [];
         expressIds.forEach(function(eid){
           S.mg.traverse(function(obj){
             if(obj.isMesh && obj.userData.expressID===eid){
+              // Temporarily show frustum-culled meshes for bounding box
+              if(!obj.visible && obj.userData._frustumCulled){obj.visible=true;hiddenMeshes.push(obj);}
               box.expandByObject(obj);
               foundAny = true;
             }
           });
         });
+        hiddenMeshes.forEach(function(m){m.visible=false;});
         if(!foundAny){
           if(fallbackPt) _flyTo(fallbackPt);
           return;
@@ -1707,22 +1728,38 @@ function startApp() {
                 if(els[ei].expressId===eid){ found={el:els[ei],model:curModels[mi]}; break; }
               }
             }
-            // Highlight with architectural edge outline
-            if(hlRef.current){scene.remove(hlRef.current);hlRef.current=null;}
+            // Highlight with silhouette outline (same as _highlightById)
+            if(hlRef.current){
+              if(hlRef.current.isGroup) hlRef.current.traverse(function(c){if(c.isMesh||c.isLine||c.isLineSegments){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();}});
+              scene.remove(hlRef.current);hlRef.current=null;
+            }
+            var hlGrp = new THREE.Group();
             try {
-              var edgeGeo2 = new THREE.EdgesGeometry(hit.geometry, 30);
-              var edgeMat2 = new THREE.LineBasicMaterial({color:0x3b82f6, transparent:true, opacity:0.9, depthTest:false});
+              var hullGeo2 = hit.geometry.clone();
+              var hullMat2 = new THREE.MeshBasicMaterial({color:0x2563eb, side:THREE.BackSide, transparent:true, opacity:0.95, depthTest:true, depthWrite:false});
+              var hullMesh2 = new THREE.Mesh(hullGeo2, hullMat2);
+              hullMesh2.applyMatrix4(hit.matrixWorld);
+              var hb = new THREE.Box3().setFromObject(hullMesh2);
+              var hc = hb.getCenter(new THREE.Vector3());
+              var hs = hb.getSize(new THREE.Vector3());
+              var bw = 0.03;
+              hullMesh2.position.sub(hc);
+              hullMesh2.scale.set(1+(hs.x>0.01?bw*2/hs.x:0.04),1+(hs.y>0.01?bw*2/hs.y:0.04),1+(hs.z>0.01?bw*2/hs.z:0.04));
+              hullMesh2.position.add(hc);
+              hullMesh2.renderOrder = 997;
+              hlGrp.add(hullMesh2);
+            } catch(e){}
+            try {
+              var edgeGeo2 = new THREE.EdgesGeometry(hit.geometry, 50);
+              var edgeMat2 = new THREE.LineBasicMaterial({color:0x60a5fa, transparent:true, opacity:0.4, depthTest:false});
               var edgeLines2 = new THREE.LineSegments(edgeGeo2, edgeMat2);
               edgeLines2.applyMatrix4(hit.matrixWorld);
-              edgeLines2.renderOrder = 998;
-              scene.add(edgeLines2);
-              hlRef.current = edgeLines2;
-            } catch(e){
-              var box = new THREE.BoxHelper(hit, 0x3b82f6);
-              box.material.linewidth = 2;
-              scene.add(box);
-              hlRef.current = box;
-            }
+              edgeLines2.renderOrder = 999;
+              hlGrp.add(edgeLines2);
+            } catch(e){}
+            scene.add(hlGrp);
+            hlRef.current = hlGrp;
+
             var hitBox = new THREE.Box3().setFromObject(hit);
             var hitCtr = hitBox.getCenter(new THREE.Vector3());
             var hitPt = [hitCtr.x, hitCtr.y, hitCtr.z];
@@ -1738,21 +1775,6 @@ function startApp() {
             // Normal click: outline only, no transparency
             unghostAll();
             if(outlineRef.current){scene.remove(outlineRef.current);outlineRef.current=null;}
-            if(prefsRef.current.outlineSelected!==false){
-              try {
-                var outGeo = hit.geometry.clone();
-                var outMat = new THREE.MeshBasicMaterial({color:0x3b82f6, side:THREE.BackSide, transparent:true, opacity:0.25});
-                var outMesh = new THREE.Mesh(outGeo, outMat);
-                outMesh.applyMatrix4(hit.matrixWorld);
-                var ob = new THREE.Box3().setFromObject(outMesh);
-                var oc = ob.getCenter(new THREE.Vector3());
-                outMesh.position.sub(oc).multiplyScalar(1.03).add(oc);
-                outMesh.scale.multiplyScalar(1.03);
-                outMesh.renderOrder = -1;
-                scene.add(outMesh);
-                outlineRef.current = outMesh;
-              } catch(e){}
-            }
             // Fly to element on click (if autoFlyTo enabled)
             if(prefsRef.current.autoFlyTo!==false && _flyTo) {
               var elSz = hitBox.getSize(new THREE.Vector3());
@@ -1765,7 +1787,10 @@ function startApp() {
           }
         } else {
           // Click on empty space — deselect
-          if(hlRef.current){scene.remove(hlRef.current);hlRef.current=null;}
+          if(hlRef.current){
+            if(hlRef.current.isGroup) hlRef.current.traverse(function(c){if(c.isMesh||c.isLine||c.isLineSegments){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();}});
+            scene.remove(hlRef.current);hlRef.current=null;
+          }
           if(outlineRef.current){scene.remove(outlineRef.current);outlineRef.current=null;}
           unghostAll();
           setSelectedEl(null);
@@ -2449,67 +2474,103 @@ function startApp() {
         <span>3D Section: ${s.floorPlan.storeyName} · ${(s.floorPlan.elevation+(s.floorPlan.cutHeight||1.2)).toFixed(1)}m</span>
         <span style=${{fontSize:'.6rem',opacity:.7}} title="Exit 3D section">✕</span>
       </div>`}
-      ${selectedEl && html`<div style=${{position:'absolute',bottom:'.75rem',left:'.75rem',width:290,maxHeight:'55%',overflowY:'auto',background:'rgba(15,23,42,.95)',border:'1px solid #334155',borderRadius:8,padding:'.6rem',pointerEvents:'auto',boxShadow:'0 4px 20px rgba(0,0,0,.5)'}}>
-        <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.3rem'}}>
-          <span style=${{fontSize:'.75rem',fontWeight:700,color:'#e2e8f0'}}>${ep&&ep.ifcType||'Element'}</span>
-          <div style=${{display:'flex',gap:'.3rem'}}>
-            <button onClick=${function(){d({t:'MODAL',v:true,el:selectedEl});d({t:'TAB',v:'issues'});}}
-              style=${{...S_BTN,padding:'.15rem .4rem',background:'#2563eb',color:'#fff',fontSize:'.7rem',fontWeight:600,borderRadius:4}}>Create Issue</button>
-            <button onClick=${function(){if(_sboxAroundElements)_sboxAroundElements([selectedEl.expressId]);}}
-              style=${{...S_BTN,padding:'.15rem .3rem',background:'#3b0764',color:'#c084fc',fontSize:'.65rem',borderRadius:4}} title="Section box around element">Box</button>
-            <button onClick=${function(){setSelectedEl(null);if(_unghostAll)_unghostAll();if(hlRef.current&&state3d.current.scene){state3d.current.scene.remove(hlRef.current);hlRef.current=null;}if(outlineRef.current&&state3d.current.scene){state3d.current.scene.remove(outlineRef.current);outlineRef.current=null;}}}
-              style=${{...S_BTN,padding:'0 4px',background:'none',color:'#475569',fontSize:'.75rem'}}>✕</button>
-          </div>
-        </div>
-        ${ep && ep.name && html`<div style=${{fontSize:'.7rem',color:'#e2e8f0',marginBottom:'.15rem',fontWeight:500}}>${ep.name}</div>`}
-        <div style=${{fontSize:'.65rem',color:'#f59e0b',marginBottom:'.2rem'}}>${selectedEl.modelName}</div>
-        <div style=${{display:'flex',flexWrap:'wrap',gap:'.15rem',marginBottom:'.3rem'}}>
-          ${ep && ep.storey && html`<span style=${{fontSize:'.65rem',background:'#1e293b',color:'#34d399',padding:'.1rem .35rem',borderRadius:4}}>${ep.storey}</span>`}
-          ${ep && ep.material && html`<span style=${{fontSize:'.65rem',background:'#1e293b',color:'#fbbf24',padding:'.1rem .35rem',borderRadius:4}}>${ep.material}</span>`}
-          <span style=${{fontSize:'.65rem',background:'#1e293b',color:'#64748b',padding:'.1rem .35rem',borderRadius:4}}>#${selectedEl.expressId}</span>
-        </div>
-        ${ep && ep.objectType && ep.objectType!==ep.ifcType && html`<div style=${{...ROW,fontSize:'.65rem'}}><span style=${{color:'#64748b'}}>Object Type</span><span style=${{color:'#cbd5e1'}}>${ep.objectType}</span></div>`}
-        ${ep && ep.description && html`<div style=${{...ROW,fontSize:'.65rem'}}><span style=${{color:'#64748b'}}>Description</span><span style=${{color:'#cbd5e1'}}>${ep.description}</span></div>`}
-        ${function(){
-          // Show IFC dimensions from quantities
-          var q2 = ep&&ep.quantities||{};
-          var ifcDims = [];
-          var dimKeys = ['Length','Width','Height','Depth','Perimeter','Thickness','Area','Volume','GrossArea','NetArea','GrossSideArea','NetSideArea','GrossVolume','NetVolume','GrossFootprintArea'];
-          dimKeys.forEach(function(k){ if(q2[k]!=null) ifcDims.push({l:k,v:q2[k]}); });
-          if(!ifcDims.length) return null;
-          return html`<div style=${{marginTop:'.3rem',borderTop:'1px solid #1e293b',paddingTop:'.3rem'}}>
-            <div style=${{fontSize:'.65rem',fontWeight:600,color:'#93c5fd',marginBottom:'.15rem'}}>Dimensions</div>
-            ${ifcDims.map(function(dd){
-              var val = typeof dd.v==='number'?(dd.v>=1?(dd.v.toFixed(3)+' m'):((dd.v*1000).toFixed(0)+' mm')):String(dd.v);
-              return html`<div key=${dd.l} style=${{...ROW,fontSize:'.65rem'}}><span style=${{color:'#64748b'}}>${dd.l}</span><span style=${{color:'#cbd5e1'}}>${val}</span></div>`;
-            })}
-          </div>`;
-        }()}
-        ${epQ.length>0 && function(){
-          // Show non-dimension quantities only (filter out ones already in Dimensions)
-          var dimKeys2 = ['Length','Width','Height','Depth','Perimeter','Thickness','Area','Volume','GrossArea','NetArea','GrossSideArea','NetSideArea','GrossVolume','NetVolume','GrossFootprintArea'];
-          var otherQ = epQ.filter(function(k){return dimKeys2.indexOf(k)===-1;});
-          if(!otherQ.length) return null;
-          return html`<div style=${{marginTop:'.3rem',borderTop:'1px solid #1e293b',paddingTop:'.3rem'}}>
-            <div style=${{fontSize:'.65rem',fontWeight:600,color:'#93c5fd',marginBottom:'.15rem'}}>Quantities</div>
-            ${otherQ.map(function(k){return html`<div key=${k} style=${{...ROW,fontSize:'.65rem'}}><span style=${{color:'#64748b'}}>${k}</span><span style=${{color:'#cbd5e1'}}>${typeof ep.quantities[k]==='number'?ep.quantities[k].toFixed(3):ep.quantities[k]}</span></div>`})}
-          </div>`;
-        }()}
-        ${epP.map(function(setName){
-          var ps=ep.psets[setName]; var keys=Object.keys(ps);
-          // Filter out Pset_*Dimensions property sets that duplicate IFC quantities
+      ${selectedEl && function(){
+        // ── Clean element property panel ──
+        // Organize properties into logical sections instead of raw IFC structure
+        var q2 = ep&&ep.quantities||{};
+        var dimKeys = ['Length','Width','Height','Depth','Perimeter','Thickness'];
+        var areaKeys = ['Area','GrossArea','NetArea','GrossSideArea','NetSideArea','GrossFootprintArea'];
+        var volKeys = ['Volume','GrossVolume','NetVolume'];
+        var dims = [], areas = [], vols = [], otherQ = [];
+        dimKeys.forEach(function(k){if(q2[k]!=null) dims.push({l:k,v:q2[k]});});
+        areaKeys.forEach(function(k){if(q2[k]!=null) areas.push({l:k.replace(/^(Gross|Net)/,'$1 ').replace('Footprint','Footprint '),v:q2[k]});});
+        volKeys.forEach(function(k){if(q2[k]!=null) vols.push({l:k.replace(/^(Gross|Net)/,'$1 '),v:q2[k]});});
+        Object.keys(q2).forEach(function(k){if(dimKeys.indexOf(k)===-1&&areaKeys.indexOf(k)===-1&&volKeys.indexOf(k)===-1) otherQ.push({l:k,v:q2[k]});});
+        function fmtDim(v){return typeof v==='number'?(v>=1?v.toFixed(3)+' m':(v*1000).toFixed(0)+' mm'):String(v);}
+        function fmtArea(v){return typeof v==='number'?(v>=1?v.toFixed(2)+' m²':(v*10000).toFixed(0)+' cm²'):String(v);}
+        function fmtVol(v){return typeof v==='number'?(v>=0.01?v.toFixed(3)+' m³':(v*1000000).toFixed(0)+' cm³'):String(v);}
+        // Collect all pset properties, clean up names, group logically
+        var propSections = [];
+        var skipPsets = {};
+        epP.forEach(function(setName){
+          var ps = ep.psets[setName]; var keys = Object.keys(ps);
+          // Skip dimension psets that fully duplicate quantities
           if(setName.match(/Dimensions$/i)){
-            var q3 = ep&&ep.quantities||{};
-            var dimPropNames = ['Height','Width','Length','Depth','Thickness'];
-            var allDuplicates = keys.every(function(k){return dimPropNames.indexOf(k)!==-1 && q3[k]!=null;});
-            if(allDuplicates) return null;
+            var allDup = keys.every(function(k){return q2[k]!=null;});
+            if(allDup){skipPsets[setName]=true;return;}
           }
-          return html`<div key=${setName} style=${{marginTop:'.3rem',borderTop:'1px solid #1e293b',paddingTop:'.3rem'}}>
-            <div style=${{fontSize:'.65rem',fontWeight:600,color:'#93c5fd',marginBottom:'.15rem'}}>${setName}</div>
-            ${keys.map(function(k){return html`<div key=${k} style=${{...ROW,fontSize:'.65rem'}}><span style=${{color:'#64748b'}}>${k}</span><span style=${{color:'#cbd5e1'}}>${String(ps[k])}</span></div>`})}
-          </div>`;
-        })}
-      </div>`}
+          // Clean up section name: remove Pset_ prefix, split CamelCase
+          var cleanName = setName.replace(/^Pset_/,'').replace(/^Qto_/,'').replace(/([a-z])([A-Z])/g,'$1 $2');
+          propSections.push({name:cleanName,props:keys.map(function(k){return {k:k,v:String(ps[k])};})});
+        });
+        // Friendly type name: "IfcWallStandardCase" → "Wall"
+        var typeName = (ep&&ep.ifcType||'Element').replace(/^Ifc/,'').replace(/StandardCase$/,'').replace(/([a-z])([A-Z])/g,'$1 $2');
+        var SEC={marginTop:'.35rem',borderTop:'1px solid #1e293b',paddingTop:'.35rem'};
+        var SECHDR={fontSize:'.6rem',fontWeight:600,color:'#64748b',textTransform:'uppercase',letterSpacing:'.03em',marginBottom:'.15rem'};
+
+        return html`<div style=${{position:'absolute',bottom:'.75rem',left:'.75rem',width:290,maxHeight:'55%',overflowY:'auto',background:'rgba(15,23,42,.95)',border:'1px solid #334155',borderRadius:8,padding:'.6rem',pointerEvents:'auto',boxShadow:'0 4px 20px rgba(0,0,0,.5)'}}>
+          <!-- Header -->
+          <div style=${{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:'.2rem'}}>
+            <div style=${{flex:1,minWidth:0}}>
+              <div style=${{fontSize:'.6rem',color:'#64748b',marginBottom:'.1rem'}}>${typeName}</div>
+              <div style=${{fontSize:'.8rem',fontWeight:700,color:'#e2e8f0',lineHeight:1.2}}>${ep&&ep.name||'Unnamed element'}</div>
+            </div>
+            <div style=${{display:'flex',gap:'.2rem',flexShrink:0,marginLeft:'.3rem'}}>
+              <button onClick=${function(){d({t:'MODAL',v:true,el:selectedEl});d({t:'TAB',v:'issues'});}}
+                style=${{...S_BTN,padding:'.15rem .35rem',background:'#2563eb',color:'#fff',fontSize:'.6rem',borderRadius:4}}>Issue</button>
+              <button onClick=${function(){if(_sboxAroundElements)_sboxAroundElements([selectedEl.expressId]);}}
+                style=${{...S_BTN,padding:'.15rem .25rem',background:'#3b0764',color:'#c084fc',fontSize:'.6rem',borderRadius:4}} title="Section box around element">Box</button>
+              <button onClick=${function(){setSelectedEl(null);if(_unghostAll)_unghostAll();if(hlRef.current&&state3d.current.scene){if(hlRef.current.isGroup)hlRef.current.traverse(function(c){if(c.isMesh||c.isLine||c.isLineSegments){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();}});state3d.current.scene.remove(hlRef.current);hlRef.current=null;}if(outlineRef.current&&state3d.current.scene){state3d.current.scene.remove(outlineRef.current);outlineRef.current=null;}}}
+                style=${{...S_BTN,padding:'0 4px',background:'none',color:'#475569',fontSize:'.7rem'}}>✕</button>
+            </div>
+          </div>
+
+          <!-- Location & Identity -->
+          <div style=${{display:'flex',flexWrap:'wrap',gap:'.15rem',marginBottom:'.15rem'}}>
+            <span style=${{fontSize:'.6rem',background:'#172554',color:'#60a5fa',padding:'.1rem .3rem',borderRadius:4}}>${selectedEl.modelName}</span>
+            ${ep && ep.storey && html`<span style=${{fontSize:'.6rem',background:'#052e16',color:'#34d399',padding:'.1rem .3rem',borderRadius:4}}>${ep.storey}</span>`}
+            ${ep && ep.material && html`<span style=${{fontSize:'.6rem',background:'#422006',color:'#fbbf24',padding:'.1rem .3rem',borderRadius:4}}>${ep.material}</span>`}
+          </div>
+          ${ep && ep.description && html`<div style=${{fontSize:'.6rem',color:'#94a3b8',marginBottom:'.15rem',lineHeight:1.3}}>${ep.description}</div>`}
+          ${ep && ep.objectType && ep.objectType!==(ep&&ep.ifcType) && html`<div style=${{fontSize:'.6rem',color:'#94a3b8',marginBottom:'.15rem'}}>${ep.objectType}</div>`}
+
+          <!-- Dimensions -->
+          ${dims.length>0 && html`<div style=${SEC}>
+            <div style=${SECHDR}>Dimensions</div>
+            <div style=${{display:'flex',flexWrap:'wrap',gap:'.25rem'}}>
+              ${dims.map(function(dd){return html`<div key=${dd.l} style=${{flex:'1 0 45%',display:'flex',justifyContent:'space-between',fontSize:'.65rem',padding:'.05rem 0'}}>
+                <span style=${{color:'#64748b'}}>${dd.l}</span>
+                <span style=${{color:'#e2e8f0',fontWeight:500}}>${fmtDim(dd.v)}</span>
+              </div>`})}
+            </div>
+          </div>`}
+
+          <!-- Area & Volume combined -->
+          ${(areas.length>0||vols.length>0) && html`<div style=${SEC}>
+            <div style=${SECHDR}>Area & Volume</div>
+            ${areas.map(function(dd){return html`<div key=${dd.l} style=${{...ROW,fontSize:'.65rem'}}><span style=${{color:'#64748b'}}>${dd.l}</span><span style=${{color:'#e2e8f0',fontWeight:500}}>${fmtArea(dd.v)}</span></div>`})}
+            ${vols.map(function(dd){return html`<div key=${dd.l} style=${{...ROW,fontSize:'.65rem'}}><span style=${{color:'#64748b'}}>${dd.l}</span><span style=${{color:'#e2e8f0',fontWeight:500}}>${fmtVol(dd.v)}</span></div>`})}
+          </div>`}
+
+          <!-- Other quantities -->
+          ${otherQ.length>0 && html`<div style=${SEC}>
+            <div style=${SECHDR}>Quantities</div>
+            ${otherQ.map(function(dd){return html`<div key=${dd.l} style=${{...ROW,fontSize:'.65rem'}}><span style=${{color:'#64748b'}}>${dd.l}</span><span style=${{color:'#e2e8f0'}}>${typeof dd.v==='number'?dd.v.toFixed(3):String(dd.v)}</span></div>`})}
+          </div>`}
+
+          <!-- Property sets (cleaned names) -->
+          ${propSections.map(function(sec){return html`<div key=${sec.name} style=${SEC}>
+            <div style=${SECHDR}>${sec.name}</div>
+            ${sec.props.map(function(p){return html`<div key=${p.k} style=${{...ROW,fontSize:'.65rem'}}><span style=${{color:'#64748b'}}>${p.k}</span><span style=${{color:'#cbd5e1',maxWidth:'55%',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',textAlign:'right'}} title=${p.v}>${p.v}</span></div>`})}
+          </div>`})}
+
+          <!-- ID footer -->
+          <div style=${{marginTop:'.3rem',paddingTop:'.2rem',borderTop:'1px solid #0f172a',display:'flex',justifyContent:'space-between',fontSize:'.55rem',color:'#334155'}}>
+            <span>${ep&&ep.ifcType||''}</span>
+            <span>#${selectedEl.expressId}</span>
+          </div>
+        </div>`;
+      }()}`}
       <div style=${{position:'absolute',bottom:'.75rem',right:'.75rem',pointerEvents:'auto',display:'flex',flexDirection:'column',gap:'.3rem',alignItems:'flex-end'}}>
         <div style=${{display:'flex',gap:'.2rem',background:'rgba(15,23,42,.92)',border:'1px solid #334155',borderRadius:8,padding:'.3rem'}}>
           <button onClick=${function(){d({t:'MEASURE_MODE',v:s.measureMode?null:'length'});measurePtsRef.current=[];}}
@@ -2897,7 +2958,25 @@ function startApp() {
             return html`<div key=${st}
               onClick=${function(e){
                 e.preventDefault();
-                // Single click: highlight all elements on this storey
+                // Single click: highlight elements on this storey (ghost others, NO fly-to)
+                if(isHighlighted){
+                  // Un-highlight: unghost all
+                  if(_unghostAll) _unghostAll();
+                  d({t:'SET_HIGHLIGHTED_STOREY',v:null});
+                } else {
+                  var ids=[];
+                  s.models.forEach(function(m){
+                    (m.elements||[]).forEach(function(el){
+                      if(el.props&&el.props.storey===st) ids.push(el.expressId);
+                    });
+                  });
+                  if(ids.length && _ghostOthers) _ghostOthers(ids);
+                  d({t:'SET_HIGHLIGHTED_STOREY',v:st});
+                }
+              }}
+              onDblClick=${function(e){
+                e.preventDefault(); e.stopPropagation();
+                // Double click: fly-to + highlight
                 var ids=[];
                 s.models.forEach(function(m){
                   (m.elements||[]).forEach(function(el){
@@ -2908,14 +2987,7 @@ function startApp() {
                   if(_ghostOthers) _ghostOthers(ids);
                   if(_flyToElements) _flyToElements(ids);
                 }
-                d({t:'SET_HIGHLIGHTED_STOREY',v:isHighlighted?null:st});
-              }}
-              onDblClick=${function(e){
-                e.preventDefault(); e.stopPropagation();
-                if(!hasElev) return;
-                // Double click: toggle floor plan cut
-                if(isPlanActive){d({t:'FLOOR_PLAN',v:null});}
-                else{d({t:'FLOOR_PLAN',v:{storeyName:st,elevation:elev,cutHeight:1.2}});}
+                d({t:'SET_HIGHLIGHTED_STOREY',v:st});
               }}
               style=${{display:'flex',alignItems:'center',gap:'.25rem',padding:'.2rem .3rem',cursor:'pointer',borderRadius:4,background:isPlanActive?'#2d1a4e':isHighlighted?'#1e293b':'transparent',transition:'background .15s'}}>
               <span style=${{fontSize:'.6rem',color:isPlanActive?'#c084fc':isHighlighted?'#38bdf8':'#e2e8f0',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontWeight:isHighlighted||isPlanActive?600:400}} title=${st+(hasElev?' ('+elev.toFixed(1)+'m)':'')}>${st}</span>
