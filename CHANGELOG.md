@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.14 (2026-03-21)
+- Fix critical crash on element click and multiple viewer bugs
+
 ## v1.2.12 (2026-03-21)
 - Auto version bumping with changelog and README updates on every commit
 - Lazy rendering for unused UI components (modals, overlays, panels)

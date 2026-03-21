@@ -150,7 +150,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.13',hash:'870edac',date:'2026-03-21T16:19:25Z'};
+  var CC_VERSION = {v:'1.2.14',hash:'eef3312',date:'2026-03-21T16:29:49Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -1209,6 +1209,19 @@ function startApp() {
           g.mesh.material = g.origMaterial;
         });
         _ghostedMeshes = [];
+        // Reset hover tracking to prevent stale material references
+        if(lastHoveredMesh && lastHoverOriginals){
+          try {
+            if(lastHoveredMesh.material && lastHoveredMesh.material !== _ghostMat){
+              if(lastHoveredMesh.material.emissive) lastHoveredMesh.material.emissive.copy(lastHoverOriginals.emissive);
+              lastHoveredMesh.material.opacity = lastHoverOriginals.opacity;
+              lastHoveredMesh.material.needsUpdate = true;
+            }
+          } catch(e){}
+          lastHoveredMesh = null;
+          lastHoverOriginals = null;
+        }
+        if(hoverRef.current){scene.remove(hoverRef.current);if(hoverRef.current.geometry)hoverRef.current.geometry.dispose();if(hoverRef.current.material)hoverRef.current.material.dispose();hoverRef.current=null;}
         invalidate();
       }
       S._ghostOthers = ghostOthers;
@@ -1244,31 +1257,35 @@ function startApp() {
             });
             var hullMesh = new THREE.Mesh(hullGeo, hullMat);
             hullMesh.applyMatrix4(found.matrixWorld);
-            // Scale outward from center for consistent border width
             var hullBox = new THREE.Box3().setFromObject(hullMesh);
-            var hullCtr = hullBox.getCenter(new THREE.Vector3());
-            var hullSize = hullBox.getSize(new THREE.Vector3());
-            // Use absolute offset instead of percentage for consistent border width
-            var borderWidth = 0.03; // meters
-            var sx = 1 + (hullSize.x > 0.01 ? borderWidth*2/hullSize.x : 0.04);
-            var sy = 1 + (hullSize.y > 0.01 ? borderWidth*2/hullSize.y : 0.04);
-            var sz = 1 + (hullSize.z > 0.01 ? borderWidth*2/hullSize.z : 0.04);
-            // Translate to origin, scale, translate back
-            hullMesh.position.sub(hullCtr);
-            hullMesh.scale.set(sx, sy, sz);
-            hullMesh.position.add(hullCtr);
+            if(!hullBox.isEmpty()){
+              var hullCtr = hullBox.getCenter(new THREE.Vector3());
+              var hullSize = hullBox.getSize(new THREE.Vector3());
+              var borderWidth = 0.03;
+              var sx = 1 + (hullSize.x > 0.01 ? borderWidth*2/hullSize.x : 0.04);
+              var sy = 1 + (hullSize.y > 0.01 ? borderWidth*2/hullSize.y : 0.04);
+              var sz = 1 + (hullSize.z > 0.01 ? borderWidth*2/hullSize.z : 0.04);
+              if(isFinite(sx)&&isFinite(sy)&&isFinite(sz)){
+                hullMesh.position.sub(hullCtr);
+                hullMesh.scale.set(sx, sy, sz);
+                hullMesh.position.add(hullCtr);
+              }
+            }
             hullMesh.renderOrder = 997;
             grp.add(hullMesh);
           } catch(e){}
 
-          // 2. Top hard edges only (very high angle threshold = only sharp 90° corners)
+          // 2. Top hard edges only (skip for large geometries >50K faces to avoid freeze)
           try {
-            var edgeGeo = new THREE.EdgesGeometry(found.geometry, 50);
-            var edgeMat = new THREE.LineBasicMaterial({color:0x60a5fa, transparent:true, opacity:0.4, depthTest:false});
-            var edgeLines = new THREE.LineSegments(edgeGeo, edgeMat);
-            edgeLines.applyMatrix4(found.matrixWorld);
-            edgeLines.renderOrder = 999;
-            grp.add(edgeLines);
+            var faceCount = found.geometry.index ? found.geometry.index.count/3 : (found.geometry.attributes.position?found.geometry.attributes.position.count/3:0);
+            if(faceCount < 50000) {
+              var edgeGeo = new THREE.EdgesGeometry(found.geometry, 50);
+              var edgeMat = new THREE.LineBasicMaterial({color:0x60a5fa, transparent:true, opacity:0.4, depthTest:false});
+              var edgeLines = new THREE.LineSegments(edgeGeo, edgeMat);
+              edgeLines.applyMatrix4(found.matrixWorld);
+              edgeLines.renderOrder = 999;
+              grp.add(edgeLines);
+            }
           } catch(e){}
 
           scene.add(grp);
@@ -1500,8 +1517,13 @@ function startApp() {
       var hoverMouse = new THREE.Vector2();
       var lastHoveredMesh = null;
       var lastHoverOriginals = null;
+      var _lastHoverTime = 0;
       renderer.domElement.addEventListener('mousemove', function(e){
         if(!prefsRef.current.hoverHighlight) return;
+        // Throttle hover raycasting to every 50ms for performance
+        var now = performance.now();
+        if(now - _lastHoverTime < 50) return;
+        _lastHoverTime = now;
         var rect = renderer.domElement.getBoundingClientRect();
         hoverMouse.x = ((e.clientX-rect.left)/rect.width)*2-1;
         hoverMouse.y = -((e.clientY-rect.top)/rect.height)*2+1;
@@ -1527,14 +1549,17 @@ function startApp() {
           };
           if(hitMesh.material.emissive) hitMesh.material.emissive.set(0x1e3a5f);
           hitMesh.material.needsUpdate = true;
-          // Add a subtle wireframe overlay
+          // Add a subtle wireframe overlay (skip for large meshes)
           try {
-            var wfGeo = new THREE.WireframeGeometry(hitMesh.geometry);
-            var wfMat = new THREE.LineBasicMaterial({color:0x60a5fa, transparent:true, opacity:0.3});
-            var wf = new THREE.LineSegments(wfGeo, wfMat);
-            wf.applyMatrix4(hitMesh.matrixWorld);
-            scene.add(wf);
-            hoverRef.current = wf;
+            var hfc = hitMesh.geometry.index ? hitMesh.geometry.index.count/3 : (hitMesh.geometry.attributes.position?hitMesh.geometry.attributes.position.count/3:0);
+            if(hfc < 20000) {
+              var wfGeo = new THREE.WireframeGeometry(hitMesh.geometry);
+              var wfMat = new THREE.LineBasicMaterial({color:0x60a5fa, transparent:true, opacity:0.3});
+              var wf = new THREE.LineSegments(wfGeo, wfMat);
+              wf.applyMatrix4(hitMesh.matrixWorld);
+              scene.add(wf);
+              hoverRef.current = wf;
+            }
           } catch(e){}
           renderer.domElement.style.cursor = 'pointer';
         } else {
@@ -1669,10 +1694,14 @@ function startApp() {
         mouse.x = ((e.clientX-rect.left)/rect.width)*2-1;
         mouse.y = -((e.clientY-rect.top)/rect.height)*2+1;
         raycaster.setFromCamera(mouse, camera);
-        var hits = raycaster.intersectObjects(S.mg.children, true);
+        if(!S.mg) return;
+        // Filter out ghosted meshes — clicking them would corrupt shared ghost material
+        var hits = raycaster.intersectObjects(S.mg.children, true).filter(function(h){
+          return h.object.material !== _ghostMat;
+        });
 
         // ── Measurement mode: intercept clicks ──
-        if(measureModeRef.current && hits.length>0) {
+        if(measureModeRef.current && hits.length>0 && hits[0].object.material !== _ghostMat) {
           var hitPt = hits[0].point.clone();
           measurePtsRef.current.push(hitPt);
           // Add a small sphere at click point
@@ -1770,22 +1799,33 @@ function startApp() {
               var hullMesh2 = new THREE.Mesh(hullGeo2, hullMat2);
               hullMesh2.applyMatrix4(hit.matrixWorld);
               var hb = new THREE.Box3().setFromObject(hullMesh2);
-              var hc = hb.getCenter(new THREE.Vector3());
-              var hs = hb.getSize(new THREE.Vector3());
-              var bw = 0.03;
-              hullMesh2.position.sub(hc);
-              hullMesh2.scale.set(1+(hs.x>0.01?bw*2/hs.x:0.04),1+(hs.y>0.01?bw*2/hs.y:0.04),1+(hs.z>0.01?bw*2/hs.z:0.04));
-              hullMesh2.position.add(hc);
+              if(!hb.isEmpty()){
+                var hc = hb.getCenter(new THREE.Vector3());
+                var hs = hb.getSize(new THREE.Vector3());
+                var bw = 0.03;
+                var sx2 = 1+(hs.x>0.01?bw*2/hs.x:0.04);
+                var sy2 = 1+(hs.y>0.01?bw*2/hs.y:0.04);
+                var sz2 = 1+(hs.z>0.01?bw*2/hs.z:0.04);
+                // Guard against NaN/Infinity from degenerate geometry
+                if(isFinite(sx2)&&isFinite(sy2)&&isFinite(sz2)){
+                  hullMesh2.position.sub(hc);
+                  hullMesh2.scale.set(sx2,sy2,sz2);
+                  hullMesh2.position.add(hc);
+                }
+              }
               hullMesh2.renderOrder = 997;
               hlGrp.add(hullMesh2);
             } catch(e){}
             try {
-              var edgeGeo2 = new THREE.EdgesGeometry(hit.geometry, 50);
-              var edgeMat2 = new THREE.LineBasicMaterial({color:0x60a5fa, transparent:true, opacity:0.4, depthTest:false});
-              var edgeLines2 = new THREE.LineSegments(edgeGeo2, edgeMat2);
-              edgeLines2.applyMatrix4(hit.matrixWorld);
-              edgeLines2.renderOrder = 999;
-              hlGrp.add(edgeLines2);
+              var fc2 = hit.geometry.index ? hit.geometry.index.count/3 : (hit.geometry.attributes.position?hit.geometry.attributes.position.count/3:0);
+              if(fc2 < 50000) {
+                var edgeGeo2 = new THREE.EdgesGeometry(hit.geometry, 50);
+                var edgeMat2 = new THREE.LineBasicMaterial({color:0x60a5fa, transparent:true, opacity:0.4, depthTest:false});
+                var edgeLines2 = new THREE.LineSegments(edgeGeo2, edgeMat2);
+                edgeLines2.applyMatrix4(hit.matrixWorld);
+                edgeLines2.renderOrder = 999;
+                hlGrp.add(edgeLines2);
+              }
             } catch(e){}
             scene.add(hlGrp);
             hlRef.current = hlGrp;
@@ -1831,11 +1871,14 @@ function startApp() {
       // Right-click context menu
       renderer.domElement.addEventListener('contextmenu', function(e){
         e.preventDefault();
+        if(!S.mg) return;
         var rect = renderer.domElement.getBoundingClientRect();
         mouse.x = ((e.clientX-rect.left)/rect.width)*2-1;
         mouse.y = -((e.clientY-rect.top)/rect.height)*2+1;
         raycaster.setFromCamera(mouse, camera);
-        var hits = raycaster.intersectObjects(S.mg.children, true);
+        var hits = raycaster.intersectObjects(S.mg.children, true).filter(function(h){
+          return h.object.material !== _ghostMat;
+        });
         if(hits.length>0 && hits[0].face) {
           var hit = hits[0];
           var faceNormal = hit.face.normal.clone();
@@ -1960,9 +2003,11 @@ function startApp() {
           updateCulling();
         }
         // Main render
-        renderer.setViewport(0,0,el.clientWidth,el.clientHeight);
-        renderer.setScissorTest(false);
-        renderer.render(scene,camera);
+        try {
+          renderer.setViewport(0,0,el.clientWidth,el.clientHeight);
+          renderer.setScissorTest(false);
+          renderer.render(scene,camera);
+        } catch(renderErr) { console.warn('Render error:', renderErr); }
         S.perf.frameCount++;
       }
       tick();
@@ -2578,7 +2623,7 @@ function startApp() {
         <span>3D Section: ${s.floorPlan.storeyName} · ${(s.floorPlan.elevation+(s.floorPlan.cutHeight||1.2)).toFixed(1)}m</span>
         <span style=${{fontSize:'.6rem',opacity:.7}} title="Exit 3D section">✕</span>
       </div>`}
-      ${selectedEl && function(){
+      ${selectedEl && function(){ try {
         // ── Clean element property panel ──
         // Organize properties into logical sections instead of raw IFC structure
         var q2 = ep&&ep.quantities||{};
@@ -2673,7 +2718,14 @@ function startApp() {
             <span>#${selectedEl.expressId}</span>
           </div>
         </div>`;
-      }()}
+      } catch(renderErr) {
+        console.warn('Property panel render error:', renderErr);
+        return html`<div style=${{position:'absolute',bottom:'.75rem',left:'.75rem',width:290,background:'var(--overlay-bg-strong)',border:'1px solid var(--border)',borderRadius:8,padding:'.6rem',pointerEvents:'auto'}}>
+          <div style=${{fontSize:'.7rem',color:'#f87171',marginBottom:'.2rem'}}>Error displaying properties</div>
+          <div style=${{fontSize:'.6rem',color:'#64748b'}}>${String(renderErr.message||renderErr)}</div>
+          <button onClick=${function(){setSelectedEl(null)}} style=${{...S_BTN,marginTop:'.3rem',padding:'.2rem .5rem',background:'#1e293b',color:'#94a3b8',fontSize:'.6rem'}}>Dismiss</button>
+        </div>`;
+      }}()}
       ${!selectedEl && html`<div style=${{position:'absolute',bottom:'.75rem',left:'.75rem',pointerEvents:'auto'}}>
         <div style=${{display:'flex',gap:'.2rem',background:'var(--overlay-bg)',border:'1px solid var(--border)',borderRadius:8,padding:'.3rem'}}>
           ${['standard','shaded','rendered','wireframe'].map(function(rs){
@@ -4019,6 +4071,33 @@ function startApp() {
     </div></div>`;
   }
 
+  // ── Error Boundary ─────────────────────────────────────────────
+  // Prevents unhandled render errors from unmounting the entire app (white screen)
+  var ErrorBoundary = (function(){
+    function EB(props){ React.Component.call(this,props); this.state={hasError:false,error:null}; }
+    EB.prototype = Object.create(React.Component.prototype);
+    EB.prototype.constructor = EB;
+    EB.getDerivedStateFromError = function(error){ return {hasError:true, error:error}; };
+    EB.prototype.componentDidCatch = function(error,info){ console.error('ClashControl render error:', error, info); };
+    EB.prototype.render = function(){
+      if(this.state.hasError){
+        var self=this;
+        return h('div',{style:{padding:'2rem',textAlign:'center',color:'#e2e8f0',background:'#0f172a',height:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}},
+          h('div',{style:{width:48,height:48,background:'#2563eb',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:'1rem'}},
+            h('span',{style:{color:'#fff',fontWeight:900,fontSize:18}},'CC')),
+          h('h2',{style:{marginBottom:'.5rem'}},'Something went wrong'),
+          h('p',{style:{color:'#94a3b8',marginBottom:'1rem',maxWidth:400}},String(this.state.error&&this.state.error.message||this.state.error||'Unknown error')),
+          h('div',{style:{display:'flex',gap:'.5rem'}},
+            h('button',{onClick:function(){self.setState({hasError:false,error:null});},style:{padding:'.5rem 1rem',background:'#1e293b',color:'#93c5fd',border:'1px solid #334155',borderRadius:6,cursor:'pointer',fontFamily:'inherit'}},'Try Again'),
+            h('button',{onClick:function(){window.location.reload();},style:{padding:'.5rem 1rem',background:'#2563eb',color:'#fff',border:'none',borderRadius:6,cursor:'pointer',fontFamily:'inherit'}},'Reload App')
+          )
+        );
+      }
+      return this.props.children;
+    };
+    return EB;
+  })();
+
   // ── App ────────────────────────────────────────────────────────
 
   function App() {
@@ -4046,8 +4125,8 @@ function startApp() {
   document.getElementById('boot').style.display = 'none';
   var rootEl = document.getElementById('root');
   var root = ReactDOM.createRoot ? ReactDOM.createRoot(rootEl) : null;
-  if (root) { root.render(html`<${App} />`); }
-  else { ReactDOM.render(html`<${App} />`, rootEl); }
+  if (root) { root.render(h(ErrorBoundary, null, h(App, null))); }
+  else { ReactDOM.render(h(ErrorBoundary, null, h(App, null)), rootEl); }
 
 } // end startApp
 </script>
