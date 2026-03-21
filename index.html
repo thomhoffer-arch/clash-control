@@ -124,7 +124,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.2',hash:'89d77e6',date:'2026-03-21T07:34:32Z'};
+  var CC_VERSION = {v:'1.2.3',hash:'b3e8836',date:'2026-03-21T07:41:51Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -2004,19 +2004,20 @@ function startApp() {
       });
       S._sboxFacePanels=facePanels;
 
-      // --- 6 face-center drag handles (spheres) ---
+      // --- 6 face-center drag handles (spheres) on OUTSIDE of box ---
       var handleSize=Math.max(hx,hy,hz)*0.06;
       handleSize=Math.max(0.05,Math.min(handleSize,0.5));
+      var handleOffset=handleSize*2.5; // push handles outside the box face
       var handleGeo=new THREE.SphereGeometry(handleSize,8,8);
       var handles=[];
-      // Face handle definitions: axis (0=x,1=y,2=z), side (min/max), position
+      // Face handle definitions: axis (0=x,1=y,2=z), side (min/max), position offset outward
       var handleDefs=[
-        {axis:0,side:'max',pos:ctr.clone().addScaledVector(axX,hx),color:0xef4444,dir:axX},   // +X red
-        {axis:0,side:'min',pos:ctr.clone().addScaledVector(axX,-hx),color:0xef4444,dir:axX},   // -X red
-        {axis:1,side:'max',pos:ctr.clone().addScaledVector(axY,hy),color:0x22c55e,dir:axY},    // +Y green
-        {axis:1,side:'min',pos:ctr.clone().addScaledVector(axY,-hy),color:0x22c55e,dir:axY},   // -Y green
-        {axis:2,side:'max',pos:ctr.clone().addScaledVector(axZ,hz),color:0x3b82f6,dir:axZ},    // +Z blue
-        {axis:2,side:'min',pos:ctr.clone().addScaledVector(axZ,-hz),color:0x3b82f6,dir:axZ}    // -Z blue
+        {axis:0,side:'max',pos:ctr.clone().addScaledVector(axX,hx+handleOffset),color:0xef4444,dir:axX},   // +X red
+        {axis:0,side:'min',pos:ctr.clone().addScaledVector(axX,-(hx+handleOffset)),color:0xef4444,dir:axX},   // -X red
+        {axis:1,side:'max',pos:ctr.clone().addScaledVector(axY,hy+handleOffset),color:0x22c55e,dir:axY},    // +Y green
+        {axis:1,side:'min',pos:ctr.clone().addScaledVector(axY,-(hy+handleOffset)),color:0x22c55e,dir:axY},   // -Y green
+        {axis:2,side:'max',pos:ctr.clone().addScaledVector(axZ,hz+handleOffset),color:0x3b82f6,dir:axZ},    // +Z blue
+        {axis:2,side:'min',pos:ctr.clone().addScaledVector(axZ,-(hz+handleOffset)),color:0x3b82f6,dir:axZ}    // -Z blue
       ];
       handleDefs.forEach(function(hd){
         var mat=new THREE.MeshBasicMaterial({color:hd.color,transparent:true,opacity:0.8,depthTest:false});
@@ -2033,17 +2034,33 @@ function startApp() {
 
       S._sboxHandles=handles;
 
-      // --- Rotation ring on top face ---
-      var ringRadius=Math.max(hx,hz)*0.7;
-      var ringGeo=new THREE.TorusGeometry(ringRadius,handleSize*0.35,8,32);
-      var ringMat=new THREE.MeshBasicMaterial({color:0xf59e0b,transparent:true,opacity:0.6,depthTest:false});
+      // --- Rotation ring floating above top face with constant size ---
+      var ringRadius=1.2; // constant size, independent of box dimensions
+      var ringTubeRadius=0.04;
+      var ringFloatHeight=Math.max(hy*0.3,0.5); // float above box
+      var ringGeo=new THREE.TorusGeometry(ringRadius,ringTubeRadius,8,48);
+      var ringMat=new THREE.MeshBasicMaterial({color:0xf59e0b,transparent:true,opacity:0.7,depthTest:false});
       var ring=new THREE.Mesh(ringGeo,ringMat);
-      ring.position.copy(ctr).addScaledVector(axY,hy);
+      var ringY=hy+ringFloatHeight;
+      ring.position.copy(ctr).addScaledVector(axY,ringY);
       ring.rotation.x=Math.PI/2; // lay flat
       ring.userData._sboxRotation=true;
       ring.renderOrder=999;
       S.scene.add(ring);
       S._sboxRotRing=ring;
+
+      // --- Connecting line from box top to rotation ring ---
+      var lineGeo=new THREE.BufferGeometry().setFromPoints([
+        ctr.clone().addScaledVector(axY,hy),
+        ctr.clone().addScaledVector(axY,ringY)
+      ]);
+      var lineMat2=new THREE.LineBasicMaterial({color:0xf59e0b,transparent:true,opacity:0.35});
+      var connLine=new THREE.Line(lineGeo,lineMat2);
+      connLine.userData._sboxPart=true;
+      connLine.renderOrder=999;
+      S.scene.add(connLine);
+      if(!S._sboxFacePanels) S._sboxFacePanels=[];
+      S._sboxFacePanels.push(connLine); // cleaned up with face panels
     }, [s.sectionBox]);
 
     // Floor plan: Dalux-style 3D section cut (single clip from above, angled 3D view)
@@ -2597,7 +2614,7 @@ function startApp() {
     return html`<div style=${{marginTop:'.4rem'}}>
       <button onClick=${toggleSectionBox}
         style=${{...S_BTN,width:'100%',padding:'.25rem',background:active?'#7c3aed':'#1e293b',color:active?'#fff':'#64748b',border:'1px solid '+(active?'#7c3aed':'#334155'),marginBottom:active?'.4rem':0}}>
-        ${active?'Section Box ON':'Section Box'}
+        ${active?'Section Box OFF':'Section Box'}
       </button>
       ${active && html`<div style=${{fontSize:'.55rem',color:'#64748b',padding:'.2rem 0'}}>
         <div style=${{marginBottom:'.2rem'}}>Drag handles to resize · Ring to rotate</div>
@@ -2724,6 +2741,23 @@ function startApp() {
     function onDragOver(e){e.preventDefault();e.stopPropagation();setDragging(true);}
     function onDragLeave(e){e.preventDefault();e.stopPropagation();setDragging(false);}
 
+    var splitSt = useState(50), splitPct=splitSt[0], setSplitPct=splitSt[1];
+    var splitDrag = useRef(null);
+    function onSplitDown(e){
+      e.preventDefault();
+      splitDrag.current={startY:e.clientY,startPct:splitPct};
+      function onMove(ev){
+        if(!splitDrag.current) return;
+        var dy=ev.clientY-splitDrag.current.startY;
+        var aside=ev.target.closest?ev.target.closest('aside'):null;
+        var h=aside?aside.offsetHeight:500;
+        var newPct=splitDrag.current.startPct+(dy/h)*100;
+        setSplitPct(Math.max(15,Math.min(85,newPct)));
+      }
+      function onUp(){splitDrag.current=null;window.removeEventListener('mousemove',onMove);window.removeEventListener('mouseup',onUp);}
+      window.addEventListener('mousemove',onMove);
+      window.addEventListener('mouseup',onUp);
+    }
     return html`<aside style=${{...S_PANEL,width:240}} onDrop=${onDrop} onDragOver=${onDragOver} onDragLeave=${onDragLeave}>
       <div style=${{padding:'.75rem',borderBottom:'1px solid #1e293b',flexShrink:0}}>
         <div style=${{display:'flex',justifyContent:'space-between',marginBottom:'.4rem'}}>
@@ -2737,9 +2771,13 @@ function startApp() {
         </button>
         ${err && html`<div style=${{marginTop:'.4rem',padding:'.4rem',background:'#450a0a',border:'1px solid #7f1d1d',borderRadius:6,fontSize:'.7rem',color:'#fca5a5',whiteSpace:'pre-line'}}>${err}</div>`}
       </div>
-      <div style=${{flex:1,overflowY:'auto',padding:'.4rem',display:'flex',flexDirection:'column',gap:'.25rem'}}>
+      <div style=${{flex:splitPct,overflowY:'auto',padding:'.4rem',display:'flex',flexDirection:'column',gap:'.25rem',minHeight:0}}>
         ${s.models.length===0 && html`<div style=${{textAlign:'center',color:'#334155',fontSize:'.75rem',padding:'2rem 0'}}><div style=${{fontSize:'2rem',marginBottom:'.3rem'}}>📁</div>No models loaded</div>`}
         ${s.models.map(function(m){return html`<${ModelCard} key=${m.id} m=${m} d=${d} />`})}
+      </div>
+      <div onMouseDown=${onSplitDown}
+        style=${{height:6,flexShrink:0,cursor:'row-resize',background:'#1e293b',borderTop:'1px solid #334155',borderBottom:'1px solid #334155',display:'flex',alignItems:'center',justifyContent:'center'}}>
+        <span style=${{width:20,height:2,background:'#475569',borderRadius:1}}></span>
       </div>
       ${function(){
         // Collect all unique storeys across all models for global toggle + floor plan cuts
@@ -2758,7 +2796,7 @@ function startApp() {
         var stKeys = Object.keys(allStoreys).sort(function(a,b){return (elevMap[a]||0)-(elevMap[b]||0)});
         if(stKeys.length===0) return null;
         var activePlan = s.floorPlan;
-        return html`<div style=${{padding:'.5rem .75rem',borderTop:'1px solid #1e293b',flexShrink:0,maxHeight:180,overflowY:'auto'}}>
+        return html`<div style=${{padding:'.5rem .75rem',flex:100-splitPct,overflowY:'auto',minHeight:0}}>
           <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.3rem'}}>
             <span style=${{fontSize:'.65rem',fontWeight:600,color:'#64748b',textTransform:'uppercase',letterSpacing:'.05em'}}>Levels</span>
             <div style=${{display:'flex',gap:'.2rem'}}>
@@ -2948,15 +2986,19 @@ function startApp() {
           </div>
         </div>`}
         ${classView && total>0 && html`<div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'.15rem'}}>
-          <span style=${{fontSize:'.55rem',color:'#475569'}}>${keys.length} groups · ${total} elements</span>
+          <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
+            <span onClick=${function(){if(hiddenCount>0){d({t:'SHOW_ALL_CLASSES'})}else{d({t:'HIDE_ALL_CLASSES',view:classView})}}}
+              style=${{width:12,height:12,borderRadius:2,border:'2px solid '+(hiddenCount===0?'#3b82f6':hiddenCount<keys.length?'#64748b':'#475569'),background:hiddenCount===0?'#3b82f6':hiddenCount<keys.length?'#334155':'transparent',cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}
+              title=${hiddenCount>0?'Show all':'Hide all'}>
+              ${hiddenCount===0 && html`<span style=${{color:'#fff',fontSize:8}}>✓</span>`}
+              ${hiddenCount>0 && hiddenCount<keys.length && html`<span style=${{color:'#fff',fontSize:8}}>-</span>`}
+            </span>
+            <span style=${{fontSize:'.55rem',color:'#475569'}}>${keys.length} groups · ${total} elements</span>
+          </div>
           <div style=${{display:'flex',gap:'.2rem'}}>
             <button onClick=${function(){d({t:'COLOR_BY_CLASS',v:classView})}}
               style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:s.colorByClass===classView?'#7c3aed':'#1e293b',color:s.colorByClass===classView?'#fff':'#475569'}}
               title="Color elements by this classification">Color</button>
-            <button onClick=${function(){d({t:'SHOW_ALL_CLASSES'})}}
-              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Show all</button>
-            <button onClick=${function(){d({t:'HIDE_ALL_CLASSES',view:classView})}}
-              style=${{...S_BTN,fontSize:'.5rem',padding:'.1rem .3rem',background:'#0f172a',color:'#64748b'}}>Hide all</button>
           </div>
         </div>`}
         ${classView && hiddenCount>0 && html`<div style=${{fontSize:'.5rem',color:'#f59e0b',marginTop:'.15rem'}}>${hiddenCount} group${hiddenCount>1?'s':''} hidden</div>`}
