@@ -150,7 +150,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.12',hash:'c584b5a',date:'2026-03-21T08:52:34Z'};
+  var CC_VERSION = {v:'1.2.13',hash:'870edac',date:'2026-03-21T16:19:25Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -313,7 +313,7 @@ function startApp() {
     try {
       var line = api.GetLine(modelID, expressID);
       if (line) {
-        props.ifcType = line.__proto__.constructor.name || line.type || '';
+        props.ifcType = String(line.__proto__.constructor.name || line.type || '');
         // Try to get a readable type name from the IFC type number
         if (line.constructor && line.constructor.name) props.ifcType = line.constructor.name;
         props.name = safeStr(line.Name);
@@ -1509,14 +1509,16 @@ function startApp() {
         var hits = hoverRaycaster.intersectObjects(S.mg.children, true);
         var hitMesh = null;
         if(hits.length>0 && hits[0].object.isMesh) hitMesh = hits[0].object;
+        // Skip ghosted meshes — don't mutate the shared ghost material
+        if(hitMesh && hitMesh.material === _ghostMat) hitMesh = null;
         if(hitMesh===lastHoveredMesh) return;
         // Restore previous
-        if(lastHoveredMesh && lastHoverOriginals){
-          lastHoveredMesh.material.emissive = lastHoverOriginals.emissive;
+        if(lastHoveredMesh && lastHoverOriginals && lastHoveredMesh.material && lastHoveredMesh.material !== _ghostMat){
+          if(lastHoveredMesh.material.emissive) lastHoveredMesh.material.emissive.copy(lastHoverOriginals.emissive);
           lastHoveredMesh.material.opacity = lastHoverOriginals.opacity;
           lastHoveredMesh.material.needsUpdate = true;
         }
-        if(hoverRef.current){scene.remove(hoverRef.current);hoverRef.current=null;}
+        if(hoverRef.current){scene.remove(hoverRef.current);if(hoverRef.current.geometry)hoverRef.current.geometry.dispose();if(hoverRef.current.material)hoverRef.current.material.dispose();hoverRef.current=null;}
         if(hitMesh){
           // Store originals and apply hover effect
           lastHoverOriginals = {
@@ -1746,6 +1748,7 @@ function startApp() {
           var hit = hits[0].object;
           var eid = hit.userData.expressID;
           if(eid!=null) {
+            try {
             // Find element props from models
             var found = null;
             var curModels = modelsRef.current;
@@ -1811,6 +1814,7 @@ function startApp() {
               var elDist = elMaxDim * elScale;
               _flyTo(hitPt, elDist, hitNormal ? {normal:hitNormal} : null);
             }
+            } catch(pickErr) { console.warn('Element pick failed:', pickErr.message||pickErr); }
           }
         } else {
           // Click on empty space — deselect
@@ -1832,7 +1836,7 @@ function startApp() {
         mouse.y = -((e.clientY-rect.top)/rect.height)*2+1;
         raycaster.setFromCamera(mouse, camera);
         var hits = raycaster.intersectObjects(S.mg.children, true);
-        if(hits.length>0) {
+        if(hits.length>0 && hits[0].face) {
           var hit = hits[0];
           var faceNormal = hit.face.normal.clone();
           // Transform normal from object space to world space
@@ -2591,20 +2595,19 @@ function startApp() {
         function fmtVol(v){return typeof v==='number'?(v>=0.01?v.toFixed(3)+' m³':(v*1000000).toFixed(0)+' cm³'):String(v);}
         // Collect all pset properties, clean up names, group logically
         var propSections = [];
-        var skipPsets = {};
         epP.forEach(function(setName){
           var ps = ep.psets[setName]; var keys = Object.keys(ps);
           // Skip dimension psets that fully duplicate quantities
           if(setName.match(/Dimensions$/i)){
             var allDup = keys.every(function(k){return q2[k]!=null;});
-            if(allDup){skipPsets[setName]=true;return;}
+            if(allDup) return;
           }
           // Clean up section name: remove Pset_ prefix, split CamelCase
           var cleanName = setName.replace(/^Pset_/,'').replace(/^Qto_/,'').replace(/([a-z])([A-Z])/g,'$1 $2');
           propSections.push({name:cleanName,props:keys.map(function(k){return {k:k,v:String(ps[k])};})});
         });
         // Friendly type name: "IfcWallStandardCase" → "Wall"
-        var typeName = (ep&&ep.ifcType||'Element').replace(/^Ifc/,'').replace(/StandardCase$/,'').replace(/([a-z])([A-Z])/g,'$1 $2');
+        var typeName = String(ep&&ep.ifcType||'Element').replace(/^Ifc/,'').replace(/StandardCase$/,'').replace(/([a-z])([A-Z])/g,'$1 $2');
         var SEC={marginTop:'.35rem',borderTop:'1px solid #1e293b',paddingTop:'.35rem'};
         var SECHDR={fontSize:'.6rem',fontWeight:600,color:'#64748b',textTransform:'uppercase',letterSpacing:'.03em',marginBottom:'.15rem'};
 
@@ -2839,9 +2842,6 @@ function startApp() {
       <canvas ref=${canvasRef} width="120" height="120" style=${{display:'block',borderRadius:8}} />
     </div>`;
   }
-
-  // Expose fly-to-view for the cube
-  var _flyToViewFn = null;
 
   // ── Section Box UI ──────────────────────────────────────────
   var _getSectionBoxFromScene = null; // set in Viewer
