@@ -8,7 +8,7 @@
   <meta name="theme-color" content="#0f172a">
 
   <!-- CSP: restrict resource loading to known CDN origins -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://esm.sh https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src https://esm.sh https://cdn.jsdelivr.net blob:; worker-src blob:; img-src 'self' blob: data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://esm.sh https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src https://esm.sh https://cdn.jsdelivr.net blob:; worker-src blob:; img-src 'self' blob: data:;">
 
   <!-- CDN deps: React, Three.js, JSZip — all UMD, all cdnjs -->
   <!-- SRI hashes: regenerate with `node scripts/generate-sri.js` if you change versions -->
@@ -171,7 +171,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.17',hash:'aa5e701',date:'2026-03-21T20:21:20Z'};
+  var CC_VERSION = {v:'1.2.18',hash:'9f5354b',date:'2026-03-22T07:23:57Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -246,7 +246,10 @@ function startApp() {
     treeOpen:false,
     // Floor plan cut
     floorPlan:null, // {storeyName, elevation, cutHeight} or null
-    _highlightedStorey:null
+    _highlightedStorey:null,
+    // Projects
+    activeProject:getActiveProjectId(),
+    projectList:ensureDefaultProject()
   };
   function reducer(s,a) {
     switch(a.t) {
@@ -286,6 +289,9 @@ function startApp() {
       case 'TREE':         return Object.assign({},s,{treeOpen:a.v});
       case 'FLOOR_PLAN':   return Object.assign({},s,{floorPlan:a.v, sectionAxis:null, sectionCustom:null, sectionBox:null});
       case 'SET_HIGHLIGHTED_STOREY': return Object.assign({},s,{_highlightedStorey:a.v});
+      case 'SET_PROJECT':  return Object.assign({},s,{activeProject:a.id});
+      case 'SET_PROJECT_LIST': return Object.assign({},s,{projectList:a.v});
+      case 'LOAD_PROJECT_STATE': return Object.assign({},s,a.data);
       default:            return s;
     }
   }
@@ -293,22 +299,27 @@ function startApp() {
   // ── IndexedDB persistence for IFC files ────────────────────────
   var IDB_NAME = 'ClashControlFiles';
   var IDB_STORE = 'ifcFiles';
-  var IDB_VERSION = 1;
+  var IDB_PROJSTORE = 'projects';
+  var IDB_VERSION = 2;
 
   function _openIDB() {
     return new Promise(function(resolve, reject) {
       var req = indexedDB.open(IDB_NAME, IDB_VERSION);
-      req.onupgradeneeded = function(e) { e.target.result.createObjectStore(IDB_STORE, {keyPath:'id'}); };
+      req.onupgradeneeded = function(e) {
+        var db = e.target.result;
+        if(!db.objectStoreNames.contains(IDB_STORE)) db.createObjectStore(IDB_STORE, {keyPath:'id'});
+        if(!db.objectStoreNames.contains(IDB_PROJSTORE)) db.createObjectStore(IDB_PROJSTORE, {keyPath:'id'});
+      };
       req.onsuccess = function(e) { resolve(e.target.result); };
       req.onerror = function(e) { reject(e.target.error); };
     });
   }
 
-  function idbSaveFile(id, name, buffer) {
+  function idbSaveFile(id, name, buffer, projectId) {
     return _openIDB().then(function(db) {
       return new Promise(function(resolve, reject) {
         var tx = db.transaction(IDB_STORE, 'readwrite');
-        tx.objectStore(IDB_STORE).put({id:id, name:name, buffer:buffer, savedAt:Date.now()});
+        tx.objectStore(IDB_STORE).put({id:id, name:name, buffer:buffer, projectId:projectId||'default', savedAt:Date.now()});
         tx.oncomplete = function() { resolve(); };
         tx.onerror = function(e) { reject(e.target.error); };
       });
@@ -326,26 +337,89 @@ function startApp() {
     }).catch(function(e) { console.warn('Failed to delete IFC from IndexedDB:', e); });
   }
 
-  function idbGetAllFiles() {
+  function idbGetProjectFiles(projectId) {
     return _openIDB().then(function(db) {
       return new Promise(function(resolve, reject) {
         var tx = db.transaction(IDB_STORE, 'readonly');
         var req = tx.objectStore(IDB_STORE).getAll();
-        req.onsuccess = function() { resolve(req.result||[]); };
+        req.onsuccess = function() {
+          var all = req.result||[];
+          resolve(all.filter(function(f){ return f.projectId===(projectId||'default'); }));
+        };
         req.onerror = function(e) { reject(e.target.error); };
       });
     }).catch(function(e) { console.warn('Failed to read IndexedDB:', e); return []; });
   }
 
-  function idbClearAll() {
+  function idbDeleteProjectFiles(projectId) {
+    return idbGetProjectFiles(projectId).then(function(files){
+      return _openIDB().then(function(db){
+        return new Promise(function(resolve, reject){
+          var tx = db.transaction(IDB_STORE, 'readwrite');
+          var store = tx.objectStore(IDB_STORE);
+          files.forEach(function(f){ store.delete(f.id); });
+          tx.oncomplete = function(){ resolve(); };
+          tx.onerror = function(e){ reject(e.target.error); };
+        });
+      });
+    });
+  }
+
+  // ── Project session data (clashes, issues, rules, etc.) ───────
+  function idbSaveProjectData(projectId, data) {
     return _openIDB().then(function(db) {
       return new Promise(function(resolve, reject) {
-        var tx = db.transaction(IDB_STORE, 'readwrite');
-        tx.objectStore(IDB_STORE).clear();
+        var tx = db.transaction(IDB_PROJSTORE, 'readwrite');
+        tx.objectStore(IDB_PROJSTORE).put(Object.assign({id:projectId||'default'}, data));
         tx.oncomplete = function() { resolve(); };
         tx.onerror = function(e) { reject(e.target.error); };
       });
-    }).catch(function(e) { console.warn('Failed to clear IndexedDB:', e); });
+    }).catch(function(e) { console.warn('Failed to save project data:', e); });
+  }
+
+  function idbGetProjectData(projectId) {
+    return _openIDB().then(function(db) {
+      return new Promise(function(resolve, reject) {
+        var tx = db.transaction(IDB_PROJSTORE, 'readonly');
+        var req = tx.objectStore(IDB_PROJSTORE).get(projectId||'default');
+        req.onsuccess = function() { resolve(req.result||null); };
+        req.onerror = function(e) { reject(e.target.error); };
+      });
+    }).catch(function(e) { console.warn('Failed to load project data:', e); return null; });
+  }
+
+  function idbDeleteProjectData(projectId) {
+    return _openIDB().then(function(db) {
+      return new Promise(function(resolve, reject) {
+        var tx = db.transaction(IDB_PROJSTORE, 'readwrite');
+        tx.objectStore(IDB_PROJSTORE).delete(projectId||'default');
+        tx.oncomplete = function() { resolve(); };
+        tx.onerror = function(e) { reject(e.target.error); };
+      });
+    }).catch(function(e) { console.warn('Failed to delete project data:', e); });
+  }
+
+  // ── Project list (stored in localStorage) ─────────────────────
+  function getProjects() {
+    try { return JSON.parse(localStorage.getItem('cc_projects')||'[]'); }
+    catch(e) { return []; }
+  }
+  function saveProjects(list) {
+    try { localStorage.setItem('cc_projects', JSON.stringify(list)); } catch(e) {}
+  }
+  function getActiveProjectId() {
+    return localStorage.getItem('cc_activeProject')||'default';
+  }
+  function setActiveProjectId(id) {
+    try { localStorage.setItem('cc_activeProject', id); } catch(e) {}
+  }
+  function ensureDefaultProject() {
+    var list = getProjects();
+    if(!list.find(function(p){return p.id==='default';})){
+      list.unshift({id:'default', name:'Default Project', createdAt:Date.now()});
+      saveProjects(list);
+    }
+    return list;
   }
 
   // ── IFC Loader (web-ifc, lazy) ─────────────────────────────────
@@ -2016,6 +2090,22 @@ function startApp() {
 
       var mg = new THREE.Group(); scene.add(mg); S.mg = mg;
 
+      // Clear all model meshes from scene (used by project switch)
+      window._ccClearScene = function() {
+        while(mg.children.length>0) {
+          var child = mg.children[0];
+          mg.remove(child);
+          if(child.traverse) child.traverse(function(c){
+            if(c.geometry) c.geometry.dispose();
+            if(c.material) {
+              if(Array.isArray(c.material)) c.material.forEach(function(m){m.dispose();});
+              else c.material.dispose();
+            }
+          });
+        }
+        invalidate();
+      };
+
       // FPS tracking
       S.perf = {fps:0, frameCount:0, lastTime:performance.now(), tris:0, meshCount:0, drawCalls:0};
       // ── Frustum culling + distance-based LOD ──
@@ -2070,7 +2160,10 @@ function startApp() {
           S.perf.lastTime = now;
           S.perf.drawCalls = renderer.info.render.calls;
           S.perf.tris = renderer.info.render.triangles;
-          S.perf.meshCount = renderer.info.memory.geometries;
+          // Count only model geometries (inside S.mg group), not scene helpers
+          var modelGeoCount = 0;
+          S.mg.traverse(function(c){ if(c.geometry) modelGeoCount++; });
+          S.perf.meshCount = modelGeoCount;
         }
         // Render on demand: skip if nothing changed
         if(_needsRender <= 0) return;
@@ -2881,50 +2974,232 @@ function startApp() {
     </div>`;
   }
 
-  // ── View Cube (Revit-style navigation) ──────────────────────
+  // ── View Cube (Revit-style 3D cube with compass) ──────────────
   function ViewCube(props) {
     var state3d = props.state3d;
-    var views = [
-      {label:'Front', dir:[0,0,1]},
-      {label:'Back',  dir:[0,0,-1]},
-      {label:'Left',  dir:[-1,0,0]},
-      {label:'Right', dir:[1,0,0]},
-      {label:'Top',   dir:[0,1,0]},
-      {label:'Bottom',dir:[0,-1,0]}
+    var canvasRef = useRef(null);
+    var vcState = useRef(null);
+    var hoveredFace = useState(null), hovered=hoveredFace[0], setHovered=hoveredFace[1];
+
+    // Face definitions: label, normal direction, up vector
+    var FACES = [
+      {label:'FRONT',  normal:[0,0,1],   up:[0,1,0]},
+      {label:'BACK',   normal:[0,0,-1],  up:[0,1,0]},
+      {label:'RIGHT',  normal:[1,0,0],   up:[0,1,0]},
+      {label:'LEFT',   normal:[-1,0,0],  up:[0,1,0]},
+      {label:'TOP',    normal:[0,1,0],   up:[0,0,-1]},
+      {label:'BOTTOM', normal:[0,-1,0],  up:[0,0,1]}
     ];
+    // Edge definitions: midpoints between two face normals
+    var EDGES = [
+      {dir:[0,1,1],   up:[0,1,0]},   // front-top
+      {dir:[0,-1,1],  up:[0,-1,0]},  // front-bottom
+      {dir:[1,0,1],   up:[0,1,0]},   // front-right
+      {dir:[-1,0,1],  up:[0,1,0]},   // front-left
+      {dir:[0,1,-1],  up:[0,1,0]},   // back-top
+      {dir:[0,-1,-1], up:[0,-1,0]},  // back-bottom
+      {dir:[1,0,-1],  up:[0,1,0]},   // back-right
+      {dir:[-1,0,-1], up:[0,1,0]},   // back-left
+      {dir:[1,1,0],   up:[0,1,0]},   // top-right
+      {dir:[-1,1,0],  up:[0,1,0]},   // top-left
+      {dir:[1,-1,0],  up:[0,-1,0]},  // bottom-right
+      {dir:[-1,-1,0], up:[0,-1,0]}   // bottom-left
+    ];
+    // Corner definitions: all 8 corners
+    var CORNERS = [
+      {dir:[1,1,1]},  {dir:[-1,1,1]},  {dir:[1,-1,1]},  {dir:[-1,-1,1]},
+      {dir:[1,1,-1]}, {dir:[-1,1,-1]}, {dir:[1,-1,-1]}, {dir:[-1,-1,-1]}
+    ];
+
     function flyToDir(dir) {
       var S=state3d.current; if(!S||!S.orbit||!S.mg) return;
       var modelBox=S.mg.children.length>0?new THREE.Box3().setFromObject(S.mg):new THREE.Box3(new THREE.Vector3(-5,-5,-5),new THREE.Vector3(5,5,5));
       var ctr=modelBox.getCenter(new THREE.Vector3());
       var sz=modelBox.getSize(new THREE.Vector3());
       var dist=Math.max(sz.x,sz.y,sz.z)*1.5;
-      var viewDir=new THREE.Vector3(dir[0],dir[1],dir[2]);
-      if(Math.abs(viewDir.y)>0.9) viewDir.set(0.3,viewDir.y>0?0.85:-0.85,0.3).normalize();
+      var viewDir=new THREE.Vector3(dir[0],dir[1],dir[2]).normalize();
       var endPos=ctr.clone().addScaledVector(viewDir,dist);
       if(window._ccFlyToView) window._ccFlyToView(ctr,endPos);
     }
-    var wrapStyle = {position:'absolute',top:'.5rem',right:'.5rem',pointerEvents:'auto',
-      display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:'2px',
-      background:'var(--vc-bg,rgba(30,41,59,.85))',borderRadius:6,padding:3,
-      backdropFilter:'blur(8px)',WebkitBackdropFilter:'blur(8px)',border:'1px solid var(--vc-border,rgba(71,85,105,.6))'};
-    var btnBase = {border:'none',cursor:'pointer',fontSize:'.55rem',fontWeight:600,fontFamily:'system-ui,sans-serif',
-      letterSpacing:'.03em',textTransform:'uppercase',borderRadius:3,padding:'4px 0',textAlign:'center',
-      transition:'background .15s,color .15s',lineHeight:1,
-      background:'var(--vc-btn,rgba(51,65,85,.7))',color:'var(--vc-text,#cbd5e1)'};
-    var btnHover = function(e){e.target.style.background='var(--accent)';e.target.style.color='#fff';};
-    var btnLeave = function(e){e.target.style.background='var(--vc-btn,rgba(51,65,85,.7))';e.target.style.color='var(--vc-text,#cbd5e1)';};
-    // Layout: row1=[_,Top,_] row2=[Left,Front,Right] row3=[_,Bottom,_] row4=[Back across 3 cols]
-    return html`<div style=${wrapStyle}>
-      <span />
-      <button style=${btnBase} onMouseEnter=${btnHover} onMouseLeave=${btnLeave} onClick=${function(){flyToDir(views[4].dir)}} title="Top view">Top</button>
-      <span />
-      <button style=${btnBase} onMouseEnter=${btnHover} onMouseLeave=${btnLeave} onClick=${function(){flyToDir(views[2].dir)}} title="Left view">Left</button>
-      <button style=${Object.assign({},btnBase,{background:'var(--vc-center,rgba(37,99,235,.5))',color:'var(--text-primary)'})} onMouseEnter=${btnHover} onMouseLeave=${btnLeave} onClick=${function(){flyToDir(views[0].dir)}} title="Front view">Front</button>
-      <button style=${btnBase} onMouseEnter=${btnHover} onMouseLeave=${btnLeave} onClick=${function(){flyToDir(views[3].dir)}} title="Right view">Right</button>
-      <span />
-      <button style=${btnBase} onMouseEnter=${btnHover} onMouseLeave=${btnLeave} onClick=${function(){flyToDir(views[5].dir)}} title="Bottom view">Bot</button>
-      <span />
-      <button style=${Object.assign({},btnBase,{gridColumn:'1/4',fontSize:'.5rem'})} onMouseEnter=${btnHover} onMouseLeave=${btnLeave} onClick=${function(){flyToDir(views[1].dir)}} title="Back view">Back</button>
+
+    // Create face texture with label
+    function makeFaceTexture(label, isHovered) {
+      var c = document.createElement('canvas');
+      c.width=128; c.height=128;
+      var ctx=c.getContext('2d');
+      // Background
+      ctx.fillStyle = isHovered ? '#3b82f6' : 'rgba(51,65,85,0.85)';
+      ctx.fillRect(0,0,128,128);
+      // Border
+      ctx.strokeStyle = 'rgba(148,163,184,0.4)';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(1,1,126,126);
+      // Label
+      ctx.fillStyle = isHovered ? '#ffffff' : '#cbd5e1';
+      ctx.font = 'bold 18px system-ui, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, 64, 64);
+      var tex = new THREE.CanvasTexture(c);
+      tex.minFilter = THREE.LinearFilter;
+      return tex;
+    }
+
+    useEffect(function() {
+      var canvas = canvasRef.current;
+      if(!canvas || vcState.current) return;
+
+      var size = 120;
+      var renderer = new THREE.WebGLRenderer({canvas:canvas, alpha:true, antialias:true});
+      renderer.setSize(size, size);
+      renderer.setPixelRatio(window.devicePixelRatio);
+
+      var scene = new THREE.Scene();
+      var camera = new THREE.OrthographicCamera(-1.8,1.8,1.8,-1.8,0.1,10);
+      camera.position.set(2,2,2);
+      camera.lookAt(0,0,0);
+
+      // Ambient + directional light
+      scene.add(new THREE.AmbientLight(0xffffff, 0.6));
+      var dLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      dLight.position.set(2,3,2);
+      scene.add(dLight);
+
+      // Build cube from 6 face planes
+      var cubeGroup = new THREE.Group();
+      var faceMeshes = [];
+      FACES.forEach(function(f, i) {
+        var geo = new THREE.PlaneGeometry(0.98, 0.98);
+        var tex = makeFaceTexture(f.label, false);
+        var mat = new THREE.MeshBasicMaterial({map:tex, side:THREE.FrontSide, transparent:true});
+        var mesh = new THREE.Mesh(geo, mat);
+        // Position and orient face
+        var n = new THREE.Vector3(f.normal[0],f.normal[1],f.normal[2]);
+        mesh.position.copy(n.clone().multiplyScalar(0.5));
+        mesh.lookAt(n.clone().multiplyScalar(1.5));
+        mesh.userData = {faceIndex:i, label:f.label, normal:f.normal};
+        faceMeshes.push(mesh);
+        cubeGroup.add(mesh);
+      });
+
+      // Wireframe edges for the cube
+      var edgeGeo = new THREE.BoxGeometry(1,1,1);
+      var edgeMat = new THREE.LineBasicMaterial({color:0x94a3b8, transparent:true, opacity:0.6});
+      var edges = new THREE.LineSegments(new THREE.EdgesGeometry(edgeGeo), edgeMat);
+      cubeGroup.add(edges);
+
+      scene.add(cubeGroup);
+
+      // Compass ring
+      var compassGroup = new THREE.Group();
+      var ringGeo = new THREE.RingGeometry(1.25, 1.38, 64);
+      var ringMat = new THREE.MeshBasicMaterial({color:0x475569, side:THREE.DoubleSide, transparent:true, opacity:0.5});
+      var ring = new THREE.Mesh(ringGeo, ringMat);
+      ring.rotation.x = -Math.PI/2;
+      ring.position.y = -0.01;
+      compassGroup.add(ring);
+
+      // Compass labels N/S/E/W
+      var compassLabels = [{l:'N',angle:0},{l:'E',angle:Math.PI/2},{l:'S',angle:Math.PI},{l:'W',angle:-Math.PI/2}];
+      compassLabels.forEach(function(cl){
+        var lc = document.createElement('canvas');
+        lc.width=32; lc.height=32;
+        var lctx=lc.getContext('2d');
+        lctx.fillStyle = cl.l==='N' ? '#ef4444' : '#94a3b8';
+        lctx.font = 'bold 22px system-ui';
+        lctx.textAlign='center'; lctx.textBaseline='middle';
+        lctx.fillText(cl.l, 16, 16);
+        var lt = new THREE.CanvasTexture(lc);
+        lt.minFilter = THREE.LinearFilter;
+        var lm = new THREE.MeshBasicMaterial({map:lt, transparent:true, side:THREE.DoubleSide, depthTest:false});
+        var ls = new THREE.Mesh(new THREE.PlaneGeometry(0.22,0.22), lm);
+        ls.position.set(Math.sin(cl.angle)*1.52, 0, -Math.cos(cl.angle)*1.52);
+        ls.rotation.x = -Math.PI/2;
+        compassGroup.add(ls);
+      });
+      scene.add(compassGroup);
+
+      // Raycaster for picking
+      var raycaster = new THREE.Raycaster();
+      var mouse = new THREE.Vector2();
+
+      vcState.current = {renderer:renderer, scene:scene, camera:camera, cubeGroup:cubeGroup,
+        faceMeshes:faceMeshes, compassGroup:compassGroup, raycaster:raycaster, mouse:mouse, needsRender:true};
+
+      // Animation loop synced to main camera
+      var animId;
+      function animate() {
+        animId = requestAnimationFrame(animate);
+        var S = state3d.current;
+        var vc = vcState.current;
+        if(!S || !S.camera || !vc) return;
+        // Mirror main camera orientation onto cube
+        vc.cubeGroup.quaternion.copy(S.camera.quaternion).invert();
+        // Compass stays world-aligned (only Y rotation from camera)
+        vc.compassGroup.quaternion.copy(S.camera.quaternion).invert();
+        // Keep compass labels facing camera
+        vc.compassGroup.children.forEach(function(child){
+          if(child.material && child.material.map) {
+            child.quaternion.copy(vc.compassGroup.quaternion).invert();
+            child.quaternion.premultiply(vc.cubeGroup.quaternion);
+          }
+        });
+        vc.renderer.render(vc.scene, vc.camera);
+      }
+      animate();
+
+      // Mouse interaction
+      function getMousePos(e) {
+        var rect = canvas.getBoundingClientRect();
+        vc.mouse.x = ((e.clientX-rect.left)/rect.width)*2-1;
+        vc.mouse.y = -((e.clientY-rect.top)/rect.height)*2+1;
+      }
+      function onMove(e) {
+        var vc=vcState.current; if(!vc) return;
+        getMousePos(e);
+        vc.raycaster.setFromCamera(vc.mouse, vc.camera);
+        var hits = vc.raycaster.intersectObjects(vc.faceMeshes);
+        var newHover = hits.length>0 ? hits[0].object.userData.faceIndex : null;
+        if(newHover !== hovered) {
+          // Reset old hover
+          vc.faceMeshes.forEach(function(m,i){
+            m.material.map = makeFaceTexture(m.userData.label, i===newHover);
+            m.material.needsUpdate = true;
+          });
+          setHovered(newHover);
+        }
+      }
+      function onClick(e) {
+        var vc=vcState.current; if(!vc) return;
+        getMousePos(e);
+        vc.raycaster.setFromCamera(vc.mouse, vc.camera);
+        // Check faces first
+        var faceHits = vc.raycaster.intersectObjects(vc.faceMeshes);
+        if(faceHits.length>0) {
+          var f = FACES[faceHits[0].object.userData.faceIndex];
+          flyToDir(f.normal);
+          return;
+        }
+      }
+      canvas.addEventListener('mousemove', onMove);
+      canvas.addEventListener('click', onClick);
+      canvas.addEventListener('mouseleave', function(){
+        var vc=vcState.current; if(!vc) return;
+        vc.faceMeshes.forEach(function(m){
+          m.material.map = makeFaceTexture(m.userData.label, false);
+          m.material.needsUpdate = true;
+        });
+        setHovered(null);
+      });
+
+      return function() {
+        cancelAnimationFrame(animId);
+        renderer.dispose();
+      };
+    }, []);
+
+    return html`<div style=${{position:'absolute',top:'.5rem',right:'.5rem',pointerEvents:'auto',width:120,height:120}}>
+      <canvas ref=${canvasRef} width="120" height="120" style=${{cursor:'pointer',width:'100%',height:'100%'}} />
     </div>`;
   }
 
@@ -2973,11 +3248,90 @@ function startApp() {
 
   // ── Header ─────────────────────────────────────────────────────
 
+  // ── Project switching helpers ─────────────────────────────────
+
+  function _saveCurrentProjectData(s) {
+    var pid = s.activeProject||'default';
+    var data = {
+      clashes:s.clashes, issues:s.issues, rules:s.rules, floors:s.floors,
+      viewpoints:(s.viewpoints||[]).map(function(v){return Object.assign({},v,{snapshot:undefined})}),
+      measurements:s.measurements||[], filters:s.filters,
+      modelMeta:s.models.map(function(m){return {id:m.id,name:m.name,discipline:m.discipline,color:m.color,visible:m.visible};})
+    };
+    return idbSaveProjectData(pid, data);
+  }
+
+  function _switchProject(newProjId, s, d) {
+    // Save current project first
+    _saveCurrentProjectData(s).then(function(){
+      // Clear current scene
+      if(window._ccClearScene) window._ccClearScene();
+      // Reset state to fresh
+      d({t:'LOAD_PROJECT_STATE', data:{
+        models:[], clashes:[], issues:[], activeId:null, detecting:false,
+        sectionAxis:null, sectionPos:0.5, sectionCustom:null, sectionBox:null,
+        filters:Object.assign({},INIT_FILTERS), floors:[],
+        measurements:[], measureMode:null, viewpoints:[],
+        classifications:{}, hiddenClasses:{}, colorByClass:null,
+        floorPlan:null, _highlightedStorey:null
+      }});
+      d({t:'SET_PROJECT', id:newProjId});
+      setActiveProjectId(newProjId);
+      // Trigger reload of stored files for new project (ModelSidebar will handle via effect)
+      window._ccProjectSwitch = newProjId;
+      window.dispatchEvent(new Event('cc-project-switch'));
+    });
+  }
+
   function Header(props) {
     var s=props.s, d=props.d;
     var all = s.clashes.concat(s.issues);
     var openN = all.filter(function(x){return x.status==='open'}).length;
     var isDark = (s.prefs.theme||'dark')==='dark';
+    var projects = s.projectList||[];
+    var activeProj = projects.find(function(p){return p.id===s.activeProject;})||projects[0]||{name:'Default Project'};
+    var po = useState(false), projOpen=po[0], setProjOpen=po[1];
+    var rn = useState(false), renaming=rn[0], setRenaming=rn[1];
+    var rnv = useState(''), renameVal=rnv[0], setRenameVal=rnv[1];
+
+    function createProject() {
+      var name = prompt('New project name:');
+      if(!name||!name.trim()) return;
+      var id = uid();
+      var list = getProjects().concat([{id:id, name:name.trim(), createdAt:Date.now()}]);
+      saveProjects(list);
+      d({t:'SET_PROJECT_LIST', v:list});
+      _switchProject(id, s, d);
+      setProjOpen(false);
+    }
+    function switchTo(id) {
+      if(id===s.activeProject) { setProjOpen(false); return; }
+      _switchProject(id, s, d);
+      setProjOpen(false);
+    }
+    function deleteProject(id) {
+      if(id==='default') return;
+      if(!confirm('Delete this project and all its stored IFC files?')) return;
+      idbDeleteProjectFiles(id);
+      idbDeleteProjectData(id);
+      var list = getProjects().filter(function(p){return p.id!==id;});
+      saveProjects(list);
+      d({t:'SET_PROJECT_LIST', v:list});
+      if(s.activeProject===id) _switchProject('default', s, d);
+      setProjOpen(false);
+    }
+    function startRename(p) {
+      setRenaming(p.id);
+      setRenameVal(p.name);
+    }
+    function finishRename(id) {
+      if(!renameVal.trim()) { setRenaming(false); return; }
+      var list = getProjects().map(function(p){return p.id===id?Object.assign({},p,{name:renameVal.trim()}):p;});
+      saveProjects(list);
+      d({t:'SET_PROJECT_LIST', v:list});
+      setRenaming(false);
+    }
+
     return html`<header style=${{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'.5rem 1rem',background:'var(--bg-primary)',borderBottom:'1px solid var(--border-subtle)',flexShrink:0}}>
       <div style=${{display:'flex',alignItems:'center',gap:'.75rem'}}>
         <div style=${{width:32,height:32,background:'var(--accent)',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center'}}><span style=${{color:'#fff',fontWeight:900,fontSize:14}}>CC</span></div>
@@ -2985,16 +3339,38 @@ function startApp() {
           <span style=${{fontWeight:600}}>ClashControl</span>
           <span style=${{color:'var(--text-muted)',fontSize:'.7rem',marginLeft:'.4rem',cursor:'default'}} title=${'Released: '+new Date(CC_VERSION.date).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})+' at '+new Date(CC_VERSION.date).toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit'})+'\nBuild: '+CC_VERSION.hash}>v${CC_VERSION.v}</span>
         </div>
+        <div style=${{position:'relative'}}>
+          <button onClick=${function(){setProjOpen(!projOpen)}}
+            style=${{...S_BTN,background:'var(--bg-secondary)',color:'var(--text-primary)',border:'1px solid var(--border)',display:'flex',alignItems:'center',gap:'.3rem',fontSize:'.7rem',padding:'.3rem .6rem'}}>
+            <span style=${{fontSize:'.6rem'}}>📁</span> ${activeProj.name} <span style=${{fontSize:'.5rem',color:'var(--text-faint)'}}>${projOpen?'▲':'▼'}</span>
+          </button>
+          ${projOpen && html`<div style=${{position:'absolute',top:'100%',left:0,marginTop:4,background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:8,boxShadow:'0 8px 24px rgba(0,0,0,.4)',minWidth:220,zIndex:100,overflow:'hidden'}}>
+            ${projects.map(function(p){
+              var isActive = p.id===s.activeProject;
+              return html`<div key=${p.id} style=${{display:'flex',alignItems:'center',gap:'.3rem',padding:'.4rem .6rem',cursor:'pointer',background:isActive?'var(--accent)':'transparent',borderBottom:'1px solid var(--border-subtle)'}}>
+                ${renaming===p.id ? html`<input type="text" value=${renameVal} autofocus
+                  onInput=${function(e){setRenameVal(e.target.value)}}
+                  onKeyDown=${function(e){if(e.key==='Enter')finishRename(p.id);if(e.key==='Escape')setRenaming(false);}}
+                  onBlur=${function(){finishRename(p.id)}}
+                  style=${{...S_INPUT,fontSize:'.65rem',padding:'.15rem .3rem',flex:1}} />` :
+                html`<span onClick=${function(){switchTo(p.id)}} style=${{flex:1,fontSize:'.7rem',color:isActive?'#fff':'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${p.name}</span>`}
+                <button onClick=${function(e){e.stopPropagation();startRename(p)}} style=${{...S_BTN,padding:'0 3px',background:'none',color:isActive?'#fff':'var(--text-faint)',fontSize:'.55rem'}} title="Rename">✎</button>
+                ${p.id!=='default' && html`<button onClick=${function(e){e.stopPropagation();deleteProject(p.id)}} style=${{...S_BTN,padding:'0 3px',background:'none',color:isActive?'#fff':'var(--text-faint)',fontSize:'.55rem'}} title="Delete project">✕</button>`}
+              </div>`;
+            })}
+            <button onClick=${createProject} style=${{...S_BTN,width:'100%',textAlign:'left',padding:'.4rem .6rem',background:'none',color:'var(--accent)',fontSize:'.7rem',borderRadius:0}}>+ New Project</button>
+          </div>`}
+        </div>
       </div>
       <div style=${{display:'flex',alignItems:'center',gap:'.5rem'}}>
         ${openN>0 && html`<span style=${{background:'#ef4444',color:'#fff',fontSize:'.65rem',padding:'.1rem .5rem',borderRadius:99}}>${openN} open</span>`}
         <button onClick=${function(){loadProject(d)}}
-          style=${{...S_BTN,background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)'}}>
-          ↑ Load Project
+          style=${{...S_BTN,background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',fontSize:'.65rem'}}>
+          ↑ .ccproj
         </button>
         <button onClick=${function(){saveProject(s)}} disabled=${!all.length&&!s.models.length}
-          style=${{...S_BTN,background:s.models.length||all.length?'#0f4c81':'var(--bg-secondary)',color:s.models.length||all.length?'#93c5fd':'var(--text-faint)',cursor:s.models.length||all.length?'pointer':'not-allowed'}}>
-          ↓ Save Project
+          style=${{...S_BTN,background:s.models.length||all.length?'#0f4c81':'var(--bg-secondary)',color:s.models.length||all.length?'#93c5fd':'var(--text-faint)',cursor:s.models.length||all.length?'pointer':'not-allowed',fontSize:'.65rem'}}>
+          ↓ .ccproj
         </button>
         <button onClick=${function(){importBCF(d)}}
           style=${{...S_BTN,background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)'}}>
@@ -3042,12 +3418,9 @@ function startApp() {
     var er = useState(''), err=er[0], setErr=er[1];
     var dg = useState(false), dragging=dg[0], setDragging=dg[1];
 
-    // Auto-load stored IFC files from IndexedDB on first mount
-    var didRestore = useRef(false);
-    useEffect(function(){
-      if(didRestore.current) return;
-      didRestore.current = true;
-      idbGetAllFiles().then(function(stored){
+    // Auto-load stored IFC files from IndexedDB for the active project
+    function _restoreProjectFiles(projectId) {
+      idbGetProjectFiles(projectId||'default').then(function(stored){
         if(!stored.length) return;
         var chain = Promise.resolve();
         stored.forEach(function(entry){
@@ -3067,6 +3440,31 @@ function startApp() {
           });
         });
       });
+    }
+
+    var didRestore = useRef(false);
+    useEffect(function(){
+      if(didRestore.current) return;
+      didRestore.current = true;
+      _restoreProjectFiles(s.activeProject);
+      // Also restore saved project session data (clashes, issues, etc.)
+      idbGetProjectData(s.activeProject).then(function(data){
+        if(data) d({t:'LOAD_PROJECT_STATE', data:Object.assign({}, data, {models:s.models})});
+      });
+    },[]);
+
+    // Listen for project switch events
+    useEffect(function(){
+      function onSwitch() {
+        var newProjId = window._ccProjectSwitch||'default';
+        _restoreProjectFiles(newProjId);
+        // Also load saved project session data (clashes, issues, etc.)
+        idbGetProjectData(newProjId).then(function(data){
+          if(data) d({t:'LOAD_PROJECT_STATE', data:Object.assign({}, data, {models:s.models})});
+        });
+      }
+      window.addEventListener('cc-project-switch', onSwitch);
+      return function(){ window.removeEventListener('cc-project-switch', onSwitch); };
     },[]);
 
     function processFiles(files) {
@@ -3088,7 +3486,7 @@ function startApp() {
               var modelId = uid();
               d({t:'ADD_MODEL', v:{id:modelId, name:f.name.replace(/\.ifc$/i,''), discipline:disc, color:col, visible:true, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], storeyData:result.storeyData||[], stats:result.stats||{fileSize:fSize}}});
               // Persist raw IFC file for reload across sessions
-              idbSaveFile(modelId, f.name, buf);
+              idbSaveFile(modelId, f.name, buf, s.activeProject||'default');
             });
           }).catch(function(er) {
             console.error(er);
@@ -4154,6 +4552,13 @@ function startApp() {
     useEffect(function(){
       document.documentElement.setAttribute('data-theme', s.prefs.theme||'dark');
     }, [s.prefs.theme]);
+    // Auto-save project data (debounced) when clashes/issues/viewpoints change
+    useEffect(function(){
+      var timer = setTimeout(function(){
+        if(s.models.length||s.clashes.length||s.issues.length) _saveCurrentProjectData(s);
+      }, 2000);
+      return function(){ clearTimeout(timer); };
+    }, [s.clashes, s.issues, s.viewpoints, s.measurements, s.rules]);
     return html`<div style=${{height:'100vh',display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <${Header} s=${s} d=${d} />
       <div style=${{display:'flex',flex:1,overflow:'hidden'}}>

@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.18 (2026-03-22)
+- Persist loaded IFC files across page reloads using IndexedDB
+
 ## v1.2.17 (2026-03-21)
 - Rewrite README with proper project description and feature overview
 
