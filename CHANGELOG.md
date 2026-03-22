@@ -1,5 +1,15 @@
 # Changelog
 
+## v1.2.28 (2026-03-22)
+- UX: keep render style bar visible when element selected; add prominent issue button
+
+## v1.2.27 (2026-03-22)
+- UX: render style bar always visible; prominent Create Issue button
+- Fix viewer background turning blue on element click
+- Fix htm parser to skip HTML comments; bust SW cache
+- Fix crash when clicking elements (HTML comments in htm templates)
+- Fix IFC loading: load web-ifc directly from jsdelivr instead of esm.sh
+
 ## v1.2.22 (2026-03-22)
 - Fix web-ifc import to use browser-specific entry point
 
