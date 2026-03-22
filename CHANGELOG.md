@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.29 (2026-03-22)
+- Bump version to 1.2.27; install pre-commit hook
+
 ## v1.2.28 (2026-03-22)
 - UX: keep render style bar visible when element selected; add prominent issue button
 

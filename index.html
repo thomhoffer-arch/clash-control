@@ -131,6 +131,7 @@
     ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg-secondary)}::-webkit-scrollbar-thumb{background:var(--text-faint);border-radius:3px}
     select,select option{background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border)}
     .spin{animation:sp 1s linear infinite;display:inline-block}@keyframes sp{to{transform:rotate(360deg)}}
+    @keyframes nlDots{0%,20%{opacity:.2}50%{opacity:1}80%,100%{opacity:.2}}
     .lc2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     button{font-family:inherit}
   </style>
@@ -174,7 +175,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.23',hash:'8116c28',date:'2026-03-22T19:21:05Z'};
+  var CC_VERSION = {v:'1.2.24',hash:'8116c28',date:'2026-03-22T19:21:05Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -5307,6 +5308,346 @@ function startApp() {
   // IFC4X3 schema with full geometric accuracy. Migration would replace the
   // getIfcAPI() loader and generate2DOutlines() with ifc-lite's built-in pipeline.
 
+  // ── Natural Language Command Engine ────────────────────────────
+
+  function processNLCommand(raw, s, d) {
+    var text = raw.trim().toLowerCase();
+
+    // Questions first
+    if (/how many clashes|clash count|number of clashes/.test(text)) {
+      var total = s.clashes.length;
+      if (!total) return 'No clashes detected yet. Try running clash detection first.';
+      var open = s.clashes.filter(function(c){return (c.status||'open')==='open';}).length;
+      return 'There are ' + total + ' clash' + (total===1?'':'es') + ' total — ' + open + ' open, ' + (total-open) + ' resolved.';
+    }
+    if (/how many issues|issue count|number of issues/.test(text)) {
+      var ti = s.issues.length;
+      if (!ti) return 'No issues created yet.';
+      var oi = s.issues.filter(function(i){return (i.status||'open')==='open';}).length;
+      return ti + ' issue' + (ti===1?'':'s') + ' total — ' + oi + ' open, ' + (ti-oi) + ' resolved.';
+    }
+    if (/what models|models loaded|loaded models|list models/.test(text)) {
+      if (!s.models.length) return 'No models loaded. Drag and drop an IFC file onto the viewer to get started.';
+      return 'Loaded models: ' + s.models.map(function(m){return m.name;}).join(', ') + '.';
+    }
+    if (/what.*active project|current project/.test(text)) {
+      var proj = (s.projectList||[]).find(function(p){return p.id===s.activeProject;});
+      return proj ? 'Active project: ' + proj.name + '.' : 'No active project.';
+    }
+    if (/help|what can you do|what commands/.test(text)) {
+      return 'I can help with: run clash detection · show/hide models · filter clashes by status/type/discipline · section x/y/z · color by type/storey/discipline · render styles · group by · export BCF · measure · reset view · light/dark theme.';
+    }
+
+    // Clash detection
+    if (/run|detect|check|find|start/.test(text) && /clash/.test(text)) {
+      if (!s.models.length) return 'No models loaded. Load at least two IFC files first.';
+      if (s.detecting) return 'Clash detection is already running…';
+      d({t:'DETECTING'});
+      d({t:'TAB',v:'clashes'});
+      setTimeout(function(){d({t:'SET_CLASHES',v:detectClashes(s.models,s.rules)});},20);
+      return 'Running clash detection across ' + s.models.length + ' model' + (s.models.length===1?'':'s') + '…';
+    }
+
+    // Show/hide model
+    var hideMatch = text.match(/^(hide|show)\s+(model\s+)?(.+)$/);
+    if (hideMatch) {
+      var action = hideMatch[1], query = hideMatch[3].trim();
+      var found = s.models.find(function(m){return m.name.toLowerCase().indexOf(query)!==-1;});
+      if (!found) return 'No model matching "' + query + '" found.';
+      d({t:'UPD_MODEL', id:found.id, u:{hidden: action==='hide'}});
+      if (window._ccApplyModelVisibility) window._ccApplyModelVisibility(found.id, action!=='hide');
+      return (action==='hide'?'Hid':'Showed') + ' model: ' + found.name + '.';
+    }
+
+    // Section planes
+    var secMatch = text.match(/section\s+(x|y|z)|cut\s+(x|y|z)|slice\s+(x|y|z)/);
+    if (secMatch) {
+      var axis = (secMatch[1]||secMatch[2]||secMatch[3]).toUpperCase();
+      var posMatch = text.match(/(\d+\.?\d*)\s*%/) || text.match(/at\s+([\d.]+)/);
+      var pos = posMatch ? parseFloat(posMatch[1]) / (posMatch[0].indexOf('%')!==-1?100:1) : 0.5;
+      d({t:'SECTION', axis:axis, pos:Math.min(1,Math.max(0,pos))});
+      invalidate(2);
+      return 'Section plane set on ' + axis + ' axis at ' + Math.round(pos*100) + '%.';
+    }
+    if (/clear section|remove section|no section|reset section/.test(text)) {
+      d({t:'SECTION', axis:null, pos:0.5});
+      invalidate(2);
+      return 'Section plane removed.';
+    }
+
+    // Filter by status
+    var statusMatch = text.match(/filter.*\b(open|active|resolved|new|all)\b/) || text.match(/show\s+(open|active|resolved|new|all)\s+clashes?/);
+    if (statusMatch) {
+      var st2 = statusMatch[1]==='active'?'open':statusMatch[1];
+      d({t:'UPD_FILTERS', u:{status: st2==='all'?'all':st2}});
+      d({t:'TAB',v:'clashes'});
+      return st2==='all' ? 'Showing all clashes.' : 'Filtered to ' + statusMatch[1] + ' clashes.';
+    }
+
+    // Filter by type
+    var typeKw = ['wall','slab','beam','column','pipe','duct','cable','door','window','stair','ramp','roof','floor','space'];
+    for (var ti2=0; ti2<typeKw.length; ti2++) {
+      if (text.indexOf(typeKw[ti2])!==-1 && /filter|show only/.test(text)) {
+        var kw = typeKw[ti2];
+        d({t:'UPD_FILTERS', u:{type:'Ifc'+kw.charAt(0).toUpperCase()+kw.slice(1)}});
+        d({t:'TAB',v:'clashes'});
+        return 'Filtered clashes involving ' + kw + 's.';
+      }
+    }
+
+    // Reset filters
+    if (/reset filter|clear filter|show all clashes|all clashes/.test(text)) {
+      d({t:'RESET_FILTERS'});
+      return 'Filters cleared — showing all clashes.';
+    }
+
+    // Group by
+    var groupMatch = text.match(/group\s+by\s+(storey|floor|discipline|status|type|none)/);
+    if (groupMatch) {
+      var gv = groupMatch[1]==='floor'?'storey':groupMatch[1];
+      d({t:'CLASH_GROUP_BY',v:gv});
+      d({t:'TAB',v:'clashes'});
+      return 'Clashes grouped by ' + gv + '.';
+    }
+
+    // Color by classification
+    var colorMatch = text.match(/color\s+by\s+(type|storey|floor|discipline|material)/);
+    if (colorMatch) {
+      var cv = colorMatch[1]==='floor'?'storey':colorMatch[1];
+      var key = 'by'+cv.charAt(0).toUpperCase()+cv.slice(1);
+      d({t:'COLOR_BY_CLASS',v:key});
+      invalidate(2);
+      return 'Coloring models by ' + cv + '.';
+    }
+    if (/reset color|no color|clear color/.test(text)) {
+      d({t:'COLOR_BY_CLASS',v:s.colorByClass});
+      invalidate(2);
+      return 'Color override removed.';
+    }
+
+    // Render style
+    var rsMatch = text.match(/\b(standard|shaded|rendered|wireframe)\b/);
+    if (rsMatch && /render|style|view|mode/.test(text)) {
+      d({t:'UPD_PREFS',u:{renderStyle:rsMatch[1]}});
+      invalidate(3);
+      return 'Render style set to ' + rsMatch[1] + '.';
+    }
+
+    // Theme
+    if (/dark\s+theme|switch.*dark|dark\s+mode/.test(text)) {
+      d({t:'UPD_PREFS',u:{theme:'dark'}});
+      return 'Switched to dark theme.';
+    }
+    if (/light\s+theme|switch.*light|light\s+mode/.test(text)) {
+      d({t:'UPD_PREFS',u:{theme:'light'}});
+      return 'Switched to light theme.';
+    }
+
+    // Measurement mode
+    if (/measure\s+length|length\s+measure/.test(text)) { d({t:'MEASURE_MODE',v:'length'}); return 'Length measurement active — click two points in the viewer.'; }
+    if (/measure\s+angle|angle\s+measure/.test(text)) { d({t:'MEASURE_MODE',v:'angle'}); return 'Angle measurement active — click three points.'; }
+    if (/measure\s+area|area\s+measure/.test(text)) { d({t:'MEASURE_MODE',v:'area'}); return 'Area measurement active — click points, double-click to finish.'; }
+    if (/stop\s+measur|clear\s+measur|end\s+measur/.test(text)) {
+      d({t:'MEASURE_MODE',v:null});
+      d({t:'CLEAR_MEASUREMENTS'});
+      return 'Measurement mode off.';
+    }
+
+    // Export BCF
+    if (/export\s+bcf|bcf\s+export/.test(text)) {
+      var all = s.issues.concat(s.clashes.filter(function(c){return !s.issues.find(function(i){return i.clashId===c.id;});}));
+      if (!all.length) return 'No issues or clashes to export.';
+      exportBCF(s.issues.length ? s.issues : s.clashes, '2.1', s.viewpoints);
+      return 'BCF 2.1 export started — ' + (s.issues.length||s.clashes.length) + ' item' + ((s.issues.length||s.clashes.length)===1?'':'s') + ' exported.';
+    }
+
+    // Show panel tabs
+    if (/show\s+issues|open\s+issues\s+panel/.test(text)) { d({t:'TAB',v:'issues'}); return 'Switched to issues panel.'; }
+    if (/show\s+clashes|open\s+clashes\s+panel/.test(text)) { d({t:'TAB',v:'clashes'}); return 'Switched to clashes panel.'; }
+
+    // Reset view
+    if (/reset\s+view|fit\s+all|zoom\s+all|home\s+view/.test(text)) {
+      if (window._ccFlyToView && s.models.length) {
+        var first = s.models[0];
+        if (first.center) window._ccFlyToView(new THREE.Vector3().fromArray(first.center), null);
+      }
+      d({t:'SECTION',axis:null,pos:0.5});
+      d({t:'ACTIVE',id:null});
+      invalidate(3);
+      return 'View reset.';
+    }
+
+    // Ortho/perspective
+    if (/ortho|orthographic/.test(text)) { d({t:'TOGGLE_PROJECTION'}); invalidate(2); return 'Toggled projection mode.'; }
+
+    return null;
+  }
+
+  // ── Natural Language Command Panel ─────────────────────────────
+
+  function NLCommandPanel(props) {
+    var s = props.s, d = props.d;
+    var stOpen = useState(false), open = stOpen[0], setOpen = stOpen[1];
+    var stMsgs = useState([{role:'assistant', text:'Hi! I\'m ClashControl AI. Ask me to run clash detection, filter clashes, change view, export BCF, and more. Or just ask "help".'}]);
+    var msgs = stMsgs[0], setMsgs = stMsgs[1];
+    var stInput = useState(''), input = stInput[0], setInput = stInput[1];
+    var stLoading = useState(false), loading = stLoading[0], setLoading = stLoading[1];
+    var inputRef = useRef(null);
+    var bottomRef = useRef(null);
+
+    useEffect(function() {
+      function onKey(e) {
+        if ((e.ctrlKey || e.metaKey) && e.key === '/') {
+          e.preventDefault();
+          setOpen(function(o){ return !o; });
+        }
+      }
+      window.addEventListener('keydown', onKey);
+      return function() { window.removeEventListener('keydown', onKey); };
+    }, []);
+
+    useEffect(function() {
+      if (open && inputRef.current) setTimeout(function(){ inputRef.current && inputRef.current.focus(); }, 80);
+    }, [open]);
+
+    useEffect(function() {
+      if (bottomRef.current) bottomRef.current.scrollIntoView({behavior:'smooth'});
+    }, [msgs]);
+
+    function send() {
+      var text = input.trim();
+      if (!text) return;
+      var userMsg = {role:'user', text:text};
+      setMsgs(function(m){ return m.concat([userMsg]); });
+      setInput('');
+      setLoading(true);
+      setTimeout(function() {
+        var result = processNLCommand(text, s, d);
+        var reply = result !== null ? result : 'I\'m not sure how to do that yet. Try: "run clash detection", "filter open clashes", "section x", "export BCF", or "help".';
+        setMsgs(function(m){ return m.concat([{role:'assistant', text:reply}]); });
+        setLoading(false);
+      }, 120);
+    }
+
+    function onKeyDown(e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+      if (e.key === 'Escape') setOpen(false);
+    }
+
+    var isDark = (s.prefs && s.prefs.theme) !== 'light';
+    var panelBg = isDark ? '#1e2736' : '#ffffff';
+    var borderCol = isDark ? '#334155' : '#d1d5db';
+    var textCol = isDark ? '#e2e8f0' : '#1f2937';
+    var mutedCol = isDark ? '#64748b' : '#9ca3af';
+    var inputBg = isDark ? '#0f172a' : '#f9fafb';
+    var userBubbleBg = '#2563eb';
+    var aiBubbleBg = isDark ? '#273244' : '#f3f4f6';
+
+    if (!open) {
+      return html`<button
+        onClick=${function(){ setOpen(true); }}
+        title="Ask ClashControl (Ctrl+/)"
+        style=${{
+          position:'fixed', bottom:'1rem', left:'50%', transform:'translateX(-50%)',
+          zIndex:1200, display:'flex', alignItems:'center', gap:'.4rem',
+          padding:'.45rem 1.1rem', borderRadius:999,
+          background: isDark ? '#1e2736' : '#ffffff',
+          border:'1px solid ' + borderCol,
+          color: mutedCol, fontSize:'.75rem', cursor:'pointer',
+          boxShadow:'0 2px 12px rgba(0,0,0,.3)', whiteSpace:'nowrap',
+          transition:'box-shadow .15s'
+        }}>
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style=${{flexShrink:0}}>
+          <circle cx="8" cy="8" r="7" stroke="${isDark?'#60a5fa':'#2563eb'}" stroke-width="1.5"/>
+          <path d="M6 6c0-1.1.9-2 2-2s2 .9 2 2c0 .8-.5 1.5-1.2 1.8L8 9" stroke="${isDark?'#60a5fa':'#2563eb'}" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="8" cy="11.5" r=".8" fill="${isDark?'#60a5fa':'#2563eb'}"/>
+        </svg>
+        Ask ClashControl…
+        <span style=${{fontSize:'.6rem', opacity:.6, marginLeft:'.2rem'}}>Ctrl+/</span>
+      </button>`;
+    }
+
+    return html`<div style=${{
+      position:'fixed', bottom:'1rem', left:'50%', transform:'translateX(-50%)',
+      zIndex:1200, width:'min(480px, calc(100vw - 2rem))',
+      background:panelBg, border:'1px solid '+borderCol,
+      borderRadius:14, boxShadow:'0 8px 32px rgba(0,0,0,.4)',
+      display:'flex', flexDirection:'column', overflow:'hidden'
+    }}>
+      <div style=${{
+        display:'flex', alignItems:'center', padding:'.6rem .85rem',
+        borderBottom:'1px solid '+borderCol, gap:'.5rem'
+      }}>
+        <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style=${{flexShrink:0}}>
+          <circle cx="8" cy="8" r="7" stroke="#60a5fa" stroke-width="1.5"/>
+          <path d="M6 6c0-1.1.9-2 2-2s2 .9 2 2c0 .8-.5 1.5-1.2 1.8L8 9" stroke="#60a5fa" stroke-width="1.5" stroke-linecap="round"/>
+          <circle cx="8" cy="11.5" r=".8" fill="#60a5fa"/>
+        </svg>
+        <span style=${{fontSize:'.78rem', fontWeight:600, color:textCol, flex:1}}>ClashControl AI</span>
+        <button onClick=${function(){ setOpen(false); }} style=${{
+          background:'none', border:'none', cursor:'pointer',
+          color:mutedCol, fontSize:'1rem', lineHeight:1, padding:'0 .15rem'
+        }}>×</button>
+      </div>
+
+      <div style=${{
+        flex:1, overflowY:'auto', padding:'.75rem .85rem',
+        display:'flex', flexDirection:'column', gap:'.6rem',
+        maxHeight:320, minHeight:120
+      }}>
+        ${msgs.map(function(m, i) {
+          var isUser = m.role === 'user';
+          return html`<div key=${i} style=${{
+            display:'flex', justifyContent: isUser ? 'flex-end' : 'flex-start'
+          }}>
+            <div style=${{
+              maxWidth:'82%', padding:'.42rem .72rem',
+              borderRadius: isUser ? '14px 14px 4px 14px' : '14px 14px 14px 4px',
+              background: isUser ? userBubbleBg : aiBubbleBg,
+              color: isUser ? '#fff' : textCol,
+              fontSize:'.74rem', lineHeight:1.5, wordBreak:'break-word'
+            }}>${m.text}</div>
+          </div>`;
+        })}
+        ${loading && html`<div style=${{display:'flex', justifyContent:'flex-start'}}>
+          <div style=${{
+            padding:'.42rem .72rem', borderRadius:'14px 14px 14px 4px',
+            background:aiBubbleBg, color:mutedCol, fontSize:'.74rem'
+          }}>
+            <span style=${{opacity:.7}}>Thinking</span>
+            <span style=${{animation:'nlDots 1.2s infinite', display:'inline-block', marginLeft:2}}>…</span>
+          </div>
+        </div>`}
+        <div ref=${bottomRef}></div>
+      </div>
+
+      <div style=${{
+        padding:'.55rem .7rem', borderTop:'1px solid '+borderCol,
+        display:'flex', gap:'.45rem', alignItems:'flex-end'
+      }}>
+        <textarea
+          ref=${inputRef}
+          value=${input}
+          onInput=${function(e){ setInput(e.target.value); }}
+          onKeyDown=${onKeyDown}
+          placeholder=${'Ask or command… (Enter to send)'}
+          rows="1"
+          style=${{
+            flex:1, resize:'none', background:inputBg, border:'1px solid '+borderCol,
+            borderRadius:8, padding:'.38rem .6rem', color:textCol,
+            fontSize:'.74rem', lineHeight:1.5, outline:'none',
+            fontFamily:'inherit', overflowY:'hidden'
+          }}
+        ></textarea>
+        <button onClick=${send} disabled=${!input.trim()||loading} style=${{
+          background:'#2563eb', color:'#fff', border:'none', borderRadius:8,
+          padding:'.38rem .65rem', cursor:'pointer', fontSize:'.74rem',
+          opacity:(!input.trim()||loading)?0.5:1, flexShrink:0
+        }}>Send</button>
+      </div>
+    </div>`;
+  }
+
   // ── App ────────────────────────────────────────────────────────
 
   function App() {
@@ -5355,6 +5696,7 @@ function startApp() {
       ${is2D && html`<${ExportBar} s=${s} d=${d} />`}
       ${s.showModal && html`<${NewIssueModal} d=${d} el=${s.modalElement} prefs=${s.prefs} />`}
       ${s.showSettings && html`<${SettingsModal} d=${d} prefs=${s.prefs} />`}
+      <${NLCommandPanel} s=${s} d=${d} />
     </div>`;
   }
 
