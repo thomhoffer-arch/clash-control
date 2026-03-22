@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.24 (2026-03-22)
+- Fix 8 code review issues: CSP, SRI, state mutation, stale closures, dead code
+
 ## v1.2.22 (2026-03-22)
 - Fix web-ifc import to use browser-specific entry point
 

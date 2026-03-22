@@ -174,7 +174,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.23',hash:'8116c28',date:'2026-03-22T19:21:05Z'};
+  var CC_VERSION = {v:'1.2.24',hash:'7c6d995',date:'2026-03-22T19:33:19Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -816,6 +816,8 @@ function startApp() {
   var _prevElementHashes = {};
   // Cache for underlay Image elements — keyed by underlay id, avoids mutating state objects
   var _underlayImgCache = {};
+  // Parallel cache for the canvasData string each Image was built from — avoids custom DOM property
+  var _underlayImgDataCache = {};
   // 2D floor plan outlines for compare mode — module-level, not window global
   var _cc2DOutlines = null;
 
@@ -3369,6 +3371,10 @@ function startApp() {
 
   // ── Project switching helpers ─────────────────────────────────
 
+  function _hasProjectData(s) {
+    return s.models.length || s.clashes.length || s.issues.length;
+  }
+
   function _saveCurrentProjectData(s) {
     var pid = s.activeProject||'default';
     var data = {
@@ -4953,8 +4959,6 @@ function startApp() {
     // Keep a ref to latest state so event-handler closures always read fresh values
     var sRef = useRef(s);
     sRef.current = s;
-    var dRef = useRef(d);
-    dRef.current = d;
     var activeUl = s.underlays.find(function(u) { return u.id === s.activeUnderlay; });
 
     function redraw() {
@@ -4995,11 +4999,11 @@ function startApp() {
         ctx.rotate((ul.rotation || 0) * Math.PI / 180);
         var sc = ul.scale || 1;
         var img = _underlayImgCache[ul.id];
-        if (!img || img._src !== ul.canvasData) {
+        if (!img || _underlayImgDataCache[ul.id] !== ul.canvasData) {
           img = new Image();
-          img._src = ul.canvasData;
           img.src = ul.canvasData;
           _underlayImgCache[ul.id] = img;
+          _underlayImgDataCache[ul.id] = ul.canvasData;
           img.onload = function() { redraw(); };
         }
         if (img.complete && img.naturalWidth > 0) {
@@ -5071,7 +5075,7 @@ function startApp() {
     useEffect(function() {
       // Purge image cache for removed underlays
       var ids = s.underlays.reduce(function(acc, u) { acc[u.id] = true; return acc; }, {});
-      Object.keys(_underlayImgCache).forEach(function(k) { if (!ids[k]) delete _underlayImgCache[k]; });
+      Object.keys(_underlayImgCache).forEach(function(k) { if (!ids[k]) { delete _underlayImgCache[k]; delete _underlayImgDataCache[k]; } });
       redraw();
     }, [s.underlays, s.activeUnderlay, s.markups, s.markupTool, s.underlayMode, s.floorPlan]);
 
@@ -5083,7 +5087,12 @@ function startApp() {
       resize();
       var obs = new ResizeObserver(resize);
       obs.observe(el);
-      return function() { obs.disconnect(); window._cc2DCanvas = null; };
+      return function() {
+        obs.disconnect();
+        window._cc2DCanvas = null;
+        // Clear image cache on unmount to avoid stale entries across 2D/3D toggles
+        Object.keys(_underlayImgCache).forEach(function(k) { delete _underlayImgCache[k]; delete _underlayImgDataCache[k]; });
+      };
     }, []);
 
     function toWorld(e) {
@@ -5096,12 +5105,12 @@ function startApp() {
     }
 
     function onDown(e) {
-      var sc = sRef.current, dc = dRef.current;
+      var sc = sRef.current;
       if (sc.markupTool && sc.markupTool !== 'erase') {
         var pt = toWorld(e);
         if (sc.markupTool === 'text') {
           var txt = prompt('Enter text:');
-          if (txt) dc({ t: 'ADD_MARKUP', v: { id: uid(), type: 'text', points: pt, color: '#f59e0b', text: txt } });
+          if (txt) d({ t: 'ADD_MARKUP', v: { id: uid(), type: 'text', points: pt, color: '#f59e0b', text: txt } });
           return;
         }
         markupPtsRef.current = [pt[0], pt[1], pt[0], pt[1]];
@@ -5125,10 +5134,10 @@ function startApp() {
       redraw();
     }
     function onUp() {
-      var sc = sRef.current, dc = dRef.current;
+      var sc = sRef.current;
       if (sc.markupTool && markupPtsRef.current.length >= 4) {
         var mp = markupPtsRef.current;
-        dc({ t: 'ADD_MARKUP', v: { id: uid(), type: sc.markupTool, points: [mp[0], mp[1], mp[2], mp[3]], color: '#f59e0b' } });
+        d({ t: 'ADD_MARKUP', v: { id: uid(), type: sc.markupTool, points: [mp[0], mp[1], mp[2], mp[3]], color: '#f59e0b' } });
         markupPtsRef.current = [];
       }
       panRef.current.dragging = false;
@@ -5321,15 +5330,16 @@ function startApp() {
     _latestSRef.current = s;
     useEffect(function(){
       var timer = setTimeout(function(){
-        if(s.models.length||s.clashes.length||s.issues.length) _saveCurrentProjectData(s);
+        if(_hasProjectData(s)) _saveCurrentProjectData(s);
       }, 2000);
       return function(){ clearTimeout(timer); };
     }, [s.clashes, s.issues, s.viewpoints, s.measurements, s.rules]);
-    // Flush project save synchronously on tab close so data isn't lost
+    // Start an IDB save on tab close. IDB is async but modern browsers typically
+    // complete in-progress transactions before unloading; covers the debounce gap.
     useEffect(function(){
       function onUnload() {
         var cur = _latestSRef.current;
-        if(cur.models.length||cur.clashes.length||cur.issues.length) _saveCurrentProjectData(cur);
+        if(_hasProjectData(cur)) _saveCurrentProjectData(cur);
       }
       window.addEventListener('beforeunload', onUnload);
       return function(){ window.removeEventListener('beforeunload', onUnload); };
