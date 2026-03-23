@@ -178,7 +178,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.40',hash:'dd80efe',date:'2026-03-23T10:13:40Z'};
+  var CC_VERSION = {v:'1.2.41',hash:'af06834',date:'2026-03-23T10:26:36Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -3076,48 +3076,28 @@ function startApp() {
     var state3d = props.state3d;
     var canvasRef = useRef(null);
     var vcState = useRef(null);
-    var hoveredFace = useState(null), hovered=hoveredFace[0], setHovered=hoveredFace[1];
 
-    // Face definitions: label, normal direction, up vector
+    // Face definitions: label + normal. Order MUST stay fixed (BOX_FACE_MAP depends on it).
     var FACES = [
-      {label:'FRONT',  normal:[0,0,1],   up:[0,1,0]},
-      {label:'BACK',   normal:[0,0,-1],  up:[0,1,0]},
-      {label:'RIGHT',  normal:[1,0,0],   up:[0,1,0]},
-      {label:'LEFT',   normal:[-1,0,0],  up:[0,1,0]},
-      {label:'TOP',    normal:[0,1,0],   up:[0,0,-1]},
-      {label:'BOTTOM', normal:[0,-1,0],  up:[0,0,1]}
+      {label:'FRONT',  normal:[0,0,1]},
+      {label:'BACK',   normal:[0,0,-1]},
+      {label:'RIGHT',  normal:[1,0,0]},
+      {label:'LEFT',   normal:[-1,0,0]},
+      {label:'TOP',    normal:[0,1,0]},
+      {label:'BOTTOM', normal:[0,-1,0]}
     ];
-    // Edge definitions: midpoints between two face normals
-    var EDGES = [
-      {dir:[0,1,1],   up:[0,1,0]},   // front-top
-      {dir:[0,-1,1],  up:[0,-1,0]},  // front-bottom
-      {dir:[1,0,1],   up:[0,1,0]},   // front-right
-      {dir:[-1,0,1],  up:[0,1,0]},   // front-left
-      {dir:[0,1,-1],  up:[0,1,0]},   // back-top
-      {dir:[0,-1,-1], up:[0,-1,0]},  // back-bottom
-      {dir:[1,0,-1],  up:[0,1,0]},   // back-right
-      {dir:[-1,0,-1], up:[0,1,0]},   // back-left
-      {dir:[1,1,0],   up:[0,1,0]},   // top-right
-      {dir:[-1,1,0],  up:[0,1,0]},   // top-left
-      {dir:[1,-1,0],  up:[0,-1,0]},  // bottom-right
-      {dir:[-1,-1,0], up:[0,-1,0]}   // bottom-left
-    ];
-    // Corner definitions: all 8 corners
-    var CORNERS = [
-      {dir:[1,1,1]},  {dir:[-1,1,1]},  {dir:[1,-1,1]},  {dir:[-1,-1,1]},
-      {dir:[1,1,-1]}, {dir:[-1,1,-1]}, {dir:[1,-1,-1]}, {dir:[-1,-1,-1]}
-    ];
+    // BoxGeometry material group order: +X, -X, +Y, -Y, +Z, -Z = RIGHT, LEFT, TOP, BOTTOM, FRONT, BACK
+    var BOX_FACE_MAP = [2, 3, 4, 5, 0, 1]; // boxGeo slot → FACES index
+    // Base face colors (dark-theme palette; lighting provides per-face variation)
+    var FACE_CLR = {FRONT:0x1c3550, BACK:0x1c3550, RIGHT:0x1c3550, LEFT:0x1c3550, TOP:0x1c3550, BOTTOM:0x1c3550};
 
     function flyToDir(dir) {
       var S=state3d.current; if(!S||!S.orbit) return;
-      // Compute model center as new orbit target
       var ctr=new THREE.Vector3();
       if(S.mg&&S.mg.children.length>0) new THREE.Box3().setFromObject(S.mg).getCenter(ctr);
-      // Convert direction to orbit spherical angles
       var d=new THREE.Vector3(dir[0],dir[1],dir[2]).normalize();
       var targetTheta=Math.atan2(d.x,d.z);
       var targetPhi=Math.max(0.05,Math.min(Math.PI-0.05,Math.acos(d.y)));
-      // Shortest arc for theta
       var startTheta=S.orbit.sph.theta, startPhi=S.orbit.sph.phi;
       var dTheta=targetTheta-startTheta;
       while(dTheta>Math.PI) dTheta-=2*Math.PI;
@@ -3137,28 +3117,23 @@ function startApp() {
       step();
     }
 
-    // Axis-coded face colors: Z=blue-grey, X=warm-grey, Y=cool-grey
-    var FACE_COLORS={FRONT:'#2d3f55',BACK:'#2d3f55',RIGHT:'#3a3a50',LEFT:'#3a3a50',TOP:'#283d50',BOTTOM:'#283d50'};
+    // Canvas texture: transparent background, thin border, bold label.
+    // Material color (phong) provides the face colour; lighting gives depth.
     function makeFaceTexture(label, isHovered) {
       var c = document.createElement('canvas');
       c.width=128; c.height=128;
       var ctx=c.getContext('2d');
-      // Background with rounded rect
-      var bg=isHovered?'#2563eb':(FACE_COLORS[label]||'#334155');
-      ctx.fillStyle=bg;
-      ctx.fillRect(0,0,128,128);
-      // Thin border
-      ctx.strokeStyle=isHovered?'#93c5fd':'rgba(148,163,184,0.35)';
-      ctx.lineWidth=2;
-      ctx.strokeRect(1,1,126,126);
-      // Label
-      ctx.fillStyle=isHovered?'#fff':'#e2e8f0';
-      ctx.font='bold 20px system-ui,sans-serif';
-      ctx.textAlign='center';
-      ctx.textBaseline='middle';
-      ctx.fillText(label,64,64);
-      var tex=new THREE.CanvasTexture(c);
-      tex.minFilter=THREE.LinearFilter;
+      ctx.clearRect(0,0,128,128);
+      ctx.strokeStyle = isHovered ? 'rgba(147,197,253,0.95)' : 'rgba(148,163,184,0.22)';
+      ctx.lineWidth = 4;
+      ctx.strokeRect(3,3,122,122);
+      ctx.fillStyle = isHovered ? '#ffffff' : 'rgba(226,232,240,0.88)';
+      ctx.font = 'bold 21px system-ui,sans-serif';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillText(label, 64, 64);
+      var tex = new THREE.CanvasTexture(c);
+      tex.minFilter = THREE.LinearFilter;
       return tex;
     }
 
@@ -3172,181 +3147,150 @@ function startApp() {
       renderer.setPixelRatio(window.devicePixelRatio);
 
       var scene = new THREE.Scene();
-      var camera = new THREE.OrthographicCamera(-1.8,1.8,1.8,-1.8,0.1,10);
-      camera.position.set(2,2,2);
-      camera.lookAt(0,0,0);
+      // Perspective camera gives real depth cues
+      var camera = new THREE.PerspectiveCamera(40, 1, 0.1, 20);
+      camera.position.set(2.3, 2.3, 2.3);
+      camera.lookAt(0, 0, 0);
 
-      // Ambient + directional light
-      scene.add(new THREE.AmbientLight(0xffffff, 0.6));
-      var dLight = new THREE.DirectionalLight(0xffffff, 0.8);
-      dLight.position.set(2,3,2);
-      scene.add(dLight);
+      // Strong key light from upper-right-front + dim fill from opposite side
+      scene.add(new THREE.AmbientLight(0xffffff, 0.45));
+      var dKey = new THREE.DirectionalLight(0xffffff, 1.1);
+      dKey.position.set(3, 5, 4);
+      scene.add(dKey);
+      var dFill = new THREE.DirectionalLight(0x6688aa, 0.3);
+      dFill.position.set(-3, -2, -3);
+      scene.add(dFill);
 
-      // Build cube from 6 face planes
+      // BoxGeometry with 6 individual MeshPhongMaterials — real 3D, lit per-face
       var cubeGroup = new THREE.Group();
-      var faceMeshes = [];
-      FACES.forEach(function(f, i) {
-        var geo = new THREE.PlaneGeometry(0.98, 0.98);
-        var tex = makeFaceTexture(f.label, false);
-        var mat = new THREE.MeshBasicMaterial({map:tex, side:THREE.FrontSide, transparent:true});
-        var mesh = new THREE.Mesh(geo, mat);
-        // Position and orient face
-        var n = new THREE.Vector3(f.normal[0],f.normal[1],f.normal[2]);
-        mesh.position.copy(n.clone().multiplyScalar(0.5));
-        mesh.lookAt(n.clone().multiplyScalar(1.5));
-        mesh.userData = {faceIndex:i, label:f.label, normal:f.normal};
-        faceMeshes.push(mesh);
-        cubeGroup.add(mesh);
+      var materials = BOX_FACE_MAP.map(function(fi) {
+        var f = FACES[fi];
+        return new THREE.MeshPhongMaterial({
+          map: makeFaceTexture(f.label, false),
+          color: new THREE.Color(FACE_CLR[f.label] || 0x1c3550),
+          transparent: true,
+          shininess: 35,
+          specular: new THREE.Color(0x1a2e44)
+        });
       });
+      var cubeMesh = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 1), materials);
+      cubeGroup.add(cubeMesh);
 
-      // Wireframe edges for the cube
-      var edgeGeo = new THREE.BoxGeometry(1,1,1);
-      var edgeMat = new THREE.LineBasicMaterial({color:0x64748b, transparent:true, opacity:0.9});
-      var edges = new THREE.LineSegments(new THREE.EdgesGeometry(edgeGeo), edgeMat);
-      cubeGroup.add(edges);
+      // Sharp wireframe edges slightly proud of the cube surface
+      var edgeMat = new THREE.LineBasicMaterial({color:0x5577aa, transparent:true, opacity:0.9});
+      cubeGroup.add(new THREE.LineSegments(
+        new THREE.EdgesGeometry(new THREE.BoxGeometry(1.004, 1.004, 1.004)), edgeMat));
 
       scene.add(cubeGroup);
 
       // Compass ring
       var compassGroup = new THREE.Group();
-      var ringGeo = new THREE.RingGeometry(1.25, 1.38, 64);
-      var ringMat = new THREE.MeshBasicMaterial({color:0x475569, side:THREE.DoubleSide, transparent:true, opacity:0.5});
-      var ring = new THREE.Mesh(ringGeo, ringMat);
+      var ring = new THREE.Mesh(
+        new THREE.RingGeometry(1.25, 1.38, 64),
+        new THREE.MeshBasicMaterial({color:0x475569, side:THREE.DoubleSide, transparent:true, opacity:0.5}));
       ring.rotation.x = -Math.PI/2;
-      ring.position.y = -0.01;
+      ring.position.y = -0.02;
       compassGroup.add(ring);
-
-      // Compass labels N/S/E/W
-      var compassLabels = [{l:'N',angle:0},{l:'E',angle:Math.PI/2},{l:'S',angle:Math.PI},{l:'W',angle:-Math.PI/2}];
-      compassLabels.forEach(function(cl){
-        var lc = document.createElement('canvas');
-        lc.width=32; lc.height=32;
+      [{l:'N',a:0},{l:'E',a:Math.PI/2},{l:'S',a:Math.PI},{l:'W',a:-Math.PI/2}].forEach(function(cl){
+        var lc=document.createElement('canvas'); lc.width=32; lc.height=32;
         var lctx=lc.getContext('2d');
-        lctx.fillStyle = cl.l==='N' ? '#ef4444' : '#94a3b8';
-        lctx.font = 'bold 22px system-ui';
-        lctx.textAlign='center'; lctx.textBaseline='middle';
-        lctx.fillText(cl.l, 16, 16);
-        var lt = new THREE.CanvasTexture(lc);
-        lt.minFilter = THREE.LinearFilter;
-        var lm = new THREE.MeshBasicMaterial({map:lt, transparent:true, side:THREE.DoubleSide, depthTest:false});
-        var ls = new THREE.Mesh(new THREE.PlaneGeometry(0.22,0.22), lm);
-        ls.position.set(Math.sin(cl.angle)*1.52, 0, -Math.cos(cl.angle)*1.52);
-        ls.rotation.x = -Math.PI/2;
+        lctx.fillStyle = cl.l==='N'?'#ef4444':'#94a3b8';
+        lctx.font='bold 22px system-ui'; lctx.textAlign='center'; lctx.textBaseline='middle';
+        lctx.fillText(cl.l,16,16);
+        var lt=new THREE.CanvasTexture(lc); lt.minFilter=THREE.LinearFilter;
+        var ls=new THREE.Mesh(new THREE.PlaneGeometry(0.22,0.22),
+          new THREE.MeshBasicMaterial({map:lt,transparent:true,side:THREE.DoubleSide,depthTest:false}));
+        ls.position.set(Math.sin(cl.a)*1.52, 0, -Math.cos(cl.a)*1.52);
+        ls.rotation.x=-Math.PI/2;
         compassGroup.add(ls);
       });
       scene.add(compassGroup);
 
-      // Raycaster for picking
       var raycaster = new THREE.Raycaster();
       var mouse = new THREE.Vector2();
+      // Reusable quaternion scratch objects (allocated once, avoids GC)
+      var _qY  = new THREE.Quaternion();
+      var _qX  = new THREE.Quaternion();
+      var _qCam = new THREE.Quaternion();
+      var _AY  = new THREE.Vector3(0,1,0);
+      var _AX  = new THREE.Vector3(1,0,0);
 
-      vcState.current = {renderer:renderer, scene:scene, camera:camera, cubeGroup:cubeGroup,
-        faceMeshes:faceMeshes, compassGroup:compassGroup, raycaster:raycaster, mouse:mouse, needsRender:true};
+      vcState.current = {renderer:renderer, scene:scene, camera:camera,
+        cubeGroup:cubeGroup, cubeMesh:cubeMesh, materials:materials,
+        compassGroup:compassGroup, raycaster:raycaster, mouse:mouse, hoveredIdx:null};
 
-      // Animation loop synced to main camera
+      // ── Animation loop ──────────────────────────────────────────
+      // Rotation is derived from orbit spherical angles (theta/phi) rather than
+      // camera.quaternion, which suffers gimbal-lock when looking straight up/down.
       var animId;
       function animate() {
         animId = requestAnimationFrame(animate);
         var S = state3d.current;
         var vc = vcState.current;
-        if(!S || !S.camera || !vc) return;
-        // Mirror main camera orientation onto cube
-        vc.cubeGroup.quaternion.copy(S.camera.quaternion).invert();
-        // Compass stays world-aligned (only Y rotation from camera)
-        vc.compassGroup.quaternion.copy(S.camera.quaternion).invert();
-        // Keep compass labels facing camera
-        vc.compassGroup.children.forEach(function(child){
-          if(child.material && child.material.map) {
-            child.quaternion.copy(vc.compassGroup.quaternion).invert();
-            child.quaternion.premultiply(vc.cubeGroup.quaternion);
-          }
-        });
+        if(!S || !vc || !S.orbit) return;
+        var theta = S.orbit.sph.theta;
+        var phi   = S.orbit.sph.phi;
+        // Q_cam = Ry(theta) * Rx(phi-π/2)  — matches camera spherical position
+        _qY.setFromAxisAngle(_AY, theta);
+        _qX.setFromAxisAngle(_AX, phi - Math.PI/2);
+        _qCam.multiplyQuaternions(_qY, _qX);
+        // Invert so the face in the camera's direction faces the mini-camera
+        vc.cubeGroup.quaternion.copy(_qCam).invert();
+        // Compass rotates only around Y (keeps N/S/E/W correct)
+        vc.compassGroup.quaternion.setFromAxisAngle(_AY, -theta);
         vc.renderer.render(vc.scene, vc.camera);
       }
       animate();
 
-      // Mouse interaction
-      function getMousePos(e) {
+      // ── Hover / click helpers ───────────────────────────────────
+      function getHit(e) {
+        var vc = vcState.current; if(!vc) return null;
         var rect = canvas.getBoundingClientRect();
-        vc.mouse.x = ((e.clientX-rect.left)/rect.width)*2-1;
-        vc.mouse.y = -((e.clientY-rect.top)/rect.height)*2+1;
+        mouse.x = ((e.clientX-rect.left)/rect.width)*2-1;
+        mouse.y = -((e.clientY-rect.top)/rect.height)*2+1;
+        raycaster.setFromCamera(mouse, camera);
+        var hits = raycaster.intersectObject(cubeMesh);
+        return hits.length>0 ? BOX_FACE_MAP[hits[0].face.materialIndex] : null;
       }
-      function onMove(e) {
-        var vc=vcState.current; if(!vc) return;
-        getMousePos(e);
-        vc.raycaster.setFromCamera(vc.mouse, vc.camera);
-        var hits = vc.raycaster.intersectObjects(vc.faceMeshes);
-        var newHover = hits.length>0 ? hits[0].object.userData.faceIndex : null;
-        if(newHover !== hovered) {
-          // Reset old hover
-          vc.faceMeshes.forEach(function(m,i){
-            m.material.map = makeFaceTexture(m.userData.label, i===newHover);
-            m.material.needsUpdate = true;
-          });
-          setHovered(newHover);
-        }
+      function updateHover(newIdx) {
+        var vc = vcState.current; if(!vc) return;
+        if(newIdx === vc.hoveredIdx) return;
+        vc.hoveredIdx = newIdx;
+        vc.materials.forEach(function(mat, boxIdx) {
+          var fi = BOX_FACE_MAP[boxIdx];
+          var isHov = fi === newIdx;
+          mat.map = makeFaceTexture(FACES[fi].label, isHov);
+          mat.map.needsUpdate = true;
+          mat.color.setHex(isHov ? 0x2563eb : (FACE_CLR[FACES[fi].label]||0x1c3550));
+        });
       }
-      function onClick(e) {
-        var vc=vcState.current; if(!vc) return;
-        getMousePos(e);
-        vc.raycaster.setFromCamera(vc.mouse, vc.camera);
-        // Check faces first
-        var faceHits = vc.raycaster.intersectObjects(vc.faceMeshes);
-        if(faceHits.length>0) {
-          var f = FACES[faceHits[0].object.userData.faceIndex];
-          flyToDir(f.normal);
-          return;
-        }
-      }
-      // Drag-to-orbit: dragging on the cube orbits the main camera
-      var isDragging = false, dragStart = {x:0, y:0}, didDrag = false;
-      function onDown(e) {
-        isDragging = true;
-        didDrag = false;
-        dragStart.x = e.clientX;
-        dragStart.y = e.clientY;
-        canvas.style.cursor = 'grabbing';
-      }
+
+      // ── Drag-to-orbit / click ───────────────────────────────────
+      var isDragging=false, dragStart={x:0,y:0}, didDrag=false;
+      function onDown(e) { isDragging=true; didDrag=false; dragStart.x=e.clientX; dragStart.y=e.clientY; canvas.style.cursor='grabbing'; }
       function onDrag(e) {
-        if (!isDragging) { onMove(e); return; }
-        var dx = e.clientX - dragStart.x;
-        var dy = e.clientY - dragStart.y;
-        if (Math.abs(dx) > 3 || Math.abs(dy) > 3) didDrag = true;
-        if (!didDrag) return;
-        dragStart.x = e.clientX;
-        dragStart.y = e.clientY;
-        // Rotate the main camera orbit (same as dragging the 3D view)
-        var S = state3d.current;
-        if (S && S.orbit) {
-          S.orbit.sph.theta -= dx * 0.007;
-          S.orbit.sph.phi -= dy * 0.007;
-          S.orbit.apply();
-          invalidate();
+        if(!isDragging){ updateHover(getHit(e)); return; }
+        var dx=e.clientX-dragStart.x, dy=e.clientY-dragStart.y;
+        if(Math.abs(dx)>3||Math.abs(dy)>3) didDrag=true;
+        if(!didDrag) return;
+        dragStart.x=e.clientX; dragStart.y=e.clientY;
+        var S=state3d.current;
+        if(S&&S.orbit){
+          S.orbit.sph.theta -= dx*0.007;
+          S.orbit.sph.phi = Math.max(0.05, Math.min(Math.PI-0.05, S.orbit.sph.phi - dy*0.007));
+          S.orbit.apply(); invalidate();
         }
       }
       function onUp(e) {
-        if (isDragging && !didDrag) onClick(e); // click if no drag
-        isDragging = false;
-        canvas.style.cursor = 'pointer';
+        if(isDragging&&!didDrag){ var fi=getHit(e); if(fi!==null) flyToDir(FACES[fi].normal); }
+        isDragging=false; canvas.style.cursor='pointer';
       }
       canvas.addEventListener('mousedown', onDown);
       canvas.addEventListener('mousemove', onDrag);
-      canvas.addEventListener('mouseup', onUp);
-      canvas.addEventListener('mouseleave', function(){
-        isDragging = false;
-        canvas.style.cursor = 'pointer';
-        var vc=vcState.current; if(!vc) return;
-        vc.faceMeshes.forEach(function(m){
-          m.material.map = makeFaceTexture(m.userData.label, false);
-          m.material.needsUpdate = true;
-        });
-        setHovered(null);
-      });
+      canvas.addEventListener('mouseup',   onUp);
+      canvas.addEventListener('mouseleave', function(){ isDragging=false; canvas.style.cursor='pointer'; updateHover(null); });
 
-      return function() {
-        cancelAnimationFrame(animId);
-        renderer.dispose();
-      };
+      return function(){ cancelAnimationFrame(animId); renderer.dispose(); };
     }, []);
 
     return html`<div style=${{position:'absolute',top:'.5rem',right:'.5rem',pointerEvents:'auto',width:120,height:120}}>
@@ -3700,8 +3644,14 @@ function startApp() {
       processFiles(Array.prototype.slice.call(e.target.files||[]));
       e.target.value='';
     }
+    // Expose globals so LeftRail buttons can trigger file pickers regardless of which tab is active
     window._ccOpenIFC = function(){setErr('');fileRef.current&&fileRef.current.click();};
     window._ccOpen2D  = function(){setErr('');file2dRef.current&&file2dRef.current.click();};
+    // If LeftRail triggered a pending open before this component mounted, honour it now
+    useEffect(function(){
+      if(window._ccPendingOpen==='ifc'){window._ccPendingOpen=null;window._ccOpenIFC&&window._ccOpenIFC();}
+      if(window._ccPendingOpen==='2d') {window._ccPendingOpen=null;window._ccOpen2D&&window._ccOpen2D();}
+    },[]);
     function onDrop(e) {
       e.preventDefault(); e.stopPropagation();
       dragCounter.current = 0; setDragging(false);
@@ -5924,10 +5874,16 @@ function startApp() {
         html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_CHAT}}></svg>`,
         'AI Assistant')}
       <div style=${{flex:1}}></div>
-      ${iconBtn(function(){window._ccOpenIFC&&window._ccOpenIFC();},
+      ${iconBtn(function(){
+          if(window._ccOpenIFC){window._ccOpenIFC();}
+          else{window._ccPendingOpen='ifc';d({t:'TAB',v:'models'});}
+        },
         html`<span style=${{fontWeight:700,fontSize:'.7rem',letterSpacing:'.03em'}}>IFC</span>`,
         'Load IFC model')}
-      ${iconBtn(function(){window._ccOpen2D&&window._ccOpen2D();},
+      ${iconBtn(function(){
+          if(window._ccOpen2D){window._ccOpen2D();}
+          else{window._ccPendingOpen='2d';d({t:'TAB',v:'models'});}
+        },
         html`<span style=${{fontWeight:700,fontSize:'.7rem',letterSpacing:'.03em'}}>2D</span>`,
         'Load DXF / PDF / DWG')}
       ${iconBtn(function(){saveProject(s);},
@@ -5994,10 +5950,26 @@ function startApp() {
     var projects=s.projectList||[];
     var activeProj=projects.find(function(p){return p.id===s.activeProject;})||projects[0]||{name:'Default'};
     var TITLES={models:'Models',clashes:'Clashes',issues:'Issues',explorer:'Explorer'};
+    var widthSt=useState(300), panelW=widthSt[0], setPanelW=widthSt[1];
+    var dragRef=useRef(null);
+    function onResizeDown(e){
+      e.preventDefault();
+      dragRef.current={startX:e.clientX,startW:panelW};
+      function onMove(ev){
+        if(!dragRef.current) return;
+        var dx=dragRef.current.startX-ev.clientX;
+        setPanelW(Math.max(200,Math.min(600,dragRef.current.startW+dx)));
+      }
+      function onUp(){dragRef.current=null;window.removeEventListener('mousemove',onMove);window.removeEventListener('mouseup',onUp);}
+      window.addEventListener('mousemove',onMove);
+      window.addEventListener('mouseup',onUp);
+    }
     return html`<div style=${{
-      width:300,flexShrink:0,display:'flex',flexDirection:'column',overflow:'hidden',
-      background:'var(--bg-primary)',borderLeft:'1px solid var(--border-subtle)'
+      width:panelW,flexShrink:0,display:'flex',flexDirection:'column',overflow:'hidden',
+      background:'var(--bg-primary)',borderLeft:'1px solid var(--border-subtle)',position:'relative'
     }}>
+      <div onMouseDown=${onResizeDown} style=${{position:'absolute',left:0,top:0,bottom:0,width:5,cursor:'col-resize',zIndex:10,
+        background:'transparent'}} onMouseEnter=${function(e){e.currentTarget.style.background='rgba(59,130,246,0.25)';}} onMouseLeave=${function(e){e.currentTarget.style.background='transparent';}}></div>
       <div style=${{display:'flex',alignItems:'center',padding:'.5rem .75rem',
         borderBottom:'1px solid var(--border-subtle)',flexShrink:0,gap:'.5rem'}}>
         <span style=${{fontWeight:600,fontSize:'.75rem',flex:1,color:'var(--text-primary)'}}>${TITLES[tab]||''}</span>

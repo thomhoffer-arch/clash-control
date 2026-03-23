@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.41 (2026-03-23)
+- Replace folder icon in left rail with IFC and 2D label buttons
+
 ## v1.2.40 (2026-03-23)
 - Split upload button into IFC and 2D buttons
 
