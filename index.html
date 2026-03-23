@@ -178,7 +178,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.45',hash:'2adbc74',date:'2026-03-23T15:30:47Z'};
+  var CC_VERSION = {v:'1.2.46',hash:'fecff92',date:'2026-03-23T15:46:45Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -2626,6 +2626,7 @@ function startApp() {
             }
           });
         }
+        S.renderer.clippingPlanes=[];
         invalidate();
       };
 
@@ -3021,6 +3022,17 @@ function startApp() {
       }
       invalidate();
     }, [s.floorPlan]);
+
+    // Safety net: force-clear clipping planes when all section modes are off
+    useEffect(function(){
+      var S = state3d.current; if(!S.renderer) return;
+      if(!s.sectionAxis && !s.sectionCustom && (!s.sectionBox||!s.sectionBox.enabled) && !s.floorPlan){
+        if(S.renderer.clippingPlanes.length>0){
+          S.renderer.clippingPlanes=[];
+          invalidate();
+        }
+      }
+    }, [s.sectionAxis, s.sectionCustom, s.sectionBox, s.floorPlan]);
 
     // Classification visibility: hide/show groups
     var lastHiddenRef = useRef(null);
