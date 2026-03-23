@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.40 (2026-03-23)
+- Split upload button into IFC and 2D buttons
+
 ## v1.2.39 (2026-03-23)
 - Fix tooltips rendering behind the 3D viewer
 
