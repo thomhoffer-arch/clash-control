@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.39 (2026-03-23)
+- Default clash markers to off to reduce visual clutter
+
 ## v1.2.38 (2026-03-23)
 - Fix: 'run clash...' commands now run detection instead of just setting rules
 

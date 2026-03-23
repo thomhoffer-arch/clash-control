@@ -178,7 +178,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.38',hash:'8b7839b',date:'2026-03-23T14:20:35Z'};
+  var CC_VERSION = {v:'1.2.39',hash:'9a07ba9',date:'2026-03-23T14:30:55Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -927,19 +927,19 @@ function startApp() {
   }
 
   // ── Geometry-accurate narrow-phase clash detection ──────────────
-  // After AABB broad-phase identifies candidates, this verifies using
-  // actual mesh vertices with a spatial hash grid for O(n+m) speed.
+  // Hard clashes: triangle-triangle intersection (catches real penetration,
+  //   ignores beam connections that just touch at endpoints)
+  // Soft clashes: vertex-to-vertex distance via spatial hash
 
-  // Extract world-space vertex positions from an element (cached as Float32Array)
+  // Extract world-space vertex positions from an element (cached)
   function _getWorldVerts(el) {
     if (el._wvCache) return el._wvCache;
     var all = [];
     (el.meshes || []).forEach(function(mesh) {
       var pos = mesh.geometry && mesh.geometry.attributes && mesh.geometry.attributes.position;
       if (!pos) return;
-      // Ensure matrixWorld is current (may not have rendered yet)
-      mesh.updateMatrixWorld(true);
-      var mat = mesh.matrixWorld;
+      mesh.updateMatrix();
+      var mat = mesh.matrix; // parent groups are identity
       var v = new THREE.Vector3();
       for (var i = 0; i < pos.count; i++) {
         v.set(pos.getX(i), pos.getY(i), pos.getZ(i));
@@ -951,11 +951,165 @@ function startApp() {
     return el._wvCache;
   }
 
-  // Spatial hash grid: bucket vertices into cells for O(1) proximity lookup
+  // Extract world-space triangles from an element (cached)
+  // Returns flat Float32Array: [ax,ay,az, bx,by,bz, cx,cy,cz, ...] (9 per tri)
+  function _getWorldTris(el) {
+    if (el._triCache) return el._triCache;
+    var tris = [];
+    (el.meshes || []).forEach(function(mesh) {
+      var geo = mesh.geometry;
+      var pos = geo && geo.attributes && geo.attributes.position;
+      if (!pos) return;
+      mesh.updateMatrix();
+      var mat = mesh.matrix;
+      var va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
+      var idx = geo.index;
+      var count = idx ? idx.count : pos.count;
+      for (var i = 0; i < count; i += 3) {
+        var ia = idx ? idx.getX(i) : i;
+        var ib = idx ? idx.getX(i+1) : i+1;
+        var ic = idx ? idx.getX(i+2) : i+2;
+        va.set(pos.getX(ia), pos.getY(ia), pos.getZ(ia)).applyMatrix4(mat);
+        vb.set(pos.getX(ib), pos.getY(ib), pos.getZ(ib)).applyMatrix4(mat);
+        vc.set(pos.getX(ic), pos.getY(ic), pos.getZ(ic)).applyMatrix4(mat);
+        tris.push(va.x,va.y,va.z, vb.x,vb.y,vb.z, vc.x,vc.y,vc.z);
+      }
+    });
+    el._triCache = new Float32Array(tris);
+    return el._triCache;
+  }
+
+  // ── Möller triangle-triangle intersection test ──────────────────
+  // Tests if two triangles (given as flat-array offsets) intersect.
+  // Based on "A Fast Triangle-Triangle Intersection Test" (Möller, 1997)
+  function _triTriTest(tA, oA, tB, oB) {
+    // Triangle A vertices
+    var a0x=tA[oA],a0y=tA[oA+1],a0z=tA[oA+2];
+    var a1x=tA[oA+3],a1y=tA[oA+4],a1z=tA[oA+5];
+    var a2x=tA[oA+6],a2y=tA[oA+7],a2z=tA[oA+8];
+    // Triangle B vertices
+    var b0x=tB[oB],b0y=tB[oB+1],b0z=tB[oB+2];
+    var b1x=tB[oB+3],b1y=tB[oB+4],b1z=tB[oB+5];
+    var b2x=tB[oB+6],b2y=tB[oB+7],b2z=tB[oB+8];
+
+    // Plane of B: normal n2, distance d2
+    var e1x=b1x-b0x,e1y=b1y-b0y,e1z=b1z-b0z;
+    var e2x=b2x-b0x,e2y=b2y-b0y,e2z=b2z-b0z;
+    var n2x=e1y*e2z-e1z*e2y, n2y=e1z*e2x-e1x*e2z, n2z=e1x*e2y-e1y*e2x;
+    var d2=-(n2x*b0x+n2y*b0y+n2z*b0z);
+    // Signed distances of A's vertices to plane B
+    var da0=n2x*a0x+n2y*a0y+n2z*a0z+d2;
+    var da1=n2x*a1x+n2y*a1y+n2z*a1z+d2;
+    var da2=n2x*a2x+n2y*a2y+n2z*a2z+d2;
+    // All on same side → no intersection
+    if(da0>0&&da1>0&&da2>0) return false;
+    if(da0<0&&da1<0&&da2<0) return false;
+
+    // Plane of A: normal n1, distance d1
+    var f1x=a1x-a0x,f1y=a1y-a0y,f1z=a1z-a0z;
+    var f2x=a2x-a0x,f2y=a2y-a0y,f2z=a2z-a0z;
+    var n1x=f1y*f2z-f1z*f2y, n1y=f1z*f2x-f1x*f2z, n1z=f1x*f2y-f1y*f2x;
+    var d1=-(n1x*a0x+n1y*a0y+n1z*a0z);
+    // Signed distances of B's vertices to plane A
+    var db0=n1x*b0x+n1y*b0y+n1z*b0z+d1;
+    var db1=n1x*b1x+n1y*b1y+n1z*b1z+d1;
+    var db2=n1x*b2x+n1y*b2y+n1z*b2z+d1;
+    if(db0>0&&db1>0&&db2>0) return false;
+    if(db0<0&&db1<0&&db2<0) return false;
+
+    // Degenerate triangle check (zero-area)
+    var nl1=n1x*n1x+n1y*n1y+n1z*n1z;
+    var nl2=n2x*n2x+n2y*n2y+n2z*n2z;
+    if(nl1<1e-12||nl2<1e-12) return false;
+
+    // Intersection line direction D = n1 × n2
+    var Dx=n1y*n2z-n1z*n2y, Dy=n1z*n2x-n1x*n2z, Dz=n1x*n2y-n1y*n2x;
+    // Project onto largest axis of D
+    var ax=Math.abs(Dx), ay=Math.abs(Dy), az=Math.abs(Dz);
+    var proj;
+    if(ax>=ay&&ax>=az) proj=function(x,y,z){return x;};
+    else if(ay>=az) proj=function(x,y,z){return y;};
+    else proj=function(x,y,z){return z;};
+
+    // Compute intervals on intersection line for each triangle
+    function interval(v0x,v0y,v0z,v1x,v1y,v1z,v2x,v2y,v2z,dd0,dd1,dd2) {
+      // Sort so dd0 is the lone vertex on its side
+      var i0x,i0y,i0z,i1x,i1y,i1z,i2x,i2y,i2z,di0,di1,di2;
+      if(dd0*dd1>0){i0x=v2x;i0y=v2y;i0z=v2z;i1x=v0x;i1y=v0y;i1z=v0z;i2x=v1x;i2y=v1y;i2z=v1z;di0=dd2;di1=dd0;di2=dd1;}
+      else if(dd0*dd2>0){i0x=v1x;i0y=v1y;i0z=v1z;i1x=v0x;i1y=v0y;i1z=v0z;i2x=v2x;i2y=v2y;i2z=v2z;di0=dd1;di1=dd0;di2=dd2;}
+      else{i0x=v0x;i0y=v0y;i0z=v0z;i1x=v1x;i1y=v1y;i1z=v1z;i2x=v2x;i2y=v2y;i2z=v2z;di0=dd0;di1=dd1;di2=dd2;}
+      var p0=proj(i0x,i0y,i0z), p1=proj(i1x,i1y,i1z), p2=proj(i2x,i2y,i2z);
+      var t1=p0+(p1-p0)*di0/(di0-di1);
+      var t2=p0+(p2-p0)*di0/(di0-di2);
+      return t1<t2?[t1,t2]:[t2,t1];
+    }
+    var iA=interval(a0x,a0y,a0z,a1x,a1y,a1z,a2x,a2y,a2z,da0,da1,da2);
+    var iB=interval(b0x,b0y,b0z,b1x,b1y,b1z,b2x,b2y,b2z,db0,db1,db2);
+    return iA[0]<iB[1]&&iB[0]<iA[1]; // strict < to exclude edge-only touches
+  }
+
+  // ── Spatial hash for triangles (by centroid) ────────────────────
+  function _TriHash(cellSize) {
+    this.cs = cellSize; this.inv = 1/cellSize; this.map = {};
+  }
+  _TriHash.prototype.insert = function(tris) {
+    for (var i = 0; i < tris.length; i += 9) {
+      var cx = (tris[i]+tris[i+3]+tris[i+6])/3;
+      var cy = (tris[i+1]+tris[i+4]+tris[i+7])/3;
+      var cz = (tris[i+2]+tris[i+5]+tris[i+8])/3;
+      var k = Math.floor(cx*this.inv)+','+Math.floor(cy*this.inv)+','+Math.floor(cz*this.inv);
+      if (!this.map[k]) this.map[k] = [];
+      this.map[k].push(i);
+    }
+  };
+  _TriHash.prototype.nearby = function(cx,cy,cz) {
+    var out = [];
+    var gx=Math.floor(cx*this.inv), gy=Math.floor(cy*this.inv), gz=Math.floor(cz*this.inv);
+    for(var dx=-1;dx<=1;dx++) for(var dy=-1;dy<=1;dy++) for(var dz=-1;dz<=1;dz++) {
+      var b = this.map[(gx+dx)+','+(gy+dy)+','+(gz+dz)];
+      if(b) for(var i=0;i<b.length;i++) out.push(b[i]);
+    }
+    return out;
+  };
+
+  // Check if two elements' triangles actually intersect (hard clash)
+  // Uses spatial hash to avoid O(n*m) brute force
+  function _meshesIntersect(elA, elB) {
+    var tA = _getWorldTris(elA), tB = _getWorldTris(elB);
+    if (!tA.length || !tB.length) return false;
+    // Build hash from smaller set, query with larger
+    var hashTris, queryTris, hashIsA;
+    if (tA.length <= tB.length) { hashTris=tA; queryTris=tB; hashIsA=true; }
+    else { hashTris=tB; queryTris=tA; hashIsA=false; }
+    // Cell size: estimate from average triangle span
+    var span = 0, cnt = 0;
+    for (var s = 0; s < hashTris.length && cnt < 30; s += 9, cnt++) {
+      var sx=Math.max(hashTris[s],hashTris[s+3],hashTris[s+6])-Math.min(hashTris[s],hashTris[s+3],hashTris[s+6]);
+      var sy=Math.max(hashTris[s+1],hashTris[s+4],hashTris[s+7])-Math.min(hashTris[s+1],hashTris[s+4],hashTris[s+7]);
+      var sz=Math.max(hashTris[s+2],hashTris[s+5],hashTris[s+8])-Math.min(hashTris[s+2],hashTris[s+5],hashTris[s+8]);
+      span += Math.max(sx,sy,sz);
+    }
+    var cs = cnt > 0 ? Math.max((span/cnt)*2, 0.05) : 0.1;
+    var grid = new _TriHash(cs);
+    grid.insert(hashTris);
+
+    for (var q = 0; q < queryTris.length; q += 9) {
+      var qcx=(queryTris[q]+queryTris[q+3]+queryTris[q+6])/3;
+      var qcy=(queryTris[q+1]+queryTris[q+4]+queryTris[q+7])/3;
+      var qcz=(queryTris[q+2]+queryTris[q+5]+queryTris[q+8])/3;
+      var near = grid.nearby(qcx,qcy,qcz);
+      for (var n = 0; n < near.length; n++) {
+        if (hashIsA ? _triTriTest(hashTris, near[n], queryTris, q) : _triTriTest(queryTris, q, hashTris, near[n])) {
+          return true; // found an intersecting triangle pair → hard clash
+        }
+      }
+    }
+    return false;
+  }
+
+  // ── Spatial hash for vertex distance (used for soft/clearance clashes) ──
   function _SpatialHash(cellSize) {
-    this.cs = cellSize;
-    this.inv = 1 / cellSize;
-    this.map = {};
+    this.cs = cellSize; this.inv = 1/cellSize; this.map = {};
   }
   _SpatialHash.prototype.key = function(x, y, z) {
     return Math.floor(x * this.inv) + ',' + Math.floor(y * this.inv) + ',' + Math.floor(z * this.inv);
@@ -967,65 +1121,45 @@ function startApp() {
       this.map[k].push(i);
     }
   };
-  // Query: find minimum squared distance from point to any vertex in the grid
-  // Searches the cell containing the point + all 26 neighbours
   _SpatialHash.prototype.minDistSq = function(px, py, pz, verts) {
     var best = Infinity;
     var cx = Math.floor(px * this.inv), cy = Math.floor(py * this.inv), cz = Math.floor(pz * this.inv);
-    for (var dx = -1; dx <= 1; dx++) {
-      for (var dy = -1; dy <= 1; dy++) {
-        for (var dz = -1; dz <= 1; dz++) {
-          var bucket = this.map[(cx + dx) + ',' + (cy + dy) + ',' + (cz + dz)];
-          if (!bucket) continue;
-          for (var b = 0; b < bucket.length; b++) {
-            var idx = bucket[b];
-            var ex = px - verts[idx], ey = py - verts[idx + 1], ez = pz - verts[idx + 2];
-            var d2 = ex * ex + ey * ey + ez * ez;
-            if (d2 < best) best = d2;
-          }
-        }
+    for (var dx = -1; dx <= 1; dx++) for (var dy = -1; dy <= 1; dy++) for (var dz = -1; dz <= 1; dz++) {
+      var bucket = this.map[(cx + dx) + ',' + (cy + dy) + ',' + (cz + dz)];
+      if (!bucket) continue;
+      for (var b = 0; b < bucket.length; b++) {
+        var idx = bucket[b];
+        var ex = px - verts[idx], ey = py - verts[idx + 1], ez = pz - verts[idx + 2];
+        var d2 = ex * ex + ey * ey + ez * ez;
+        if (d2 < best) best = d2;
       }
     }
     return best;
   };
 
-  // Narrow-phase: compute actual minimum distance between two elements' geometry
-  // Returns distance in metres. Uses spatial hash for speed.
-  // thresholdM: early-exit if we find a distance below this (metres)
+  // Minimum vertex-to-vertex distance (for soft/clearance clashes)
   function _meshMinDist(elA, elB, thresholdM) {
     var vA = _getWorldVerts(elA), vB = _getWorldVerts(elB);
     if (!vA.length || !vB.length) return Infinity;
-
-    // Cell size = threshold (clamped to reasonable range)
     var cs = Math.max(thresholdM || 0.05, 0.02);
-    // Build grid from the smaller set
-    var grid, queryVerts, gridVerts;
-    if (vA.length <= vB.length) {
-      gridVerts = vA; queryVerts = vB;
-    } else {
-      gridVerts = vB; queryVerts = vA;
-    }
-    grid = new _SpatialHash(cs);
+    var gridVerts, queryVerts;
+    if (vA.length <= vB.length) { gridVerts=vA; queryVerts=vB; }
+    else { gridVerts=vB; queryVerts=vA; }
+    var grid = new _SpatialHash(cs);
     grid.insert(gridVerts);
-
-    var tSq = thresholdM * thresholdM;
-    var minSq = Infinity;
-    // Query every vertex of the other element (sample if very large)
+    var tSq = thresholdM * thresholdM, minSq = Infinity;
     var step = queryVerts.length > 30000 ? 3 * Math.ceil(queryVerts.length / 30000) : 3;
     for (var i = 0; i < queryVerts.length; i += step) {
       var d2 = grid.minDistSq(queryVerts[i], queryVerts[i + 1], queryVerts[i + 2], gridVerts);
-      if (d2 < minSq) {
-        minSq = d2;
-        if (minSq <= tSq) return Math.sqrt(minSq); // early exit
-      }
+      if (d2 < minSq) { minSq = d2; if (minSq <= tSq) return Math.sqrt(minSq); }
     }
     return Math.sqrt(minSq);
   }
 
-  // Flush vertex caches (called on project switch / model unload)
-  function _flushVertCache(models) {
+  // Flush caches (called on project switch / model unload)
+  function _flushGeoCache(models) {
     (models || []).forEach(function(m) {
-      (m.elements || []).forEach(function(el) { delete el._wvCache; });
+      (m.elements || []).forEach(function(el) { delete el._wvCache; delete el._triCache; });
     });
   }
 
@@ -1103,19 +1237,22 @@ function startApp() {
           if (!bA.intersectsBox(bB)) return; // AABBs don't overlap at all
         }
 
-        // ── Narrow phase: actual mesh geometry distance ───────────
-        // Compute real minimum distance between mesh vertices
-        var hardThreshM = Math.max(hardTol, 0.001); // 1mm minimum for "touching"
-        var softThreshM = rules.soft ? clearanceM : 0;
-        var checkThreshM = Math.max(hardThreshM, softThreshM);
-        var geoDist = _meshMinDist(eA, eB, checkThreshM);
+        // ── Narrow phase: geometry-level check ─────────────────────
+        // Hard clash = triangles physically intersect (not just touching)
+        // Soft clash = actual mesh distance within clearance
+        var isHard = false, isSoft = false, geoDist = Infinity;
 
-        var isHard = rules.hard && (geoDist <= hardThreshM);
-        var isSoft = !isHard && rules.soft && (geoDist <= softThreshM);
+        if (rules.hard) {
+          isHard = _meshesIntersect(eA, eB);
+        }
+        if (!isHard && rules.soft && clearanceM > 0) {
+          geoDist = _meshMinDist(eA, eB, clearanceM);
+          isSoft = geoDist <= clearanceM;
+        }
 
         if (isHard || isSoft) {
           var ctr = bA.getCenter(_tmpCtrA);
-          var dist = Math.round(geoDist * 1000); // metres → mm
+          var dist = isHard ? 0 : Math.round(geoDist * 1000); // metres → mm
           var pA = eA.props||{}, pB = eB.props||{};
           var tA = pA.ifcType||'Element', tB = pB.ifcType||'Element';
           var nA = pA.name||('#'+eA.expressId), nB = pB.name||('#'+eB.expressId);
@@ -6035,31 +6172,35 @@ function startApp() {
     var inputBg  = isDark ? '#0f172a' : '#f9fafb';
     var aiBubbleBg = isDark ? '#273244' : '#f3f4f6';
 
+    var isDetecting = s.detecting;
     if (!open) {
-      var closedAnim = modelLoading ? 'nlBorderPulse 2s ease-in-out infinite' : 'none';
-      var closedBorder = modelLoading ? '1px solid rgba(96,165,250,.5)' : '1px solid ' + borderCol;
+      var closedGlow = modelLoading || isDetecting;
+      var closedAnim = closedGlow ? 'nlBorderPulse 2s ease-in-out infinite' : 'none';
+      var closedBorder = closedGlow ? '1px solid rgba(96,165,250,.5)' : '1px solid ' + borderCol;
+      var closedLabel = isDetecting ? 'Detecting clashes…' : modelLoading ? 'Model loading…' : 'ClashControl';
       return html`<button
         onClick=${function(){ setOpen(true); }}
-        title=${modelLoading ? 'Model is loading… click to set up clashes' : 'Set up clash detection in plain English (Ctrl+/)'}
+        title=${isDetecting ? 'Clash detection running…' : modelLoading ? 'Model is loading… click to set up clashes' : 'ClashControl — describe tasks in plain English (Ctrl+/)'}
         style=${{
           position:'fixed', bottom:'1rem', left:'50%', transform:'translateX(-50%)',
           zIndex:1200, display:'flex', alignItems:'center', gap:'.4rem',
           padding:'.45rem 1.1rem', borderRadius:999,
           background:panelBg, border:closedBorder,
-          color:modelLoading ? (isDark?'#60a5fa':'#2563eb') : mutedCol, fontSize:'.74rem', cursor:'pointer',
-          boxShadow: modelLoading ? '0 2px 10px rgba(0,0,0,.25), 0 0 20px rgba(37,99,235,.3)' : '0 2px 10px rgba(0,0,0,.25)',
+          color:closedGlow ? (isDark?'#60a5fa':'#2563eb') : mutedCol, fontSize:'.74rem', cursor:'pointer',
+          boxShadow: closedGlow ? '0 2px 10px rgba(0,0,0,.25), 0 0 20px rgba(37,99,235,.3)' : '0 2px 10px rgba(0,0,0,.25)',
           whiteSpace:'nowrap', animation:closedAnim
         }}>
-        ${modelLoading ? html`<span class="spin" style=${{display:'inline-block',width:12,height:12,borderRadius:'50%',border:'1.5px solid rgba(96,165,250,.3)',borderTopColor:'#60a5fa'}}></span>` : html`<svg width="12" height="12" viewBox="0 0 16 16" fill="none" style=${{flexShrink:0}}>
+        ${closedGlow ? html`<span class="spin" style=${{display:'inline-block',width:12,height:12,borderRadius:'50%',border:'1.5px solid rgba(96,165,250,.3)',borderTopColor:'#60a5fa'}}></span>` : html`<svg width="12" height="12" viewBox="0 0 16 16" fill="none" style=${{flexShrink:0}}>
           <path d="M2 4h12M2 8h8M2 12h10" stroke="${isDark?'#60a5fa':'#2563eb'}" stroke-width="1.6" stroke-linecap="round"/>
         </svg>`}
-        ${modelLoading ? 'Model loading…' : 'Set up clash detection…'}
+        ${closedLabel}
         <span style=${{fontSize:'.6rem', opacity:.5, marginLeft:'.15rem'}}>Ctrl+/</span>
       </button>`;
     }
 
-    var panelAnimation = (modelLoading || llmStatus === 'loading') ? 'nlBorderPulse 2s ease-in-out infinite' : 'none';
-    var panelBorderCol = (modelLoading || llmStatus === 'loading') ? 'rgba(96,165,250,.5)' : borderCol;
+    var panelGlow = modelLoading || llmStatus === 'loading' || isDetecting;
+    var panelAnimation = panelGlow ? 'nlBorderPulse 2s ease-in-out infinite' : 'none';
+    var panelBorderCol = panelGlow ? 'rgba(96,165,250,.5)' : borderCol;
     var backendLabel = backend === 'ollama' ? 'Ollama (' + _ollamaModel + ')' : backend === 'browser' ? 'In-browser (0.5B)' : null;
     var backendColor = backend === 'ollama' ? '#22c55e' : backend === 'browser' ? '#f59e0b' : mutedCol;
     return html`<div style=${{
@@ -6077,8 +6218,12 @@ function startApp() {
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style=${{flexShrink:0}}>
           <path d="M2 4h12M2 8h8M2 12h10" stroke="#60a5fa" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
-        <span style=${{fontSize:'.76rem', fontWeight:600, color:textCol, flex:1}}>Clash Setup</span>
-        ${modelLoading && html`<span style=${{fontSize:'.6rem', color:'#60a5fa', display:'flex', alignItems:'center', gap:'.25rem'}}>
+        <span style=${{fontSize:'.76rem', fontWeight:600, color:textCol, flex:1}}>ClashControl</span>
+        ${isDetecting && html`<span style=${{fontSize:'.6rem', color:'#f59e0b', display:'flex', alignItems:'center', gap:'.25rem'}}>
+          <span class="spin" style=${{display:'inline-block', width:'.55rem', height:'.55rem', borderRadius:'50%', border:'1.5px solid rgba(245,158,11,.3)', borderTopColor:'#f59e0b'}}></span>
+          Detecting…
+        </span>`}
+        ${!isDetecting && modelLoading && html`<span style=${{fontSize:'.6rem', color:'#60a5fa', display:'flex', alignItems:'center', gap:'.25rem'}}>
           <span class="spin" style=${{display:'inline-block', width:'.55rem', height:'.55rem', borderRadius:'50%', border:'1.5px solid rgba(96,165,250,.3)', borderTopColor:'#60a5fa'}}></span>
           Loading model…
         </span>`}
