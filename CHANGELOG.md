@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.2.50 (2026-03-23)
+- Word-based NL parsing for clash detection commands
+
+## v1.2.49 (2026-03-23)
+- Replace distance filter with dual-range slider
+
+## v1.2.48 (2026-03-23)
+- Support discipline-based model selection in clash detection
+
+## v1.2.47 (2026-03-23)
+- Fix phantom section plane caused by stale clipping planes
+
 ## v1.2.46 (2026-03-23)
 - Convert multi-option filters to dropdown checkboxes & add delete to sidebar projects
 

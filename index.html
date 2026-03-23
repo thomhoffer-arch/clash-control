@@ -137,6 +137,10 @@
     .lc2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     button{font-family:inherit}
     .cc-tip{position:relative}.cc-tip::after{content:attr(data-tip);position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%) translateX(-4px);background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:5px;padding:.25rem .5rem;font-size:.68rem;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .15s,transform .15s;z-index:9999}.cc-tip:hover::after{opacity:1;transform:translateY(-50%) translateX(0)}.cc-tip-up::after{left:50%;top:auto;bottom:calc(100% + 7px);transform:translateX(-50%) translateY(4px)}.cc-tip-up:hover::after{transform:translateX(-50%) translateY(0)}.cc-tip-left::after{left:auto;right:calc(100% + 8px);transform:translateY(-50%) translateX(4px)}.cc-tip-left:hover::after{transform:translateY(-50%) translateX(0)}
+    input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;height:14px;width:14px;border-radius:50%;background:#3b82f6;border:2px solid #1e3a5f;cursor:pointer;pointer-events:auto;margin-top:-1px;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+    input[type=range]::-moz-range-thumb{height:10px;width:10px;border-radius:50%;background:#3b82f6;border:2px solid #1e3a5f;cursor:pointer;pointer-events:auto;box-shadow:0 1px 3px rgba(0,0,0,.4)}
+    input[type=range]::-webkit-slider-runnable-track{height:4px;background:transparent;border-radius:2px}
+    input[type=range]::-moz-range-track{height:4px;background:transparent;border-radius:2px}
   </style>
 </head>
 <body>
@@ -178,7 +182,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.46',hash:'fecff92',date:'2026-03-23T15:46:45Z'};
+  var CC_VERSION = {v:'1.2.50',hash:'7ebb1c3',date:'2026-03-23T16:08:04Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -1275,7 +1279,14 @@ function startApp() {
   }
 
   function detectClashes(models, rules) {
-    var pick = function(id) { return id === 'all' ? models : models.filter(function(m){return m.id===id}); };
+    var pick = function(id) {
+      if (id === 'all') return models;
+      if (typeof id === 'string' && id.indexOf('disc:') === 0) {
+        var disc = id.slice(5);
+        return models.filter(function(m){ return m.discipline === disc; });
+      }
+      return models.filter(function(m){return m.id===id});
+    };
     var grpA = pick(rules.modelA), grpB = pick(rules.modelB);
     var clearanceM = (rules.clearance||0)/1000;
     var clashes = [];
@@ -4219,10 +4230,10 @@ function startApp() {
         <span style=${{width:20,height:2,background:'var(--text-faint)',borderRadius:1}}></span>
       </div>
       ${function(){
-        // Collect all unique storeys across all models for global toggle + floor plan cuts
+        // Collect all unique storeys across visible models for global toggle + floor plan cuts
         var allStoreys = {};
         var elevMap = {}; // storeyName -> elevation
-        s.models.forEach(function(m){
+        s.models.filter(function(m){return m.visible!==false}).forEach(function(m){
           (m.storeys||[]).forEach(function(st){
             if(!allStoreys[st]) allStoreys[st]={models:[]};
             allStoreys[st].models.push(m.id);
@@ -4406,11 +4417,12 @@ function startApp() {
     var cls = s.classifications;
     var lastClassifyRef = useRef('');
     useEffect(function(){
-      if(s.models.length===0) return;
-      var sig = s.models.map(function(m){return m.id+':'+(m.elements?m.elements.length:0)}).join(',');
+      var vis = s.models.filter(function(m){return m.visible!==false});
+      if(vis.length===0){ d({t:'SET_CLASSIFICATIONS',v:{}}); lastClassifyRef.current=''; return; }
+      var sig = vis.map(function(m){return m.id+':'+(m.elements?m.elements.length:0)+':'+(m.visible!==false)}).join(',');
       if(sig===lastClassifyRef.current) return;
       lastClassifyRef.current = sig;
-      d({t:'SET_CLASSIFICATIONS',v:classifyModels(s.models)});
+      d({t:'SET_CLASSIFICATIONS',v:classifyModels(vis)});
     }, [s.models]);
     var hasCls = cls && Object.keys(cls).length>0;
     var classView = viewMode!=='tree' ? viewMode : null;
@@ -4456,7 +4468,7 @@ function startApp() {
       </div>
       <div style=${{flex:1,overflowY:'auto',fontSize:'.6rem'}}>
         ${s.models.length===0 && html`<div style=${{textAlign:'center',color:'var(--text-faint)',fontSize:'.7rem',padding:'2rem 1rem'}}>Load models to explore</div>`}
-        ${viewMode==='tree' && s.models.map(function(model){
+        ${viewMode==='tree' && s.models.filter(function(m){return m.visible!==false}).map(function(model){
           var mKey = 'm_'+model.id;
           var mOpen = !!expanded[mKey];
           var disc = DISC.find(function(x){return x.id===model.discipline;});
@@ -4605,12 +4617,21 @@ function startApp() {
     var isExplorerTab = s.tab==='explorer';
     var rawItems = isClashTab ? s.clashes : s.issues;
 
+    // Build set of visible model IDs for filtering
+    var visibleModelIds = useMemo(function(){
+      var ids = {};
+      s.models.forEach(function(m){ if(m.visible !== false) ids[m.id] = true; });
+      return ids;
+    }, [s.models]);
+
     // Collect unique values for dynamic filter dropdowns (memoized)
+    // Only includes values from clashes/issues belonging to visible (checked) models
     var filterLists = useMemo(function(){
       var uTypes={}, uStoreys={}, uMats={};
       var uPriorities={}, uCategories={}, uAssignees={}, uIssueTypes={}, uIssueStoreys={};
       if(isClashTab){
         s.clashes.forEach(function(c){
+          if((c.modelAId && !visibleModelIds[c.modelAId]) || (c.modelBId && !visibleModelIds[c.modelBId])) return;
           if(c.elemAType) uTypes[c.elemAType]=true;
           if(c.elemBType) uTypes[c.elemBType]=true;
           if(c.elemAStorey) uStoreys[c.elemAStorey]=true;
@@ -4620,6 +4641,7 @@ function startApp() {
         });
       } else {
         s.issues.forEach(function(i){
+          if(i.modelId && !visibleModelIds[i.modelId]) return;
           if(i.priority) uPriorities[i.priority]=true;
           if(i.category) uCategories[i.category]=true;
           if(i.assignee) uAssignees[i.assignee]=true;
@@ -4630,7 +4652,7 @@ function startApp() {
       return {types:Object.keys(uTypes).sort(), storeys:Object.keys(uStoreys).sort(), materials:Object.keys(uMats).sort(),
         priorities:Object.keys(uPriorities).sort(), categories:Object.keys(uCategories).sort(), assignees:Object.keys(uAssignees).sort(),
         issueTypes:Object.keys(uIssueTypes).sort(), issueStoreys:Object.keys(uIssueStoreys).sort()};
-    }, [s.clashes, s.issues, isClashTab]);
+    }, [s.clashes, s.issues, isClashTab, visibleModelIds]);
     var typeList = filterLists.types;
     var storeyList = filterLists.storeys;
     var materialList = filterLists.materials;
@@ -4655,13 +4677,6 @@ function startApp() {
     if(f.assignee!=='all') activeCount++;
     if(f.issueElementType!=='all') activeCount++;
     if(f.issueStorey!=='all') activeCount++;
-
-    // Build set of visible model IDs for filtering
-    var visibleModelIds = useMemo(function(){
-      var ids = {};
-      s.models.forEach(function(m){ if(m.visible !== false) ids[m.id] = true; });
-      return ids;
-    }, [s.models]);
 
     // Apply all filters
     var items = useMemo(function(){
@@ -4789,16 +4804,37 @@ function startApp() {
           </select>
         </div>`}
 
-        ${isClashTab && html`<div>
-          <span style=${FL}>Distance (mm)</span>
-          <div style=${{display:'flex',gap:'.3rem',alignItems:'center'}}>
-            <input type="number" min="0" value=${f.distMin} onInput=${function(e){d({t:'UPD_FILTERS',u:{distMin:+e.target.value||0}})}}
-              placeholder="Min" style=${{...S_INPUT,fontSize:'.65rem',padding:'.2rem .3rem',width:'50%'}} />
-            <span style=${{fontSize:'.6rem',color:'var(--text-faint)'}}>–</span>
-            <input type="number" min="0" value=${f.distMax} onInput=${function(e){d({t:'UPD_FILTERS',u:{distMax:+e.target.value||9999}})}}
-              placeholder="Max" style=${{...S_INPUT,fontSize:'.65rem',padding:'.2rem .3rem',width:'50%'}} />
-          </div>
-        </div>`}
+        ${isClashTab && function(){
+          var maxDist = 500;
+          s.clashes.forEach(function(c){ if(c.distance>maxDist) maxDist=c.distance; });
+          maxDist = Math.ceil(maxDist/50)*50 || 500;
+          var lo = Math.min(f.distMin, maxDist), hi = Math.min(f.distMax, maxDist);
+          var loP = (lo/maxDist)*100, hiP = (hi/maxDist)*100;
+          var trackBg = 'linear-gradient(to right, var(--bg-primary) '+loP+'%, #3b82f6 '+loP+'%, #3b82f6 '+hiP+'%, var(--bg-primary) '+hiP+'%)';
+          function onMinChange(e){var v=Math.min(+e.target.value,hi);d({t:'UPD_FILTERS',u:{distMin:v}});}
+          function onMaxChange(e){var v=Math.max(+e.target.value,lo);d({t:'UPD_FILTERS',u:{distMax:v}});}
+          var loLabel = lo===0?'0 (hard)':lo+'mm';
+          var hiLabel = hi>=maxDist?maxDist+'mm+':hi+'mm';
+          return html`<div>
+            <div style=${{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'.15rem'}}>
+              <span style=${FL}>Distance</span>
+              <span style=${{fontSize:'.55rem',color:'var(--text-secondary)'}}>${loLabel} – ${hiLabel}</span>
+            </div>
+            <div style=${{position:'relative',height:20,marginBottom:'.1rem'}}>
+              <div style=${{position:'absolute',top:8,left:0,right:0,height:4,borderRadius:2,background:trackBg,pointerEvents:'none'}}></div>
+              <input type="range" min="0" max=${maxDist} step="1" value=${lo}
+                onInput=${onMinChange}
+                style=${{position:'absolute',top:0,left:0,width:'100%',height:20,background:'transparent',pointerEvents:'none',WebkitAppearance:'none',appearance:'none',margin:0,zIndex:lo>hi-10?3:1,'--thumb-pe':'auto'}} />
+              <input type="range" min="0" max=${maxDist} step="1" value=${hi}
+                onInput=${onMaxChange}
+                style=${{position:'absolute',top:0,left:0,width:'100%',height:20,background:'transparent',pointerEvents:'none',WebkitAppearance:'none',appearance:'none',margin:0,zIndex:2,'--thumb-pe':'auto'}} />
+            </div>
+            <div style=${{display:'flex',justifyContent:'space-between',fontSize:'.5rem',color:'var(--text-faint)'}}>
+              <span>0 (touching)</span>
+              <span>${maxDist}mm</span>
+            </div>
+          </div>`;
+        }()}
 
         ${isClashTab && typeList.length>0 && html`<div>
           <span style=${FL}>Element Type</span>
@@ -6101,7 +6137,8 @@ function startApp() {
     if (/what.*rules?|current.*(?:settings?|setup|config)|clash.*settings?|what(?:'s| is) set up/.test(text)) {
       var r = s.rules;
       var types = [r.hard&&'hard', r.soft&&'soft'].filter(Boolean).join(' + ') || 'none';
-      var against = r.modelA==='all'&&r.modelB==='all' ? 'all models against all' : (r.modelA||'all') + ' vs ' + (r.modelB||'all');
+      function _ruleLabel(id){ if(id==='all')return 'all'; if(typeof id==='string'&&id.indexOf('disc:')===0){var dd=DISC.find(function(x){return x.id===id.slice(5)});return dd?dd.label:id.slice(5);} var mm=s.models.find(function(x){return x.id===id});return mm?mm.name:id; }
+      var against = r.modelA==='all'&&r.modelB==='all' ? 'all models against all' : _ruleLabel(r.modelA) + ' vs ' + _ruleLabel(r.modelB);
       return 'Current setup: ' + types + ' clashes, ' + against + ', clearance ' + (r.clearance||50) + 'mm' + (r.hardTolerance?' tolerance '+r.hardTolerance+'mm':'') + (r.duplicates?', including duplicates':'.');
     }
     if (/(?:what|which).*storey|worst.*storey|most clashes.*storey|storey.*most/.test(text)) {
@@ -6135,8 +6172,18 @@ function startApp() {
     }
     function resolveModel(hint) {
       if (!hint || /^all$/.test(hint.trim())) return null;
-      var h = hint.trim();
-      return s.models.find(function(m){ return m.name.toLowerCase().indexOf(h) !== -1; }) || null;
+      var h = hint.trim().toLowerCase();
+      // Try matching by model name first
+      var byName = s.models.find(function(m){ return m.name.toLowerCase().indexOf(h) !== -1; });
+      if (byName) return {type:'model', id:byName.id, name:byName.name};
+      // Try matching by discipline label or id
+      var disc = DISC.find(function(d){ return d.id.toLowerCase()===h || d.label.toLowerCase()===h
+        || h.indexOf(d.id.toLowerCase())!==-1 || h.indexOf(d.label.toLowerCase())!==-1; });
+      if (disc) {
+        var matching = s.models.filter(function(m){ return m.discipline===disc.id; });
+        if (matching.length) return {type:'disc', id:'disc:'+disc.id, name:disc.label+' model'+(matching.length>1?'s':'')};
+      }
+      return null;
     }
     function runSetup(rawA, rawB) {
       if (!s.models.length) return 'No models loaded yet — drop IFC files onto the viewer first.';
@@ -6152,18 +6199,53 @@ function startApp() {
 
     // "X vs/versus/against Y"
     var vsMatch = text.match(/(.+?)\s+(?:vs\.?|versus|against)\s+(.+?)(?:\s+with\s+.*)?$/);
-    if (vsMatch) return runSetup(vsMatch[1].replace(/^(?:check|compare|run|detect|find|look\s+for|scan|anal[yz]se?|test|search\s+for)\s+(?:(?:for\s+)?(?:clashes?|conflicts?|collisions?)\s+)?/,'').trim(), vsMatch[2].split(/\s+with\s+/)[0].trim());
+    if (vsMatch) return runSetup(vsMatch[1].replace(/^(?:check|compare|run|detect|find|look\s+for|scan|anal[yz]se?|test|search\s+for)\s+(?:(?:for\s+)?(?:clashes?|conflicts?|collisions?|clashcontrol)\s+)?(?:on\s+)?/,'').trim(), vsMatch[2].split(/\s+with\s+/)[0].replace(/\s*models?\s*$/i,'').trim());
 
     // "between X and Y"
     var betweenMatch = text.match(/between\s+(.+?)\s+and\s+(.+?)(?:\s+with\s+.*)?$/);
     if (betweenMatch && /check|compare|find|detect|look|scan|anal[yz]se?|run|clashes?|conflicts?|collisions?/.test(text))
       return runSetup(betweenMatch[1].trim(), betweenMatch[2].split(/\s+with\s+/)[0].trim());
 
-    // ── "run clash …" with inline options (no vs/between needed) ──
-    // Matches: "run clash on both models, exclude self, with clearance of 10mm"
-    //          "detect clashes with 50mm clearance exclude self"
-    //          "run detection soft clashes 20mm clearance"
-    if (/(?:run|start|do|execute|detect|find|check|scan|re-?run|again)\s+(?:the\s+)?(?:clash|detection|conflicts?|collisions?|scan|check)/i.test(text) && !/\b(?:vs\.?|versus|against|between)\b/.test(text)) {
+    // ── Word-based: scan for action words + discipline/model keywords ──
+    // Handles loose input like "run architectural structural", "check mep structural 50mm"
+    var actionWords = /\b(?:run|start|do|execute|detect|find|check|scan|re-?run|again|clashcontrol|clash)\b/i;
+    if (actionWords.test(text)) {
+      // Collect all words that match a discipline or model name
+      var words = text.toLowerCase().replace(/[,;:!?.]+/g,' ').split(/\s+/);
+      var foundRefs = [];
+      var usedWords = {};
+      words.forEach(function(w){
+        if(usedWords[w]) return;
+        // Check disciplines
+        var disc = DISC.find(function(dd){ return dd.id===w || dd.label.toLowerCase()===w; });
+        if(disc && s.models.some(function(m){return m.discipline===disc.id;})){
+          foundRefs.push({type:'disc', id:'disc:'+disc.id, name:disc.label+' model', word:w});
+          usedWords[w]=true; return;
+        }
+        // Check model names (skip noise words)
+        if(/^(?:run|start|do|execute|detect|find|check|scan|again|clash|clashcontrol|on|the|with|and|for|of|a|an|model|models|re-?run|clashes|detection|conflicts?|collisions?)$/.test(w)) return;
+        var byName = s.models.find(function(m){ return m.name.toLowerCase().indexOf(w)!==-1; });
+        if(byName && !usedWords[byName.id]){
+          foundRefs.push({type:'model', id:byName.id, name:byName.name, word:w});
+          usedWords[byName.id]=true;
+        }
+      });
+      if(foundRefs.length>=2) return runSetup(foundRefs[0].word, foundRefs[1].word);
+      if(foundRefs.length===1) {
+        // One reference found → run it against all others
+        if(!s.models.length) return 'No models loaded yet.';
+        var ref = foundRefs[0];
+        var updSingle = applyClashOpts({ modelA:ref.id, modelB:'all' });
+        d({t:'UPD_RULES', u:updSingle});
+        if(!s.detecting){ d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
+          setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, Object.assign({},s.rules,updSingle))}); }, 20);
+        }
+        return 'Running: ' + ref.name + ' vs all others…';
+      }
+    }
+
+    // ── "run clash …" generic fallback (no model/discipline found) ──
+    if (/(?:run|start|do|execute|detect|find|check|scan|re-?run|again)\s+(?:the\s+)?(?:clash|detection|conflicts?|collisions?|scan|check|clashcontrol)/i.test(text)) {
       if (!s.models.length) return 'No models loaded yet.';
       var updRun = applyClashOpts({ modelA:'all', modelB:'all' });
       d({t:'UPD_RULES', u:updRun});
