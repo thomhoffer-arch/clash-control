@@ -236,7 +236,7 @@ function startApp() {
   };
   var INIT = {
     models:[], clashes:[], issues:[], activeId:null, showModal:false, showSettings:false, modalElement:null, tab:null,
-    rules:{ modelA:'all', modelB:'all', hard:true, soft:false, clearance:50, hardTolerance:0, duplicates:false, changeAware:false },
+    rules:{ modelA:'all', modelB:'all', hard:true, soft:false, clearance:50, hardTolerance:0, duplicates:false, changeAware:false, excludeSelf:false },
     clashGroupBy:'none', // 'none','storey','discipline','status','type'
     detecting:false, switchingProject:false, sectionAxis:null, sectionPos:0.5, sectionCustom:null,
     sectionBox:null, // {enabled, min:[x,y,z], max:[x,y,z]} – 6-plane box clipping
@@ -948,6 +948,7 @@ function startApp() {
 
     grpA.forEach(function(mA) { grpB.forEach(function(mB) {
       var sameModel = mA.id === mB.id;
+      if (rules.excludeSelf && sameModel) return;
       var key = [mA.id, mB.id].sort().join('|');
       if (seen[key]) return; seen[key] = true;
       (mA.elements||[]).forEach(function(eA, iA) { (mB.elements||[]).forEach(function(eB, iB) {
@@ -2293,6 +2294,8 @@ function startApp() {
         frustum.setFromProjectionMatrix(projScreenMatrix);
         var camPos = camera.position;
         S.mg.traverse(function(obj){
+          // Skip meshes in hidden model groups (unchecked models)
+          if(obj.isMesh && obj.parent && obj.parent.userData.modelId && !obj.parent.visible) { obj.visible = false; return; }
           if(!obj.isMesh) return;
           // Skip non-IFC meshes (helpers etc)
           if(obj.userData.expressID==null) return;
@@ -2676,7 +2679,12 @@ function startApp() {
       if(lastHiddenRef.current === hiddenStr) return;
       lastHiddenRef.current = hiddenStr;
       if(!cls||!hiddenKeys.length){
-        S.mg.traverse(function(obj){if(obj.isMesh)obj.visible=true;});
+        S.mg.traverse(function(obj){
+          if(obj.isMesh){
+            var modelHidden = obj.parent && obj.parent.userData.modelId && !obj.parent.visible;
+            if(!modelHidden && !obj.userData._storeyHidden) obj.visible=true;
+          }
+        });
         return;
       }
       // Build hidden set once
@@ -2690,6 +2698,8 @@ function startApp() {
         if(!obj.isMesh) return;
         var eid=obj.userData.expressID; if(eid==null) return;
         var modelId=obj.parent?obj.parent.userData.modelId:null;
+        var modelHidden = obj.parent && obj.parent.userData.modelId && !obj.parent.visible;
+        if(modelHidden){ obj.visible=false; return; }
         obj.visible = !(modelId&&hiddenIds.has(modelId+'_'+eid));
       });
       invalidate();
@@ -3628,7 +3638,8 @@ function startApp() {
     var s=props.s, d=props.d;
     var fileRef = useRef(null);
     var file2dRef = useRef(null);
-    var ld = useState(false), loading=ld[0], setLoading=ld[1];
+    var ld = useState(false), loading=ld[0], _setLoadingRaw=ld[1];
+    function setLoading(v) { _setLoadingRaw(v); window._ccModelLoading=!!v; window.dispatchEvent(new CustomEvent('cc-model-loading',{detail:{loading:!!v}})); }
     var lm = useState(''), loadMsg=lm[0], setLoadMsg=lm[1];
     var er = useState(''), err=er[0], setErr=er[1];
     var dg = useState(false), dragging=dg[0], setDragging=dg[1];
@@ -4522,12 +4533,14 @@ function startApp() {
 
   // Virtualized list: only render visible rows for large lists
   var ROW_HEIGHT = 78; // approx height of IssueRow in px (clash rows are taller with extra metadata)
+  var GROUP_PAGE_SIZE = 50; // max items rendered per group before "show more"
   function VirtualList(props) {
     var items=props.items, activeId=props.activeId, d=props.d, isClash=props.isClash, prefs=props.prefs;
     var groupBy = props.groupBy || 'none';
     var scrollRef = useRef(null);
     var _st = useState(0), scrollTop=_st[0], setScrollTop=_st[1];
     var coll = useState({}), collapsed=coll[0], setCollapsed=coll[1];
+    var grpLimits = useState({}), groupLimits=grpLimits[0], setGroupLimits=grpLimits[1];
     if(items.length===0) return html`<div style=${{flex:1,overflowY:'auto'}}>
       <div style=${{textAlign:'center',color:'var(--text-faint)',fontSize:'.75rem',padding:'2.5rem 1rem'}}>
         <div style=${{fontSize:'2rem',marginBottom:'.3rem'}}>${isClash?'✅':'📋'}</div>
@@ -4544,11 +4557,21 @@ function startApp() {
           return n;
         });
       }
+      function showMore(label) {
+        setGroupLimits(function(prev) {
+          var n = Object.assign({}, prev);
+          n[label] = (n[label] || GROUP_PAGE_SIZE) + GROUP_PAGE_SIZE;
+          return n;
+        });
+      }
       return html`<div style=${{flex:1,overflowY:'auto'}}>
         ${groups.map(function(g) {
           var isOpen = !collapsed[g.label];
           var statusColors = {open:'#ef4444',in_progress:'#f59e0b',resolved:'#22c55e',closed:'#64748b',hard:'#ef4444',soft:'#f59e0b',duplicate:'#8b5cf6'};
           var dotColor = statusColors[g.label] || '#3b82f6';
+          var limit = groupLimits[g.label] || GROUP_PAGE_SIZE;
+          var visibleItems = g.items.slice(0, limit);
+          var hasMore = g.items.length > limit;
           return html`<div key=${g.label}>
             <div onClick=${function(){toggleGroup(g.label)}}
               style=${{display:'flex',alignItems:'center',gap:'.3rem',padding:'.35rem .5rem',cursor:'pointer',background:'var(--bg-tertiary)',borderBottom:'1px solid var(--border-subtle)',position:'sticky',top:0,zIndex:1}}>
@@ -4557,7 +4580,11 @@ function startApp() {
               <span style=${{fontSize:'.65rem',fontWeight:600,color:'var(--text-primary)',flex:1}}>${g.label}</span>
               <span style=${{fontSize:'.6rem',color:'var(--text-faint)',background:'var(--bg-secondary)',padding:'.1rem .35rem',borderRadius:10}}>${g.items.length}</span>
             </div>
-            ${isOpen && g.items.map(function(it){return html`<${IssueRow} key=${it.id} item=${it} active=${activeId===it.id} d=${d} isClash=${isClash} prefs=${prefs} />`})}
+            ${isOpen && visibleItems.map(function(it){return html`<${IssueRow} key=${it.id} item=${it} active=${activeId===it.id} d=${d} isClash=${isClash} prefs=${prefs} />`})}
+            ${isOpen && hasMore && html`<button onClick=${function(e){e.stopPropagation();showMore(g.label);}}
+              style=${{...S_BTN,width:'100%',padding:'.4rem',background:'var(--bg-tertiary)',color:'var(--accent)',fontSize:'.65rem',borderTop:'1px solid var(--border-subtle)',borderRadius:0}}>
+              Show more (${limit} of ${g.items.length})…
+            </button>`}
           </div>`;
         })}
       </div>`;
@@ -4668,73 +4695,7 @@ function startApp() {
     </div>`;
   }
 
-  // ── Clash Bar ──────────────────────────────────────────────────
-
-  function ClashBar(props) {
-    var s=props.s, d=props.d, r=s.rules, embedded=props.embedded;
-    var adv=useState(false), showAdv=adv[0], setShowAdv=adv[1];
-    function run() {
-      if(s.models.length<1||(r.modelA!=='all'&&r.modelB!=='all'&&r.modelA===r.modelB&&s.models.length<1)){alert('Load IFC models first.');return;}
-      if(!r.hard&&!r.soft&&!r.duplicates){alert('Enable at least one detection type (Hard, Soft, or Duplicates).');return;}
-      d({t:'DETECTING'});
-      setTimeout(function(){ d({t:'SET_CLASHES',v:detectClashes(s.models,s.rules)}); d({t:'TAB',v:'clashes'}); },20);
-    }
-    var canRun = !s.detecting && s.models.length>=1;
-    var CBLBL={fontSize:'.65rem',color:'var(--text-secondary)',display:'flex',alignItems:'center',gap:'.2rem',cursor:'pointer'};
-    return html`<div style=${{background:'var(--bg-primary)',borderBottom:'1px solid var(--border-subtle)',padding:'.5rem .75rem',display:'flex',flexDirection:'column',gap:'.3rem',flexShrink:0}}>
-      <div style=${{display:'flex',alignItems:'center',gap:'.6rem',flexWrap:'wrap'}}>
-        <span style=${{fontSize:'.7rem',fontWeight:600,color:'var(--text-faint)',textTransform:'uppercase',letterSpacing:'.05em',flexShrink:0}}>Clash Detection</span>
-        <span style=${{fontSize:'.7rem',color:'var(--text-faint)'}}>A:</span>
-        <select value=${r.modelA} onChange=${function(e){d({t:'UPD_RULES',u:{modelA:e.target.value}})}}
-          style=${{fontSize:'.7rem',padding:'.15rem .3rem',borderRadius:4,maxWidth:100}}>
-          <option value="all">All</option>
-          ${s.models.map(function(m){return html`<option key=${m.id} value=${m.id}>${m.name}</option>`})}
-        </select>
-        <span style=${{color:'var(--text-faint)'}}>↔</span>
-        <span style=${{fontSize:'.7rem',color:'var(--text-faint)'}}>B:</span>
-        <select value=${r.modelB} onChange=${function(e){d({t:'UPD_RULES',u:{modelB:e.target.value}})}}
-          style=${{fontSize:'.7rem',padding:'.15rem .3rem',borderRadius:4,maxWidth:100}}>
-          <option value="all">All</option>
-          ${s.models.map(function(m){return html`<option key=${m.id} value=${m.id}>${m.name}</option>`})}
-        </select>
-        <label style=${CBLBL}>
-          <input type="checkbox" checked=${r.hard} onChange=${function(e){d({t:'UPD_RULES',u:{hard:e.target.checked}})}} />
-          <span>Hard</span>
-        </label>
-        <label style=${CBLBL}>
-          <input type="checkbox" checked=${r.soft} onChange=${function(e){d({t:'UPD_RULES',u:{soft:e.target.checked}})}} />
-          <span>Soft/Clearance</span>
-        </label>
-        <label style=${CBLBL}>
-          <input type="checkbox" checked=${r.duplicates} onChange=${function(e){d({t:'UPD_RULES',u:{duplicates:e.target.checked}})}} />
-          <span>Duplicates</span>
-        </label>
-        <button onClick=${function(){setShowAdv(!showAdv)}} style=${{...S_BTN,fontSize:'.6rem',padding:'.15rem .4rem',background:'none',color:'var(--text-faint)',textDecoration:'underline'}}>${showAdv?'Less ▲':'More ▼'}</button>
-        <button onClick=${run} disabled=${!canRun}
-          style=${{...S_BTN,marginLeft:'auto',background:canRun?'#2563eb':'var(--bg-secondary)',color:canRun?'#fff':'var(--text-faint)',cursor:canRun?'pointer':'not-allowed',fontWeight:600}}>
-          ${s.detecting?html`<span class="spin">⟳</span> …`:'▶ Run'}
-        </button>
-      </div>
-      ${showAdv && html`<div style=${{display:'flex',alignItems:'center',gap:'.8rem',flexWrap:'wrap',padding:'.2rem 0',borderTop:'1px solid var(--border-subtle)',paddingTop:'.4rem'}}>
-        ${r.soft && html`<div style=${{display:'flex',alignItems:'center',gap:'.3rem'}} title="Max gap between elements for soft/clearance clash detection">
-          <span style=${{fontSize:'.6rem',color:'var(--text-faint)'}}>Clearance:</span>
-          <input type="range" min="0" max="500" step="5" value=${r.clearance}
-            onInput=${function(e){d({t:'UPD_RULES',u:{clearance:+e.target.value}})}} style=${{width:70}} />
-          <span style=${{fontSize:'.65rem',color:'var(--text-faint)',width:42}}>${r.clearance}mm</span>
-        </div>`}
-        <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}} title="Ignore hard clashes with less than this penetration depth (mm)">
-          <span style=${{fontSize:'.6rem',color:'var(--text-faint)'}}>Hard tolerance:</span>
-          <input type="range" min="0" max="100" step="1" value=${r.hardTolerance||0}
-            onInput=${function(e){d({t:'UPD_RULES',u:{hardTolerance:+e.target.value}})}} style=${{width:60}} />
-          <span style=${{fontSize:'.65rem',color:'var(--text-faint)',width:36}}>${r.hardTolerance||0}mm</span>
-        </div>
-        <label style=${CBLBL} title="Only re-check elements that changed since last run (faster for model updates)">
-          <input type="checkbox" checked=${r.changeAware} onChange=${function(e){d({t:'UPD_RULES',u:{changeAware:e.target.checked}})}} />
-          <span>Change-aware</span>
-        </label>
-      </div>`}
-    </div>`;
-  }
+  // (ClashBar removed — clash setup is handled via NLCommandPanel)
 
   // ── New Issue Modal ────────────────────────────────────────────
 
@@ -5698,6 +5659,8 @@ function startApp() {
       if (/\bsoft\b/.test(text) && !/no\s+soft|disable\s+soft|exclude\s+soft/.test(text)) { updRules.soft=true; updRules.hard=true; }
       if (/hard\s+only|no\s+soft|soft\s+(?:clashes?\s+)?off/.test(text)) { updRules.hard=true; updRules.soft=false; }
       if (/\bduplicates?\b/.test(text) && !/no\s+dup|exclude\s+dup|ignore\s+dup/.test(text)) updRules.duplicates=true;
+      // Cross-model only (exclude self-clashes)
+      if (/\bcross[\s-]*(?:model\s+)?only\b|\bno\s+self[\s-]*clash|\bexclude\s+self|\bnot?\s+with\s+itself|\b(?:against|vs)\s+(?:all\s+)?others?\b/.test(text)) updRules.excludeSelf=true;
       return updRules;
     }
     function resolveModel(hint) {
@@ -5745,6 +5708,8 @@ function startApp() {
     if (/(?:exclude|disable|remove|turn\s+off)\s+soft|hard\s+only|soft\s+(?:clashes?\s+)?off/.test(text)) { d({t:'UPD_RULES',u:{soft:false}}); return 'Soft clashes off — hard clashes only.'; }
     if (/(?:include|enable)\s+duplicates?/.test(text)) { d({t:'UPD_RULES',u:{duplicates:true}}); return 'Duplicates included.'; }
     if (/(?:exclude|ignore|no)\s+duplicates?/.test(text)) { d({t:'UPD_RULES',u:{duplicates:false}}); return 'Duplicates excluded.'; }
+    if (/cross[\s-]*(?:model\s+)?only|no\s+self[\s-]*clash|exclude\s+self|not?\s+with\s+itself/.test(text)) { d({t:'UPD_RULES',u:{excludeSelf:true}}); return 'Cross-model only — self-clashes excluded.'; }
+    if (/(?:include|enable|allow)\s+self[\s-]*clash|self[\s-]*clash.*on/.test(text)) { d({t:'UPD_RULES',u:{excludeSelf:false}}); return 'Self-clashes included.'; }
 
     // ── Plain run ──────────────────────────────────────────────────
     if (/^(?:run|go|start|detect|execute|scan|proceed)$/.test(text) ||
@@ -5802,8 +5767,16 @@ function startApp() {
     var stLLMStatus = useState(_nlModelStatus), llmStatus = stLLMStatus[0], setLLMStatus = stLLMStatus[1];
     var stLLMProgress = useState(0), llmProgress = stLLMProgress[0], setLLMProgress = stLLMProgress[1];
     var stLLMError = useState(''), llmError = stLLMError[0], setLLMError = stLLMError[1];
+    var stModelLoading = useState(!!window._ccModelLoading), modelLoading = stModelLoading[0], setModelLoading = stModelLoading[1];
     var inputRef = useRef(null);
     var bottomRef = useRef(null);
+
+    // Track model loading state for glow effect
+    useEffect(function() {
+      function onModelLoad(e) { setModelLoading(!!(e.detail && e.detail.loading)); }
+      window.addEventListener('cc-model-loading', onModelLoad);
+      return function() { window.removeEventListener('cc-model-loading', onModelLoad); };
+    }, []);
 
     useEffect(function() {
       function onKey(e) {
@@ -5867,32 +5840,37 @@ function startApp() {
     var aiBubbleBg = isDark ? '#273244' : '#f3f4f6';
 
     if (!open) {
+      var closedAnim = modelLoading ? 'nlBorderPulse 2s ease-in-out infinite' : 'none';
+      var closedBorder = modelLoading ? '1px solid rgba(96,165,250,.5)' : '1px solid ' + borderCol;
       return html`<button
         onClick=${function(){ setOpen(true); }}
-        title="Set up clash detection in plain English (Ctrl+/)"
+        title=${modelLoading ? 'Model is loading… click to set up clashes' : 'Set up clash detection in plain English (Ctrl+/)'}
         style=${{
           position:'fixed', bottom:'1rem', left:'50%', transform:'translateX(-50%)',
           zIndex:1200, display:'flex', alignItems:'center', gap:'.4rem',
           padding:'.45rem 1.1rem', borderRadius:999,
-          background:panelBg, border:'1px solid ' + borderCol,
-          color:mutedCol, fontSize:'.74rem', cursor:'pointer',
-          boxShadow:'0 2px 10px rgba(0,0,0,.25)', whiteSpace:'nowrap'
+          background:panelBg, border:closedBorder,
+          color:modelLoading ? (isDark?'#60a5fa':'#2563eb') : mutedCol, fontSize:'.74rem', cursor:'pointer',
+          boxShadow: modelLoading ? '0 2px 10px rgba(0,0,0,.25), 0 0 20px rgba(37,99,235,.3)' : '0 2px 10px rgba(0,0,0,.25)',
+          whiteSpace:'nowrap', animation:closedAnim
         }}>
-        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" style=${{flexShrink:0}}>
+        ${modelLoading ? html`<span class="spin" style=${{display:'inline-block',width:12,height:12,borderRadius:'50%',border:'1.5px solid rgba(96,165,250,.3)',borderTopColor:'#60a5fa'}}></span>` : html`<svg width="12" height="12" viewBox="0 0 16 16" fill="none" style=${{flexShrink:0}}>
           <path d="M2 4h12M2 8h8M2 12h10" stroke="${isDark?'#60a5fa':'#2563eb'}" stroke-width="1.6" stroke-linecap="round"/>
-        </svg>
-        Set up clash detection…
+        </svg>`}
+        ${modelLoading ? 'Model loading…' : 'Set up clash detection…'}
         <span style=${{fontSize:'.6rem', opacity:.5, marginLeft:'.15rem'}}>Ctrl+/</span>
       </button>`;
     }
 
-    var panelAnimation = llmStatus === 'loading' ? 'nlBorderPulse 2s ease-in-out infinite'
+    var panelAnimation = modelLoading ? 'nlBorderPulse 2s ease-in-out infinite'
+                       : llmStatus === 'loading' ? 'nlBorderPulse 2s ease-in-out infinite'
                        : llmStatus === 'ready'   ? 'nlBorderReady .8s ease-out forwards'
                        : 'none';
+    var panelBorderCol = (modelLoading || llmStatus === 'loading') ? 'rgba(96,165,250,.5)' : borderCol;
     return html`<div style=${{
       position:'fixed', bottom:'1rem', left:'50%', transform:'translateX(-50%)',
       zIndex:1200, width:'min(500px, calc(100vw - 2rem))',
-      background:panelBg, border:'1px solid '+(llmStatus==='loading'?'rgba(96,165,250,.5)':borderCol),
+      background:panelBg, border:'1px solid '+panelBorderCol,
       borderRadius:12, boxShadow:'0 8px 32px rgba(0,0,0,.35)',
       display:'flex', flexDirection:'column', overflow:'hidden',
       animation:panelAnimation
@@ -5905,7 +5883,11 @@ function startApp() {
           <path d="M2 4h12M2 8h8M2 12h10" stroke="#60a5fa" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
         <span style=${{fontSize:'.76rem', fontWeight:600, color:textCol, flex:1}}>Clash Setup</span>
-        ${llmStatus === 'loading' && html`<span title=${'Loading AI model… ' + llmProgress + '%'} style=${{
+        ${modelLoading && html`<span style=${{fontSize:'.6rem', color:'#60a5fa', display:'flex', alignItems:'center', gap:'.25rem'}}>
+          <span class="spin" style=${{display:'inline-block', width:'.55rem', height:'.55rem', borderRadius:'50%', border:'1.5px solid rgba(96,165,250,.3)', borderTopColor:'#60a5fa'}}></span>
+          Loading model…
+        </span>`}
+        ${!modelLoading && llmStatus === 'loading' && html`<span title=${'Loading AI model… ' + llmProgress + '%'} style=${{
           fontSize:'.6rem', color:'#60a5fa', display:'flex', alignItems:'center', gap:'.25rem'
         }}>
           <span class="spin" style=${{display:'inline-block', width:'.55rem', height:'.55rem', borderRadius:'50%', border:'1.5px solid rgba(96,165,250,.3)', borderTopColor:'#60a5fa'}}></span>
