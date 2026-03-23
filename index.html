@@ -9,7 +9,7 @@
 
   <!-- CSP: restrict resource loading to known CDN origins -->
   <!-- 'unsafe-eval' required by pdf.js v3 for custom font rendering (CFF/Type1 font programs) -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src https://cdn.jsdelivr.net https://cdnjs.cloudflare.com blob:; worker-src blob:; img-src 'self' blob: data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://huggingface.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.huggingface.co blob:; worker-src blob:; img-src 'self' blob: data:;">
 
   <!-- CDN deps: React, Three.js, JSZip — all UMD, all cdnjs -->
   <!-- SRI hashes: regenerate with `node scripts/generate-sri.js` if you change versions -->
@@ -175,7 +175,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.27',hash:'3ee36b1',date:'2026-03-22T19:53:03Z'};
+  var CC_VERSION = {v:'1.2.28',hash:'7b83f43',date:'2026-03-23T07:10:02Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -1307,6 +1307,12 @@ function startApp() {
   var _findAndHighlightElements = null;
   var _clearFoundElements = null;
   var _ghostOthers = null;
+
+  // ── NL Panel LLM state (lazy-loaded on first panel open) ───────
+  var _nlPipeline = null;
+  var _nlModelStatus = 'idle'; // 'idle'|'loading'|'ready'|'error'
+  var _nlModelProgress = 0;
+  var _nlModelListeners = [];
   var _unghostAll = null;
   var _sboxAroundElements = null;
   function Viewer(props) {
@@ -5320,6 +5326,189 @@ function startApp() {
   // Scope: clash setup, Q&A, result navigation, issue management, export.
   // Spatial interactions (measuring, section planes, camera) stay as traditional UI.
 
+  // ── LLM loader ─────────────────────────────────────────────────
+  function getNLPipeline() {
+    if (_nlPipeline) return Promise.resolve(_nlPipeline);
+    if (_nlModelStatus === 'loading') return new Promise(function(res, rej) {
+      _nlModelListeners.push(function(st) {
+        if (st === 'ready') res(_nlPipeline);
+        else if (st === 'error') rej(new Error('LLM load failed'));
+      });
+    });
+    if (_nlModelStatus === 'error') return Promise.reject(new Error('LLM failed to load'));
+    _nlModelStatus = 'loading';
+    return import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3/dist/transformers.min.js')
+      .then(function(mod) {
+        mod.env.useBrowserCache = true;
+        return mod.pipeline('text-generation', 'onnx-community/Qwen2.5-0.5B-Instruct', {
+          dtype: 'q4f16',
+          progress_callback: function(p) {
+            if (typeof p.progress === 'number') {
+              _nlModelProgress = Math.round(p.progress);
+              _nlModelListeners.forEach(function(cb) { cb('loading', _nlModelProgress); });
+            }
+          }
+        });
+      })
+      .then(function(pipe) {
+        _nlPipeline = pipe;
+        _nlModelStatus = 'ready';
+        _nlModelListeners.forEach(function(cb) { cb('ready', 100); });
+        _nlModelListeners = [];
+        return pipe;
+      })
+      .catch(function(err) {
+        _nlModelStatus = 'error';
+        _nlModelListeners.forEach(function(cb) { cb('error', 0); });
+        _nlModelListeners = [];
+        throw err;
+      });
+  }
+
+  // ── LLM system prompt (tokens filled in at call time) ──────────
+  var NL_SYSTEM_PROMPT = [
+    'You are a command parser for a BIM clash detection app.',
+    'Output ONLY a single JSON object. No explanation, no markdown fences, no extra text.',
+    '',
+    'Loaded models: {{MODEL_LIST}}',
+    'Current rules: clearance={{CLEARANCE}}mm, hard={{HARD}}, soft={{SOFT}}, modelA={{MODEL_A}}, modelB={{MODEL_B}}',
+    '',
+    'Convert all lengths to mm (5cm→50, 2in→51). Use model name substrings from the loaded list, or "all".',
+    '',
+    'Intent values and their fields:',
+    'run_detection: {intent, modelA, modelB, clearance, tolerance, soft, hard, duplicates}',
+    'set_clearance: {intent, value}',
+    'set_tolerance: {intent, value}',
+    'set_soft: {intent, enabled}',
+    'set_duplicates: {intent, enabled}',
+    'filter_status: {intent, status: "open"|"new"|"resolved"|"all"}',
+    'reset_filters: {intent}',
+    'group_by: {intent, groupBy: "storey"|"discipline"|"status"|"type"|"none"}',
+    'export_bcf: {intent}',
+    'query: {intent, query: "clash_count"|"issue_count"|"model_list"|"current_rules"|"worst_storey"|"active_project"}',
+    'help: {intent}',
+    'unknown: {intent}',
+    '',
+    'Examples:',
+    'User: look for pipe beam conflicts with 5cm gap',
+    '{"intent":"run_detection","modelA":"pipe","modelB":"beam","clearance":50,"hard":true,"soft":false,"duplicates":false}',
+    'User: show resolved clashes',
+    '{"intent":"filter_status","status":"resolved"}',
+    'User: how many open clashes',
+    '{"intent":"query","query":"clash_count"}'
+  ].join('\n');
+
+  // ── LLM JSON→action dispatcher ─────────────────────────────────
+  function dispatchLLMAction(jsonText, s, d) {
+    var action;
+    try {
+      var clean = jsonText.replace(/```[a-z]*\n?/g, '').trim();
+      var b0 = clean.indexOf('{'), b1 = clean.lastIndexOf('}');
+      if (b0 === -1 || b1 === -1) throw new Error('no JSON');
+      action = JSON.parse(clean.slice(b0, b1 + 1));
+    } catch(e) {
+      return null;
+    }
+    var intent = action.intent;
+    if (!intent) return null;
+
+    function resolveModel(hint) {
+      if (!hint || hint === 'all') return null;
+      var h = String(hint).toLowerCase();
+      return s.models.find(function(m) { return m.name.toLowerCase().indexOf(h) !== -1; }) || null;
+    }
+
+    switch (intent) {
+      case 'run_detection': {
+        if (!s.models.length) return 'No models loaded yet — drop IFC files onto the viewer first.';
+        var mA = resolveModel(action.modelA), mB = resolveModel(action.modelB);
+        var upd = {
+          modelA: mA ? mA.id : 'all',
+          modelB: mB ? mB.id : 'all',
+          hard:   action.hard !== false,
+          soft:   action.soft === true,
+          duplicates: action.duplicates === true
+        };
+        if (typeof action.clearance === 'number') upd.clearance = action.clearance;
+        if (typeof action.tolerance === 'number') upd.hardTolerance = action.tolerance;
+        d({t:'UPD_RULES', u:upd});
+        if (s.detecting) return 'Rules updated — detection already running.';
+        d({t:'DETECTING'}); d({t:'TAB', v:'clashes'});
+        setTimeout(function() { d({t:'SET_CLASHES', v:detectClashes(s.models, Object.assign({}, s.rules, upd))}); }, 20);
+        var aN = mA ? mA.name : 'all models', bN = mB ? mB.name : 'all models';
+        return 'Running: ' + aN + ' vs ' + bN + (upd.clearance ? ' with ' + upd.clearance + 'mm clearance' : '') + '…';
+      }
+      case 'set_clearance':
+        if (typeof action.value !== 'number') return null;
+        d({t:'UPD_RULES', u:{clearance: action.value}});
+        return 'Clearance set to ' + action.value + 'mm. Re-run detection to apply.';
+      case 'set_tolerance':
+        if (typeof action.value !== 'number') return null;
+        d({t:'UPD_RULES', u:{hardTolerance: action.value}});
+        return 'Tolerance set to ' + action.value + 'mm.';
+      case 'set_soft':
+        d({t:'UPD_RULES', u:{soft: !!action.enabled}});
+        return action.enabled ? 'Soft clashes enabled. Re-run to apply.' : 'Soft clashes off — hard only.';
+      case 'set_duplicates':
+        d({t:'UPD_RULES', u:{duplicates: !!action.enabled}});
+        return action.enabled ? 'Duplicates included.' : 'Duplicates excluded.';
+      case 'filter_status': {
+        var sm = {open:'open',new:'new',resolved:'resolved',all:'all'};
+        var sv = sm[action.status] || 'all';
+        d({t:'UPD_FILTERS', u:{status:sv}}); d({t:'TAB', v:'clashes'});
+        return sv === 'all' ? 'Showing all clashes.' : 'Filtered to ' + sv + ' clashes.';
+      }
+      case 'reset_filters':
+        d({t:'RESET_FILTERS'});
+        return 'Filters cleared.';
+      case 'group_by': {
+        var gm = {storey:'storey',floor:'storey',level:'storey',discipline:'discipline',status:'status',type:'type',none:'none'};
+        var gv = gm[action.groupBy] || 'none';
+        d({t:'CLASH_GROUP_BY', v:gv}); d({t:'TAB', v:'clashes'});
+        return 'Grouped by ' + (action.groupBy || gv) + '.';
+      }
+      case 'export_bcf': {
+        if (!s.issues.length && !s.clashes.length) return 'Nothing to export yet.';
+        var items = s.issues.length ? s.issues : s.clashes;
+        exportBCF(items, '2.1', s.viewpoints);
+        return 'Exported ' + items.length + ' item' + (items.length === 1 ? '' : 's') + ' as BCF 2.1.';
+      }
+      case 'query':
+        return processNLCommand(action.query || '', s, d);
+      case 'help':
+        return processNLCommand('help', s, d);
+      case 'unknown':
+      default:
+        return null;
+    }
+  }
+
+  // ── Async NL handler: regex fast-path → LLM fallback ───────────
+  function processNLCommandWithLLM(raw, s, d) {
+    var regexResult = processNLCommand(raw, s, d);
+    if (regexResult !== null) return Promise.resolve(regexResult);
+    if (_nlModelStatus !== 'ready') return Promise.resolve(null);
+
+    var modelList = s.models.length ? s.models.map(function(m) { return m.name; }).join(', ') : 'none';
+    var r = s.rules || {};
+    var prompt = NL_SYSTEM_PROMPT
+      .replace('{{MODEL_LIST}}', modelList)
+      .replace('{{CLEARANCE}}', r.clearance || 50)
+      .replace('{{HARD}}', !!r.hard)
+      .replace('{{SOFT}}', !!r.soft)
+      .replace('{{MODEL_A}}', r.modelA || 'all')
+      .replace('{{MODEL_B}}', r.modelB || 'all');
+
+    return _nlPipeline(
+      [{role:'system', content:prompt}, {role:'user', content:raw}],
+      {max_new_tokens: 100, temperature: 0.0, do_sample: false}
+    ).then(function(out) {
+      var text = out[0].generated_text;
+      if (Array.isArray(text)) text = text[text.length - 1].content;
+      return dispatchLLMAction(text, s, d);
+    }).catch(function() { return null; });
+  }
+
   function processNLCommand(raw, s, d) {
     var text = raw.trim().toLowerCase();
 
@@ -5454,6 +5643,8 @@ function startApp() {
     var msgs = stMsgs[0], setMsgs = stMsgs[1];
     var stInput = useState(''), input = stInput[0], setInput = stInput[1];
     var stLoading = useState(false), loading = stLoading[0], setLoading = stLoading[1];
+    var stLLMStatus = useState(_nlModelStatus), llmStatus = stLLMStatus[0], setLLMStatus = stLLMStatus[1];
+    var stLLMProgress = useState(0), llmProgress = stLLMProgress[0], setLLMProgress = stLLMProgress[1];
     var inputRef = useRef(null);
     var bottomRef = useRef(null);
 
@@ -5473,6 +5664,20 @@ function startApp() {
     }, [open]);
 
     useEffect(function() {
+      if (!open) return;
+      // Sync local status in case model already loaded
+      if (_nlModelStatus === 'ready') { setLLMStatus('ready'); return; }
+      if (_nlModelStatus === 'error') { setLLMStatus('error'); return; }
+      // Kick off lazy load on first open
+      var listener = function(st, pct) {
+        setLLMStatus(st);
+        if (typeof pct === 'number') setLLMProgress(pct);
+      };
+      _nlModelListeners.push(listener);
+      if (_nlModelStatus === 'idle') getNLPipeline().catch(function(){});
+    }, [open]);
+
+    useEffect(function() {
       if (bottomRef.current) bottomRef.current.scrollIntoView({behavior:'smooth'});
     }, [msgs]);
 
@@ -5482,13 +5687,12 @@ function startApp() {
       setMsgs(function(m){ return m.concat([{role:'user', text:text}]); });
       setInput('');
       setLoading(true);
-      setTimeout(function() {
-        var result = processNLCommand(text, s, d);
+      processNLCommandWithLLM(text, s, d).then(function(result) {
         var reply = result !== null ? result
           : 'Not sure what you mean. Try: "check structural vs MEP with 50mm clearance", "how many clashes?", "group by storey", "export BCF", or "help".';
         setMsgs(function(m){ return m.concat([{role:'assistant', text:reply}]); });
         setLoading(false);
-      }, 120);
+      });
     }
 
     function onKeyDown(e) {
@@ -5539,11 +5743,26 @@ function startApp() {
           <path d="M2 4h12M2 8h8M2 12h10" stroke="#60a5fa" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
         <span style=${{fontSize:'.76rem', fontWeight:600, color:textCol, flex:1}}>Clash Setup</span>
+        ${llmStatus === 'ready' && html`<span title="AI model loaded — natural language active" style=${{fontSize:'.6rem', color:'#22c55e', opacity:.8}}>● AI</span>`}
         <button onClick=${function(){ setOpen(false); }} style=${{
           background:'none', border:'none', cursor:'pointer',
           color:mutedCol, fontSize:'1.1rem', lineHeight:1, padding:'0 .1rem'
         }}>×</button>
       </div>
+
+      ${llmStatus === 'loading' && html`<div style=${{
+        padding:'.3rem .8rem', borderBottom:'1px solid '+borderCol,
+        fontSize:'.65rem', color:mutedCol, display:'flex', flexDirection:'column', gap:'.2rem'
+      }}>
+        <span>Loading AI model… ${llmProgress}%</span>
+        <div style=${{height:3, background:borderCol, borderRadius:2}}>
+          <div style=${{height:'100%', width:llmProgress+'%', background:'#60a5fa', borderRadius:2, transition:'width .3s'}}></div>
+        </div>
+      </div>`}
+      ${llmStatus === 'error' && html`<div style=${{
+        padding:'.3rem .8rem', borderBottom:'1px solid '+borderCol,
+        fontSize:'.65rem', color:'#f97316'
+      }}>AI model failed to load — using keyword matching mode.</div>`}
 
       <div style=${{
         overflowY:'auto', padding:'.7rem .8rem',
@@ -5580,7 +5799,7 @@ function startApp() {
           value=${input}
           onInput=${function(e){ setInput(e.target.value); }}
           onKeyDown=${onKeyDown}
-          placeholder=${'e.g. check structural vs MEP with 50mm clearance'}
+          placeholder=${llmStatus === 'ready' ? 'Describe your clash check in plain English…' : 'e.g. check structural vs MEP with 50mm clearance'}
           rows="2"
           style=${{
             flex:1, resize:'none', background:inputBg, border:'1px solid '+borderCol,
