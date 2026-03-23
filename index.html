@@ -178,7 +178,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.27',hash:'812342f',date:'2026-03-23T11:32:35Z'};
+  var CC_VERSION = {v:'1.2.28',hash:'e432726',date:'2026-03-23T12:12:26Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -3379,26 +3379,25 @@ function startApp() {
 
   function _switchProject(newProjId, s, d) {
     d({t:'SWITCHING_PROJECT', v:true});
-    // Save current project first
-    _saveCurrentProjectData(s).then(function(){
-      // Clear current scene
-      if(window._ccClearScene) window._ccClearScene();
-      // Reset state to fresh (keep switchingProject:true while files load)
-      d({t:'LOAD_PROJECT_STATE', data:{
-        models:[], clashes:[], issues:[], activeId:null, detecting:false,
-        switchingProject:true,
-        sectionAxis:null, sectionPos:0.5, sectionCustom:null, sectionBox:null,
-        filters:Object.assign({},INIT_FILTERS), floors:[],
-        measurements:[], measureMode:null, viewpoints:[],
-        classifications:{}, hiddenClasses:{}, colorByClass:null,
-        floorPlan:null, _highlightedStorey:null
-      }});
-      d({t:'SET_PROJECT', id:newProjId});
-      setActiveProjectId(newProjId);
-      // Trigger reload of stored files for new project (ModelSidebar will handle via effect)
-      window._ccProjectSwitch = newProjId;
-      window.dispatchEvent(new Event('cc-project-switch'));
-    });
+    // Save current project in background — don't block the switch on it
+    _saveCurrentProjectData(s);
+    // Clear current scene immediately
+    if(window._ccClearScene) window._ccClearScene();
+    // Reset state to fresh (keep switchingProject:true while files load)
+    d({t:'LOAD_PROJECT_STATE', data:{
+      models:[], clashes:[], issues:[], activeId:null, detecting:false,
+      switchingProject:true,
+      sectionAxis:null, sectionPos:0.5, sectionCustom:null, sectionBox:null,
+      filters:Object.assign({},INIT_FILTERS), floors:[],
+      measurements:[], measureMode:null, viewpoints:[],
+      classifications:{}, hiddenClasses:{}, colorByClass:null,
+      floorPlan:null, _highlightedStorey:null
+    }});
+    d({t:'SET_PROJECT', id:newProjId});
+    setActiveProjectId(newProjId);
+    // Trigger reload of stored files for new project (ModelSidebar will handle via effect)
+    window._ccProjectSwitch = newProjId;
+    window.dispatchEvent(new Event('cc-project-switch'));
   }
 
   function Header(props) {
