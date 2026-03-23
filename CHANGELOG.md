@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.54 (2026-03-23)
+- Add first-visit welcome popup with LLM setup instructions
+
 ## v1.2.53 (2026-03-23)
 - Add Revit Bridge: AI-powered bidirectional sync between ClashControl and Revit
 

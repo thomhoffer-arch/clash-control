@@ -182,7 +182,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.53',hash:'e506bea',date:'2026-03-23T19:37:14Z'};
+  var CC_VERSION = {v:'1.2.54',hash:'15cd29d',date:'2026-03-23T19:53:58Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -7298,51 +7298,106 @@ function startApp() {
       try { return !localStorage.getItem('cc_welcomed'); } catch(e){ return true; }
     });
     var show = stShow[0], setShow = stShow[1];
+    // Animate in
+    var stVisible = useState(false), vis = stVisible[0], setVis = stVisible[1];
+    useEffect(function(){ if(show) requestAnimationFrame(function(){ setVis(true); }); },[show]);
     if (!show) return null;
     function dismiss() {
-      try { localStorage.setItem('cc_welcomed','1'); } catch(e){}
-      setShow(false);
+      setVis(false);
+      setTimeout(function(){
+        try { localStorage.setItem('cc_welcomed','1'); } catch(e){}
+        setShow(false);
+      }, 200);
     }
-    var MS={position:'fixed',inset:0,background:'var(--modal-bg)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:60};
-    var MX={background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:14,width:400,maxWidth:'92vw',boxShadow:'0 25px 50px rgba(0,0,0,.5)',overflow:'hidden'};
-    var accent='#2563eb';
-    return html`<div style=${MS} onClick=${function(e){if(e.target===e.currentTarget)dismiss();}}>
-      <div style=${MX}>
-        <div style=${{background:'linear-gradient(135deg,#1e3a5f,#2563eb)',padding:'1.2rem 1.2rem 1rem',display:'flex',alignItems:'center',gap:'.65rem'}}>
-          <div style=${{width:36,height:36,background:'rgba(255,255,255,.15)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-            <span style=${{color:'#fff',fontWeight:900,fontSize:14}}>CC</span>
-          </div>
-          <div>
-            <div style=${{color:'#fff',fontWeight:700,fontSize:'.95rem'}}>Welcome to ClashControl</div>
-            <div style=${{color:'rgba(255,255,255,.7)',fontSize:'.65rem',marginTop:'.1rem'}}>Open-source BIM clash detection</div>
+    function openBridge() { dismiss(); setTimeout(function(){ d({t:'REVIT_BRIDGE',v:true}); },250); }
+
+    var cardBg = isDark ? '#162032' : '#f1f5f9';
+    var cardBorder = isDark ? '#1e3a5f' : '#cbd5e1';
+    var codeBg = isDark ? '#0f172a' : '#e2e8f0';
+    var CARD = {background:cardBg,border:'1px solid '+cardBorder,borderRadius:10,padding:'.65rem .75rem',display:'flex',gap:'.6rem',alignItems:'flex-start',cursor:'default',transition:'border-color .15s'};
+    var ICON_WRAP = {width:32,height:32,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0};
+
+    return html`<div style=${{position:'fixed',inset:0,background:vis?'var(--modal-bg)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',zIndex:60,transition:'background .2s'}}
+      onClick=${function(e){if(e.target===e.currentTarget)dismiss();}}>
+      <div style=${{background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:16,width:440,maxWidth:'92vw',boxShadow:'0 30px 60px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.05) inset',overflow:'hidden',transform:vis?'translateY(0) scale(1)':'translateY(12px) scale(.97)',opacity:vis?1:0,transition:'transform .25s cubic-bezier(.16,1,.3,1), opacity .2s'}}>
+
+        <!-- Header -->
+        <div style=${{background:'linear-gradient(135deg,#0f2744 0%,#1e3a5f 40%,#2563eb 100%)',padding:'1.4rem 1.4rem 1.2rem',position:'relative',overflow:'hidden'}}>
+          <div style=${{position:'absolute',top:'-30%',right:'-10%',width:180,height:180,borderRadius:'50%',background:'rgba(37,99,235,.2)',filter:'blur(40px)'}}></div>
+          <div style=${{display:'flex',alignItems:'center',gap:'.75rem',position:'relative'}}>
+            <div style=${{width:42,height:42,background:'rgba(255,255,255,.12)',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,backdropFilter:'blur(8px)',border:'1px solid rgba(255,255,255,.1)'}}>
+              <span style=${{color:'#fff',fontWeight:900,fontSize:16}}>CC</span>
+            </div>
+            <div>
+              <div style=${{color:'#fff',fontWeight:700,fontSize:'1.05rem',letterSpacing:'-.01em'}}>Welcome to ClashControl</div>
+              <div style=${{color:'rgba(255,255,255,.6)',fontSize:'.65rem',marginTop:'.15rem'}}>Free, open-source BIM clash detection</div>
+            </div>
           </div>
         </div>
-        <div style=${{padding:'1rem 1.2rem'}}>
-          <div style=${{fontSize:'.75rem',color:'var(--text-primary)',lineHeight:1.65,marginBottom:'.7rem'}}>
-            ClashControl works with a <strong>local AI assistant</strong> to help you run clash checks using plain English. You can connect your own LLM:
+
+        <!-- Body -->
+        <div style=${{padding:'1rem 1.3rem 1.2rem'}}>
+          <div style=${{fontSize:'.74rem',color:'var(--text-secondary)',lineHeight:1.6,marginBottom:'.85rem'}}>
+            Connect your own LLM to run clash checks with plain English and sync with Revit:
           </div>
-          <div style=${{display:'flex',flexDirection:'column',gap:'.45rem',marginBottom:'.8rem'}}>
-            <div style=${{display:'flex',gap:'.5rem',alignItems:'flex-start'}}>
-              <span style=${{color:'#22c55e',fontWeight:700,fontSize:'.7rem',flexShrink:0,marginTop:1}}>1</span>
-              <span style=${{fontSize:'.68rem',color:'var(--text-secondary)',lineHeight:1.55}}>
-                <strong style=${{color:'var(--text-primary)'}}>Local (free):</strong> Install <a href="https://ollama.com" target="_blank" rel="noopener" style=${{color:'#60a5fa'}}>Ollama</a>, then run <code style=${{background:isDark?'#1e293b':'#e2e8f0',padding:'1px 4px',borderRadius:3,fontSize:'.6rem'}}>ollama pull qwen2.5:7b</code>. ClashControl detects it automatically.
-              </span>
+
+          <div style=${{display:'flex',flexDirection:'column',gap:'.5rem',marginBottom:'1rem'}}>
+
+            <!-- Option 1: Local -->
+            <div style=${CARD}>
+              <div style=${{...ICON_WRAP,background:isDark?'#052e16':'#dcfce7'}}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke=${isDark?'#4ade80':'#16a34a'} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+                  <line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>
+                </svg>
+              </div>
+              <div style=${{flex:1,minWidth:0}}>
+                <div style=${{fontSize:'.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.15rem'}}>Local AI <span style=${{fontSize:'.55rem',fontWeight:600,color:isDark?'#4ade80':'#16a34a',background:isDark?'#052e16':'#dcfce7',padding:'1px 5px',borderRadius:99,marginLeft:'.3rem'}}>Free</span></div>
+                <div style=${{fontSize:'.63rem',color:'var(--text-secondary)',lineHeight:1.5}}>
+                  Install <a href="https://ollama.com" target="_blank" rel="noopener" style=${{color:'#60a5fa',textDecoration:'none',fontWeight:500}}>Ollama</a> and run:
+                  <code style=${{display:'inline-block',background:codeBg,padding:'1px 5px',borderRadius:4,fontSize:'.58rem',marginLeft:'.2rem',fontFamily:'monospace'}}>ollama pull qwen2.5:7b</code>
+                  <br/>Auto-detected when running. No data leaves your machine.
+                </div>
+              </div>
             </div>
-            <div style=${{display:'flex',gap:'.5rem',alignItems:'flex-start'}}>
-              <span style=${{color:'#22c55e',fontWeight:700,fontSize:'.7rem',flexShrink:0,marginTop:1}}>2</span>
-              <span style=${{fontSize:'.68rem',color:'var(--text-secondary)',lineHeight:1.55}}>
-                <strong style=${{color:'var(--text-primary)'}}>Cloud API (BYOK):</strong> Click the <strong>Revit Bridge</strong> button (left sidebar) to connect Claude, GPT-4o, or Gemini with your own API key. Enables push/pull to Revit via MCP.
-              </span>
+
+            <!-- Option 2: Cloud -->
+            <div style=${CARD}>
+              <div style=${{...ICON_WRAP,background:isDark?'#172554':'#dbeafe'}}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke=${isDark?'#60a5fa':'#2563eb'} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
+                </svg>
+              </div>
+              <div style=${{flex:1,minWidth:0}}>
+                <div style=${{fontSize:'.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.15rem'}}>Cloud API <span style=${{fontSize:'.55rem',fontWeight:500,color:'var(--text-muted)'}}>Bring your own key</span></div>
+                <div style=${{fontSize:'.63rem',color:'var(--text-secondary)',lineHeight:1.5}}>
+                  Connect <strong style=${{color:'var(--text-primary)',fontWeight:500}}>Claude</strong>, <strong style=${{color:'var(--text-primary)',fontWeight:500}}>GPT-4o</strong>, or <strong style=${{color:'var(--text-primary)',fontWeight:500}}>Gemini</strong> via the
+                  <button onClick=${openBridge} style=${{background:'none',border:'none',color:'#60a5fa',cursor:'pointer',fontFamily:'inherit',fontSize:'.63rem',padding:0,fontWeight:600,textDecoration:'underline',textUnderlineOffset:2}}>Revit Bridge</button>
+                  panel. Enables AI-powered push/pull to Revit via MCP.
+                </div>
+              </div>
             </div>
-            <div style=${{display:'flex',gap:'.5rem',alignItems:'flex-start'}}>
-              <span style=${{color:'#22c55e',fontWeight:700,fontSize:'.7rem',flexShrink:0,marginTop:1}}>3</span>
-              <span style=${{fontSize:'.68rem',color:'var(--text-secondary)',lineHeight:1.55}}>
-                <strong style=${{color:'var(--text-primary)'}}>No AI? No problem.</strong> Everything works without AI — load IFC files, run clashes, export BCF, all in-browser.
-              </span>
+
+            <!-- Option 3: No AI -->
+            <div style=${CARD}>
+              <div style=${{...ICON_WRAP,background:isDark?'#422006':'#fef3c7'}}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke=${isDark?'#fbbf24':'#d97706'} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+              </div>
+              <div style=${{flex:1,minWidth:0}}>
+                <div style=${{fontSize:'.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.15rem'}}>No AI needed</div>
+                <div style=${{fontSize:'.63rem',color:'var(--text-secondary)',lineHeight:1.5}}>
+                  Everything works without AI — load IFC models, detect clashes, manage issues, and export BCF. All processing runs in your browser.
+                </div>
+              </div>
             </div>
           </div>
-          <div style=${{display:'flex',gap:'.4rem',justifyContent:'flex-end'}}>
-            <button onClick=${dismiss} style=${{border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:8,padding:'.45rem 1.2rem',background:accent,color:'#fff',fontWeight:600}}>
+
+          <!-- Footer actions -->
+          <div style=${{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <span style=${{fontSize:'.58rem',color:'var(--text-muted)'}}>You can configure this anytime in Settings</span>
+            <button onClick=${dismiss} style=${{border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:8,padding:'.5rem 1.4rem',background:'#2563eb',color:'#fff',fontWeight:600,boxShadow:'0 2px 8px rgba(37,99,235,.35)',transition:'background .15s'}}>
               Get Started
             </button>
           </div>
