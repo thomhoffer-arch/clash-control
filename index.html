@@ -178,7 +178,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.39',hash:'9a07ba9',date:'2026-03-23T14:30:55Z'};
+  var CC_VERSION = {v:'1.2.40',hash:'0c6dd52',date:'2026-03-23T14:45:52Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -1048,63 +1048,85 @@ function startApp() {
     return iA[0]<iB[1]&&iB[0]<iA[1]; // strict < to exclude edge-only touches
   }
 
-  // ── Spatial hash for triangles (by centroid) ────────────────────
-  function _TriHash(cellSize) {
-    this.cs = cellSize; this.inv = 1/cellSize; this.map = {};
-  }
-  _TriHash.prototype.insert = function(tris) {
-    for (var i = 0; i < tris.length; i += 9) {
-      var cx = (tris[i]+tris[i+3]+tris[i+6])/3;
-      var cy = (tris[i+1]+tris[i+4]+tris[i+7])/3;
-      var cz = (tris[i+2]+tris[i+5]+tris[i+8])/3;
-      var k = Math.floor(cx*this.inv)+','+Math.floor(cy*this.inv)+','+Math.floor(cz*this.inv);
-      if (!this.map[k]) this.map[k] = [];
-      this.map[k].push(i);
-    }
-  };
-  _TriHash.prototype.nearby = function(cx,cy,cz) {
-    var out = [];
-    var gx=Math.floor(cx*this.inv), gy=Math.floor(cy*this.inv), gz=Math.floor(cz*this.inv);
-    for(var dx=-1;dx<=1;dx++) for(var dy=-1;dy<=1;dy++) for(var dz=-1;dz<=1;dz++) {
-      var b = this.map[(gx+dx)+','+(gy+dy)+','+(gz+dz)];
-      if(b) for(var i=0;i<b.length;i++) out.push(b[i]);
-    }
-    return out;
-  };
+  // ── BVH (Bounding Volume Hierarchy) for triangles ───────────────
+  // Three-level pipeline:
+  //   L1  Element AABB   — rejects whole element pairs instantly (detectClashes)
+  //   L2  BVH node AABB  — prunes subtrees at every split (here)
+  //   L3  Möller tri-tri — runs only on the few surviving leaf pairs (_triTriTest)
 
-  // Check if two elements' triangles actually intersect (hard clash)
-  // Uses spatial hash to avoid O(n*m) brute force
-  function _meshesIntersect(elA, elB) {
-    var tA = _getWorldTris(elA), tB = _getWorldTris(elB);
-    if (!tA.length || !tB.length) return false;
-    // Build hash from smaller set, query with larger
-    var hashTris, queryTris, hashIsA;
-    if (tA.length <= tB.length) { hashTris=tA; queryTris=tB; hashIsA=true; }
-    else { hashTris=tB; queryTris=tA; hashIsA=false; }
-    // Cell size: estimate from average triangle span
-    var span = 0, cnt = 0;
-    for (var s = 0; s < hashTris.length && cnt < 30; s += 9, cnt++) {
-      var sx=Math.max(hashTris[s],hashTris[s+3],hashTris[s+6])-Math.min(hashTris[s],hashTris[s+3],hashTris[s+6]);
-      var sy=Math.max(hashTris[s+1],hashTris[s+4],hashTris[s+7])-Math.min(hashTris[s+1],hashTris[s+4],hashTris[s+7]);
-      var sz=Math.max(hashTris[s+2],hashTris[s+5],hashTris[s+8])-Math.min(hashTris[s+2],hashTris[s+5],hashTris[s+8]);
-      span += Math.max(sx,sy,sz);
-    }
-    var cs = cnt > 0 ? Math.max((span/cnt)*2, 0.05) : 0.1;
-    var grid = new _TriHash(cs);
-    grid.insert(hashTris);
-
-    for (var q = 0; q < queryTris.length; q += 9) {
-      var qcx=(queryTris[q]+queryTris[q+3]+queryTris[q+6])/3;
-      var qcy=(queryTris[q+1]+queryTris[q+4]+queryTris[q+7])/3;
-      var qcz=(queryTris[q+2]+queryTris[q+5]+queryTris[q+8])/3;
-      var near = grid.nearby(qcx,qcy,qcz);
-      for (var n = 0; n < near.length; n++) {
-        if (hashIsA ? _triTriTest(hashTris, near[n], queryTris, q) : _triTriTest(queryTris, q, hashTris, near[n])) {
-          return true; // found an intersecting triangle pair → hard clash
-        }
+  // Build one BVH node covering indices[lo..hi) of the triangle array
+  function _buildBVHNode(tris, indices, lo, hi) {
+    // Compute tight AABB over all vertices in this range
+    var mnx=Infinity,mny=Infinity,mnz=Infinity;
+    var mxx=-Infinity,mxy=-Infinity,mxz=-Infinity;
+    for (var i=lo; i<hi; i++) {
+      var o=indices[i]*9;
+      for (var v=0; v<3; v++) {
+        var vx=tris[o+v*3],vy=tris[o+v*3+1],vz=tris[o+v*3+2];
+        if(vx<mnx)mnx=vx; if(vx>mxx)mxx=vx;
+        if(vy<mny)mny=vy; if(vy>mxy)mxy=vy;
+        if(vz<mnz)mnz=vz; if(vz>mxz)mxz=vz;
       }
     }
-    return false;
+    var node = {mnx:mnx,mny:mny,mnz:mnz,mxx:mxx,mxy:mxy,mxz:mxz};
+    if (hi-lo <= 4) { node.lo=lo; node.hi=hi; node.idx=indices; return node; } // leaf
+    // Split along longest axis at centroid median
+    var dx=mxx-mnx, dy=mxy-mny, dz=mxz-mnz;
+    var axis = (dx>=dy&&dx>=dz) ? 0 : (dy>=dz) ? 1 : 2;
+    var sub = Array.prototype.slice.call(indices, lo, hi);
+    sub.sort(function(a,b){
+      return (tris[a*9+axis]+tris[a*9+3+axis]+tris[a*9+6+axis])
+            -(tris[b*9+axis]+tris[b*9+3+axis]+tris[b*9+6+axis]);
+    });
+    for (var i=lo; i<hi; i++) indices[i]=sub[i-lo];
+    var mid=(lo+hi)>>1;
+    node.cnt=hi-lo;
+    node.left =_buildBVHNode(tris,indices,lo,mid);
+    node.right=_buildBVHNode(tris,indices,mid,hi);
+    return node;
+  }
+
+  // Return cached BVH for an element, building it on first call
+  function _getBVH(el) {
+    if (el._bvhCache !== undefined) return el._bvhCache;
+    var tris = _getWorldTris(el);
+    if (!tris.length) return (el._bvhCache = null);
+    var n = tris.length/9;
+    var indices = new Int32Array(n);
+    for (var i=0; i<n; i++) indices[i]=i;
+    el._bvhCache = { tris:tris, root:_buildBVHNode(tris, indices, 0, n) };
+    return el._bvhCache;
+  }
+
+  // Dual-BVH traversal: L2 AABB check at every node, L3 Möller at leaves
+  function _bvhTraverse(nA, trisA, nB, trisB) {
+    // L2: AABB overlap check — prune entire subtree if boxes miss
+    if (nA.mnx>nB.mxx||nA.mxx<nB.mnx||
+        nA.mny>nB.mxy||nA.mxy<nB.mny||
+        nA.mnz>nB.mxz||nA.mxz<nB.mnz) return false;
+    var aLeaf = nA.lo !== undefined;
+    var bLeaf = nB.lo !== undefined;
+    if (aLeaf && bLeaf) {
+      // L3: Möller tri-tri on every pair in these two leaves
+      for (var i=nA.lo; i<nA.hi; i++)
+        for (var j=nB.lo; j<nB.hi; j++)
+          if (_triTriTest(trisA, nA.idx[i]*9, trisB, nB.idx[j]*9)) return true;
+      return false;
+    }
+    // Descend into the node with more triangles (maximises early rejection)
+    if (bLeaf || (!aLeaf && (nA.cnt||1) >= (nB.cnt||1))) {
+      return _bvhTraverse(nA.left, trisA, nB, trisB) ||
+             _bvhTraverse(nA.right, trisA, nB, trisB);
+    }
+    return _bvhTraverse(nA, trisA, nB.left, trisB) ||
+           _bvhTraverse(nA, trisA, nB.right, trisB);
+  }
+
+  // Check if two elements' triangles physically intersect (hard clash)
+  function _meshesIntersect(elA, elB) {
+    var bA = _getBVH(elA), bB = _getBVH(elB);
+    if (!bA || !bB) return false;
+    return _bvhTraverse(bA.root, bA.tris, bB.root, bB.tris);
   }
 
   // ── Spatial hash for vertex distance (used for soft/clearance clashes) ──
@@ -1159,7 +1181,9 @@ function startApp() {
   // Flush caches (called on project switch / model unload)
   function _flushGeoCache(models) {
     (models || []).forEach(function(m) {
-      (m.elements || []).forEach(function(el) { delete el._wvCache; delete el._triCache; });
+      (m.elements || []).forEach(function(el) {
+        delete el._wvCache; delete el._triCache; delete el._bvhCache;
+      });
     });
   }
 
