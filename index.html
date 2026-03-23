@@ -182,7 +182,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.49',hash:'96d5cd1',date:'2026-03-23T16:05:00Z'};
+  var CC_VERSION = {v:'1.2.50',hash:'7ebb1c3',date:'2026-03-23T16:08:04Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -4230,10 +4230,10 @@ function startApp() {
         <span style=${{width:20,height:2,background:'var(--text-faint)',borderRadius:1}}></span>
       </div>
       ${function(){
-        // Collect all unique storeys across all models for global toggle + floor plan cuts
+        // Collect all unique storeys across visible models for global toggle + floor plan cuts
         var allStoreys = {};
         var elevMap = {}; // storeyName -> elevation
-        s.models.forEach(function(m){
+        s.models.filter(function(m){return m.visible!==false}).forEach(function(m){
           (m.storeys||[]).forEach(function(st){
             if(!allStoreys[st]) allStoreys[st]={models:[]};
             allStoreys[st].models.push(m.id);
@@ -4417,11 +4417,12 @@ function startApp() {
     var cls = s.classifications;
     var lastClassifyRef = useRef('');
     useEffect(function(){
-      if(s.models.length===0) return;
-      var sig = s.models.map(function(m){return m.id+':'+(m.elements?m.elements.length:0)}).join(',');
+      var vis = s.models.filter(function(m){return m.visible!==false});
+      if(vis.length===0){ d({t:'SET_CLASSIFICATIONS',v:{}}); lastClassifyRef.current=''; return; }
+      var sig = vis.map(function(m){return m.id+':'+(m.elements?m.elements.length:0)+':'+(m.visible!==false)}).join(',');
       if(sig===lastClassifyRef.current) return;
       lastClassifyRef.current = sig;
-      d({t:'SET_CLASSIFICATIONS',v:classifyModels(s.models)});
+      d({t:'SET_CLASSIFICATIONS',v:classifyModels(vis)});
     }, [s.models]);
     var hasCls = cls && Object.keys(cls).length>0;
     var classView = viewMode!=='tree' ? viewMode : null;
@@ -4467,7 +4468,7 @@ function startApp() {
       </div>
       <div style=${{flex:1,overflowY:'auto',fontSize:'.6rem'}}>
         ${s.models.length===0 && html`<div style=${{textAlign:'center',color:'var(--text-faint)',fontSize:'.7rem',padding:'2rem 1rem'}}>Load models to explore</div>`}
-        ${viewMode==='tree' && s.models.map(function(model){
+        ${viewMode==='tree' && s.models.filter(function(m){return m.visible!==false}).map(function(model){
           var mKey = 'm_'+model.id;
           var mOpen = !!expanded[mKey];
           var disc = DISC.find(function(x){return x.id===model.discipline;});
@@ -4616,12 +4617,21 @@ function startApp() {
     var isExplorerTab = s.tab==='explorer';
     var rawItems = isClashTab ? s.clashes : s.issues;
 
+    // Build set of visible model IDs for filtering
+    var visibleModelIds = useMemo(function(){
+      var ids = {};
+      s.models.forEach(function(m){ if(m.visible !== false) ids[m.id] = true; });
+      return ids;
+    }, [s.models]);
+
     // Collect unique values for dynamic filter dropdowns (memoized)
+    // Only includes values from clashes/issues belonging to visible (checked) models
     var filterLists = useMemo(function(){
       var uTypes={}, uStoreys={}, uMats={};
       var uPriorities={}, uCategories={}, uAssignees={}, uIssueTypes={}, uIssueStoreys={};
       if(isClashTab){
         s.clashes.forEach(function(c){
+          if((c.modelAId && !visibleModelIds[c.modelAId]) || (c.modelBId && !visibleModelIds[c.modelBId])) return;
           if(c.elemAType) uTypes[c.elemAType]=true;
           if(c.elemBType) uTypes[c.elemBType]=true;
           if(c.elemAStorey) uStoreys[c.elemAStorey]=true;
@@ -4631,6 +4641,7 @@ function startApp() {
         });
       } else {
         s.issues.forEach(function(i){
+          if(i.modelId && !visibleModelIds[i.modelId]) return;
           if(i.priority) uPriorities[i.priority]=true;
           if(i.category) uCategories[i.category]=true;
           if(i.assignee) uAssignees[i.assignee]=true;
@@ -4641,7 +4652,7 @@ function startApp() {
       return {types:Object.keys(uTypes).sort(), storeys:Object.keys(uStoreys).sort(), materials:Object.keys(uMats).sort(),
         priorities:Object.keys(uPriorities).sort(), categories:Object.keys(uCategories).sort(), assignees:Object.keys(uAssignees).sort(),
         issueTypes:Object.keys(uIssueTypes).sort(), issueStoreys:Object.keys(uIssueStoreys).sort()};
-    }, [s.clashes, s.issues, isClashTab]);
+    }, [s.clashes, s.issues, isClashTab, visibleModelIds]);
     var typeList = filterLists.types;
     var storeyList = filterLists.storeys;
     var materialList = filterLists.materials;
@@ -4666,13 +4677,6 @@ function startApp() {
     if(f.assignee!=='all') activeCount++;
     if(f.issueElementType!=='all') activeCount++;
     if(f.issueStorey!=='all') activeCount++;
-
-    // Build set of visible model IDs for filtering
-    var visibleModelIds = useMemo(function(){
-      var ids = {};
-      s.models.forEach(function(m){ if(m.visible !== false) ids[m.id] = true; });
-      return ids;
-    }, [s.models]);
 
     // Apply all filters
     var items = useMemo(function(){

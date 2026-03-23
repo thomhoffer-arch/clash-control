@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.50 (2026-03-23)
+- Word-based NL parsing for clash detection commands
+
 ## v1.2.49 (2026-03-23)
 - Replace distance filter with dual-range slider
 
