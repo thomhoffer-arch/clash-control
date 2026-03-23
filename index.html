@@ -128,7 +128,7 @@
     *{box-sizing:border-box;margin:0;padding:0}
     body{background:var(--bg-primary);color:var(--text-primary);font-family:system-ui,-apple-system,sans-serif;overflow:hidden}
     input[type=range]{accent-color:var(--accent)}input[type=checkbox]{accent-color:var(--accent)}
-    ::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg-secondary)}::-webkit-scrollbar-thumb{background:var(--text-faint);border-radius:3px}
+    ::-webkit-scrollbar{width:7px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--text-faint);border-radius:4px}::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}
     select,select option{background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border)}
     .spin{animation:sp 1s linear infinite;display:inline-block}@keyframes sp{to{transform:rotate(360deg)}}
     @keyframes nlDots{0%,20%{opacity:.2}50%{opacity:1}80%,100%{opacity:.2}}
@@ -136,7 +136,10 @@
     @keyframes nlBorderReady{0%{box-shadow:0 8px 32px rgba(0,0,0,.35),0 0 0 4px rgba(34,197,94,.5),0 0 20px rgba(34,197,94,.4)}100%{box-shadow:0 8px 32px rgba(0,0,0,.35),0 0 0 0 rgba(34,197,94,0),0 0 0 rgba(34,197,94,0)}}
     .lc2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     button{font-family:inherit}
-    .cc-tip{position:relative}.cc-tip::after{content:attr(data-tip);position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%) translateX(-4px);background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:5px;padding:.25rem .5rem;font-size:.68rem;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .15s,transform .15s;z-index:9999}.cc-tip:hover::after{opacity:1;transform:translateY(-50%) translateX(0)}.cc-tip-up::after{left:50%;top:auto;bottom:calc(100% + 7px);transform:translateX(-50%) translateY(4px)}.cc-tip-up:hover::after{transform:translateX(-50%) translateY(0)}.cc-tip-left::after{left:auto;right:calc(100% + 8px);transform:translateY(-50%) translateX(4px)}.cc-tip-left:hover::after{transform:translateY(-50%) translateX(0)}
+    .cc-tip{position:relative}.cc-tip::after{content:attr(data-tip);position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%) translateX(-4px);background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:.3rem .6rem;font-size:.7rem;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .15s,transform .15s;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.2)}.cc-tip:hover::after{opacity:1;transform:translateY(-50%) translateX(0)}.cc-tip-up::after{left:50%;top:auto;bottom:calc(100% + 7px);transform:translateX(-50%) translateY(4px)}.cc-tip-up:hover::after{transform:translateX(-50%) translateY(0)}.cc-tip-left::after{left:auto;right:calc(100% + 8px);transform:translateY(-50%) translateX(4px)}.cc-tip-left:hover::after{transform:translateY(-50%) translateX(0)}
+    button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
+    [role=switch]:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:10px}
     input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;appearance:none;height:14px;width:14px;border-radius:50%;background:#3b82f6;border:2px solid #1e3a5f;cursor:pointer;pointer-events:auto;margin-top:-1px;box-shadow:0 1px 3px rgba(0,0,0,.4)}
     input[type=range]::-moz-range-thumb{height:10px;width:10px;border-radius:50%;background:#3b82f6;border:2px solid #1e3a5f;cursor:pointer;pointer-events:auto;box-shadow:0 1px 3px rgba(0,0,0,.4)}
     input[type=range]::-webkit-slider-runnable-track{height:4px;background:transparent;border-radius:2px}
@@ -182,7 +185,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.53',hash:'e506bea',date:'2026-03-23T19:37:14Z'};
+  var CC_VERSION = {v:'1.2.55',hash:'8798e45',date:'2026-03-23T19:58:02Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -3855,8 +3858,8 @@ function startApp() {
 
   var S_PANEL   = {background:'var(--bg-primary)',borderRight:'1px solid var(--border-subtle)',display:'flex',flexDirection:'column',flexShrink:0,overflow:'hidden'};
   var S_PANELR  = {background:'var(--bg-primary)',borderLeft:'1px solid var(--border-subtle)',display:'flex',flexDirection:'column',flexShrink:0};
-  var S_BTN     = {border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:'6px',padding:'.35rem .75rem'};
-  var S_INPUT   = {width:'100%',background:'var(--bg-tertiary)',color:'var(--text-primary)',fontSize:'.8rem',borderRadius:'8px',padding:'.35rem .6rem',border:'1px solid var(--border)',outline:'none'};
+  var S_BTN     = {border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:'6px',padding:'.4rem .85rem',lineHeight:1.4};
+  var S_INPUT   = {width:'100%',background:'var(--bg-tertiary)',color:'var(--text-primary)',fontSize:'.8rem',borderRadius:'8px',padding:'.4rem .65rem',border:'1px solid var(--border)',outline:'none',transition:'border-color .15s'};
 
   // ── Header ─────────────────────────────────────────────────────
 
@@ -5287,25 +5290,25 @@ function startApp() {
     function tog(k){return function(){var u={};u[k]=!p[k];d({t:'UPD_PREFS',u:u});}}
     function sel(k){return function(e){var u={};u[k]=e.target.value;d({t:'UPD_PREFS',u:u});}}
     var MS={position:'fixed',inset:0,background:'var(--modal-bg)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:50};
-    var MX={background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:12,width:440,maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 25px 50px rgba(0,0,0,.5)'};
-    var LBL={fontSize:'.7rem',color:'var(--text-muted)',display:'block',marginBottom:'.2rem'};
-    var SEC={fontSize:'.65rem',fontWeight:700,color:'#93c5fd',textTransform:'uppercase',letterSpacing:'.05em',marginBottom:'.4rem',marginTop:'.6rem'};
-    var TROW={display:'flex',justifyContent:'space-between',alignItems:'center',padding:'.35rem 0',borderBottom:'1px solid var(--border-subtle)'};
-    var TLBL={fontSize:'.75rem',color:'var(--text-primary)'};
-    var TSUB={fontSize:'.6rem',color:'var(--text-muted)',marginTop:'.05rem'};
+    var MX={background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:14,width:460,maxWidth:'95vw',maxHeight:'90vh',overflowY:'auto',boxShadow:'0 25px 50px rgba(0,0,0,.5)'};
+    var LBL={fontSize:'.72rem',color:'var(--text-muted)',display:'block',marginBottom:'.25rem'};
+    var SEC={fontSize:'.7rem',fontWeight:700,color:'var(--pill-blue)',textTransform:'uppercase',letterSpacing:'.06em',marginBottom:'.5rem',marginTop:'.8rem'};
+    var TROW={display:'flex',justifyContent:'space-between',alignItems:'center',padding:'.5rem 0',gap:'1rem',borderBottom:'1px solid var(--border-subtle)'};
+    var TLBL={fontSize:'.78rem',color:'var(--text-primary)'};
+    var TSUB={fontSize:'.65rem',color:'var(--text-muted)',marginTop:'.1rem',lineHeight:1.4};
     // Toggle switch style
     function Toggle(tp) {
       var on=tp.on;
-      return html`<div onClick=${tp.onToggle} role="switch" aria-checked=${on} tabindex="0" onKeyDown=${function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();tp.onToggle();}}} style=${{width:36,height:20,borderRadius:10,background:on?'var(--accent)':'var(--text-faint)',cursor:'pointer',position:'relative',transition:'background .2s',flexShrink:0}}>
-        <div style=${{width:16,height:16,borderRadius:8,background:'#fff',position:'absolute',top:2,left:on?18:2,transition:'left .2s'}}></div>
+      return html`<div onClick=${tp.onToggle} role="switch" aria-checked=${on} tabindex="0" onKeyDown=${function(e){if(e.key==='Enter'||e.key===' '){e.preventDefault();tp.onToggle();}}} style=${{width:38,height:22,borderRadius:11,background:on?'var(--accent)':'var(--text-faint)',cursor:'pointer',position:'relative',transition:'background .2s',flexShrink:0}}>
+        <div style=${{width:18,height:18,borderRadius:9,background:'#fff',position:'absolute',top:2,left:on?18:2,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,.2)'}}></div>
       </div>`;
     }
     return html`<div style=${MS} role="dialog" aria-label="Settings"><div style=${MX}>
-      <div style=${{display:'flex',justifyContent:'space-between',padding:'.8rem 1rem',borderBottom:'1px solid var(--border)'}}>
-        <span style=${{fontWeight:600,fontSize:'.875rem'}}>Settings</span>
+      <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'1rem 1.2rem',borderBottom:'1px solid var(--border)'}}>
+        <span style=${{fontWeight:600,fontSize:'.9rem'}}>Settings</span>
         <button onClick=${function(){d({t:'SETTINGS',v:false})}} style=${{...S_BTN,background:'none',color:'var(--text-muted)',fontSize:'1.1rem',padding:0}} aria-label="Close settings">✕</button>
       </div>
-      <div style=${{padding:'0 1rem .8rem 1rem'}}>
+      <div style=${{padding:'.2rem 1.2rem 1rem 1.2rem'}}>
         <div style=${SEC}>Viewer</div>
         <div style=${TROW}>
           <div><div style=${TLBL}>Auto fly-to on click</div><div style=${TSUB}>Camera moves to element when selecting a clash or issue</div></div>
@@ -5349,7 +5352,7 @@ function startApp() {
         </div>
 
         <div style=${SEC}>Issue Defaults</div>
-        <div style=${{display:'flex',gap:'.5rem',padding:'.35rem 0'}}>
+        <div style=${{display:'flex',gap:'.5rem',padding:'.5rem 0'}}>
           <div style=${{flex:1}}><label style=${LBL}>Default Priority</label>
             <select value=${p.defaultPriority||'normal'} onChange=${sel('defaultPriority')} style=${S_INPUT}>
               <option value="critical">Critical</option><option value="high">High</option><option value="normal">Normal</option><option value="low">Low</option>
@@ -7020,11 +7023,11 @@ function startApp() {
           var isUser = m.role === 'user';
           return html`<div key=${i} style=${{display:'flex', justifyContent: isUser?'flex-end':'flex-start'}}>
             <div style=${{
-              maxWidth:'85%', padding:'.4rem .65rem',
+              maxWidth:'85%', padding:'.45rem .7rem',
               borderRadius: isUser ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
-              background: isUser ? '#2563eb' : aiBubbleBg,
+              background: isUser ? 'var(--accent)' : aiBubbleBg,
               color: isUser ? '#fff' : textCol,
-              fontSize:'.73rem', lineHeight:1.55, wordBreak:'break-word'
+              fontSize:'.76rem', lineHeight:1.55, wordBreak:'break-word'
             }}>
               ${m.detecting ? html`<span style=${{display:'flex',alignItems:'center',gap:'.4rem',color:'#60a5fa'}}>
                 <span class="spin" style=${{display:'inline-block',width:'.6rem',height:'.6rem',borderRadius:'50%',border:'1.5px solid rgba(96,165,250,.3)',borderTopColor:'#60a5fa',flexShrink:0}}></span>
@@ -7043,8 +7046,8 @@ function startApp() {
       </div>
 
       <div style=${{
-        padding:'.5rem .65rem', borderTop:'1px solid '+borderCol,
-        display:'flex', gap:'.4rem', alignItems:'flex-end'
+        padding:'.55rem .7rem', borderTop:'1px solid '+borderCol,
+        display:'flex', gap:'.45rem', alignItems:'flex-end'
       }}>
         <textarea
           ref=${inputRef}
@@ -7055,14 +7058,16 @@ function startApp() {
           rows="2"
           style=${{
             flex:1, resize:'none', background:inputBg, border:'1px solid '+borderCol,
-            borderRadius:7, padding:'.35rem .55rem', color:textCol,
-            fontSize:'.73rem', lineHeight:1.5, outline:'none', fontFamily:'inherit'
+            borderRadius:8, padding:'.4rem .6rem', color:textCol,
+            fontSize:'.76rem', lineHeight:1.5, outline:'none', fontFamily:'inherit',
+            transition:'border-color .15s'
           }}
         ></textarea>
         <button onClick=${send} disabled=${!input.trim()||loading} style=${{
-          background:'#2563eb', color:'#fff', border:'none', borderRadius:7,
-          padding:'.35rem .6rem', cursor:'pointer', fontSize:'.73rem',
-          opacity:(!input.trim()||loading)?0.45:1, alignSelf:'flex-end'
+          background:'var(--accent)', color:'#fff', border:'none', borderRadius:8,
+          padding:'.4rem .7rem', cursor:'pointer', fontSize:'.76rem', fontWeight:500,
+          opacity:(!input.trim()||loading)?0.45:1, alignSelf:'flex-end',
+          transition:'opacity .15s'
         }}>Send</button>
       </div>
     </div>`;
@@ -7089,9 +7094,11 @@ function startApp() {
 
     function iconBtn(onClick, content, title) {
       return html`<button class="cc-tip" data-tip=${title} onClick=${onClick}
-        style=${{width:'100%',height:36,background:'none',border:'none',cursor:'pointer',
-          display:'flex',alignItems:'center',justifyContent:'center',
-          color:'var(--text-muted)',fontSize:'.82rem',transition:'color .12s'}}>${content}</button>`;
+        style=${{width:'100%',height:38,background:'none',border:'none',cursor:'pointer',
+          display:'flex',alignItems:'center',justifyContent:'center',borderRadius:6,margin:'1px 4px',width:'calc(100% - 8px)',
+          color:'var(--text-muted)',fontSize:'.82rem',transition:'color .15s, background .15s'}}
+        onMouseEnter=${function(e){e.currentTarget.style.background='rgba(37,99,235,.08)';e.currentTarget.style.color='var(--text-secondary)';}}
+        onMouseLeave=${function(e){e.currentTarget.style.background='none';e.currentTarget.style.color='var(--text-muted)';}}>${content}</button>`;
     }
     var SVG_CHAT   = '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>';
     var SVG_OPEN   = '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>';
@@ -7114,7 +7121,7 @@ function startApp() {
         </div>
       </div>
       ${iconBtn(function(){window._ccNLOpen&&window._ccNLOpen();},
-        html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_CHAT}}></svg>`,
+        html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_CHAT}}></svg>`,
         'AI Assistant')}
       <!-- Project switcher -->
       <div style=${{position:'relative'}}>
@@ -7123,7 +7130,7 @@ function startApp() {
           style=${{width:'100%',height:36,background:projOpen?'rgba(37,99,235,.12)':'none',border:'none',cursor:'pointer',
             display:'flex',alignItems:'center',justifyContent:'center',
             color:projOpen?'#60a5fa':'var(--text-muted)',transition:'background .12s,color .12s'}}>
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
           </svg>
         </button>
@@ -7184,23 +7191,23 @@ function startApp() {
         html`<span style=${{fontWeight:700,fontSize:'.7rem',letterSpacing:'.03em'}}>2D</span>`,
         'Load DXF / PDF / DWG')}
       ${iconBtn(function(){saveProject(s);},
-        html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_SAVE}}></svg>`,
+        html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_SAVE}}></svg>`,
         'Save Project')}
       ${iconBtn(function(){importBCF(d);},
-        html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_IMPORT}}></svg>`,
+        html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_IMPORT}}></svg>`,
         'Import BCF')}
       ${iconBtn(function(){exportBCF(all,'2.1',s.viewpoints);},
-        html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_EXPORT}}></svg>`,
+        html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_EXPORT}}></svg>`,
         'Export BCF')}
       ${iconBtn(function(){d({t:'UPD_PREFS',u:{theme:isDark?'light':'dark'}});},
         isDark?'☀':'☾', isDark?'Light mode':'Dark mode')}
       ${iconBtn(function(){d({t:'REVIT_BRIDGE',v:true});},
-        html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+        html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>
         </svg>`,
         'Revit Bridge')}
       ${iconBtn(function(){d({t:'SETTINGS',v:true});},
-        html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_GEAR}}></svg>`,
+        html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_GEAR}}></svg>`,
         'Settings')}
     </div>`;
   }
@@ -7217,12 +7224,12 @@ function startApp() {
       return html`<button class="cc-tip cc-tip-left" data-tip=${title} onClick=${function(){d({t:'TAB',v:s.tab===id?null:id});}}
         style=${{width:'100%',height:44,background:active?'rgba(37,99,235,.12)':'none',border:'none',
           cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',position:'relative',
-          borderRight:active?'2px solid #3b82f6':'2px solid transparent',
-          color:active?'#60a5fa':'var(--text-muted)',transition:'background .12s,color .12s'}}>
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:svgPath}}></svg>
-        ${badge>0 && html`<span style=${{position:'absolute',top:6,left:5,background:'#ef4444',color:'#fff',
-          fontSize:'.48rem',padding:'1px 3px',borderRadius:99,lineHeight:1.4,minWidth:11,textAlign:'center',
-          pointerEvents:'none'}}>${badge>99?'99+':badge}</span>`}
+          borderRight:active?'3px solid #3b82f6':'3px solid transparent',
+          color:active?'#60a5fa':'var(--text-muted)',transition:'background .15s,color .15s'}}>
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:svgPath}}></svg>
+        ${badge>0 && html`<span style=${{position:'absolute',top:5,left:4,background:'#ef4444',color:'#fff',
+          fontSize:'.55rem',fontWeight:600,padding:'1px 4px',borderRadius:99,lineHeight:1.3,minWidth:14,textAlign:'center',
+          pointerEvents:'none',boxShadow:'0 1px 3px rgba(0,0,0,.3)'}}>${badge>99?'99+':badge}</span>`}
       </button>`;
     }
     var SVG_MODELS  = '<path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/><path d="M12 2L2 7l10 5 10-5-10-5z"/>';
@@ -7271,16 +7278,16 @@ function startApp() {
       width:panelW,flexShrink:0,display:'flex',flexDirection:'column',overflow:'hidden',
       background:'var(--bg-primary)',borderLeft:'1px solid var(--border-subtle)',position:'relative'
     }}>
-      <div onMouseDown=${onResizeDown} style=${{position:'absolute',left:0,top:0,bottom:0,width:5,cursor:'col-resize',zIndex:10,
-        background:'transparent'}} onMouseEnter=${function(e){e.currentTarget.style.background='rgba(59,130,246,0.25)';}} onMouseLeave=${function(e){e.currentTarget.style.background='transparent';}}></div>
-      <div style=${{display:'flex',alignItems:'center',padding:'.5rem .75rem',
+      <div onMouseDown=${onResizeDown} style=${{position:'absolute',left:0,top:0,bottom:0,width:8,cursor:'col-resize',zIndex:10,
+        background:'transparent',transition:'background .15s'}} onMouseEnter=${function(e){e.currentTarget.style.background='rgba(59,130,246,0.3)';}} onMouseLeave=${function(e){e.currentTarget.style.background='transparent';}}></div>
+      <div style=${{display:'flex',alignItems:'center',padding:'.6rem .85rem',
         borderBottom:'1px solid var(--border-subtle)',flexShrink:0,gap:'.5rem'}}>
-        <span style=${{fontWeight:600,fontSize:'.75rem',flex:1,color:'var(--text-primary)'}}>${TITLES[tab]||''}</span>
-        ${tab==='models' && html`<span style=${{fontSize:'.65rem',color:'var(--text-muted)',overflow:'hidden',
-          textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:120}} title=${activeProj.name}>📁 ${activeProj.name}</span>`}
+        <span style=${{fontWeight:600,fontSize:'.82rem',flex:1,color:'var(--text-primary)'}}>${TITLES[tab]||''}</span>
+        ${tab==='models' && html`<span style=${{fontSize:'.68rem',color:'var(--text-muted)',overflow:'hidden',
+          textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:140}} title=${activeProj.name}>📁 ${activeProj.name}</span>`}
         <button onClick=${function(){d({t:'TAB',v:null});}}
           style=${{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',
-            fontSize:'1rem',lineHeight:1,padding:'0 .1rem'}} title="Close panel">×</button>
+            fontSize:'1.1rem',lineHeight:1,padding:'2px 4px',borderRadius:4}} title="Close panel">×</button>
       </div>
       ${tab==='models'   && html`<${ModelSidebar}  s=${s} d=${d} />`}
       ${tab==='clashes'  && html`<${IssuePanel} s=${s} d=${d} hideTabBar=${true} />`}
@@ -7298,51 +7305,106 @@ function startApp() {
       try { return !localStorage.getItem('cc_welcomed'); } catch(e){ return true; }
     });
     var show = stShow[0], setShow = stShow[1];
+    // Animate in
+    var stVisible = useState(false), vis = stVisible[0], setVis = stVisible[1];
+    useEffect(function(){ if(show) requestAnimationFrame(function(){ setVis(true); }); },[show]);
     if (!show) return null;
     function dismiss() {
-      try { localStorage.setItem('cc_welcomed','1'); } catch(e){}
-      setShow(false);
+      setVis(false);
+      setTimeout(function(){
+        try { localStorage.setItem('cc_welcomed','1'); } catch(e){}
+        setShow(false);
+      }, 200);
     }
-    var MS={position:'fixed',inset:0,background:'var(--modal-bg)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:60};
-    var MX={background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:14,width:400,maxWidth:'92vw',boxShadow:'0 25px 50px rgba(0,0,0,.5)',overflow:'hidden'};
-    var accent='#2563eb';
-    return html`<div style=${MS} onClick=${function(e){if(e.target===e.currentTarget)dismiss();}}>
-      <div style=${MX}>
-        <div style=${{background:'linear-gradient(135deg,#1e3a5f,#2563eb)',padding:'1.2rem 1.2rem 1rem',display:'flex',alignItems:'center',gap:'.65rem'}}>
-          <div style=${{width:36,height:36,background:'rgba(255,255,255,.15)',borderRadius:10,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
-            <span style=${{color:'#fff',fontWeight:900,fontSize:14}}>CC</span>
-          </div>
-          <div>
-            <div style=${{color:'#fff',fontWeight:700,fontSize:'.95rem'}}>Welcome to ClashControl</div>
-            <div style=${{color:'rgba(255,255,255,.7)',fontSize:'.65rem',marginTop:'.1rem'}}>Open-source BIM clash detection</div>
+    function openBridge() { dismiss(); setTimeout(function(){ d({t:'REVIT_BRIDGE',v:true}); },250); }
+
+    var cardBg = isDark ? '#162032' : '#f1f5f9';
+    var cardBorder = isDark ? '#1e3a5f' : '#cbd5e1';
+    var codeBg = isDark ? '#0f172a' : '#e2e8f0';
+    var CARD = {background:cardBg,border:'1px solid '+cardBorder,borderRadius:10,padding:'.65rem .75rem',display:'flex',gap:'.6rem',alignItems:'flex-start',cursor:'default',transition:'border-color .15s'};
+    var ICON_WRAP = {width:32,height:32,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0};
+
+    return html`<div style=${{position:'fixed',inset:0,background:vis?'var(--modal-bg)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',zIndex:60,transition:'background .2s'}}
+      onClick=${function(e){if(e.target===e.currentTarget)dismiss();}}>
+      <div style=${{background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:16,width:440,maxWidth:'92vw',boxShadow:'0 30px 60px rgba(0,0,0,.6),0 0 0 1px rgba(255,255,255,.05) inset',overflow:'hidden',transform:vis?'translateY(0) scale(1)':'translateY(12px) scale(.97)',opacity:vis?1:0,transition:'transform .25s cubic-bezier(.16,1,.3,1), opacity .2s'}}>
+
+        <!-- Header -->
+        <div style=${{background:'linear-gradient(135deg,#0f2744 0%,#1e3a5f 40%,#2563eb 100%)',padding:'1.4rem 1.4rem 1.2rem',position:'relative',overflow:'hidden'}}>
+          <div style=${{position:'absolute',top:'-30%',right:'-10%',width:180,height:180,borderRadius:'50%',background:'rgba(37,99,235,.2)',filter:'blur(40px)'}}></div>
+          <div style=${{display:'flex',alignItems:'center',gap:'.75rem',position:'relative'}}>
+            <div style=${{width:42,height:42,background:'rgba(255,255,255,.12)',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,backdropFilter:'blur(8px)',border:'1px solid rgba(255,255,255,.1)'}}>
+              <span style=${{color:'#fff',fontWeight:900,fontSize:16}}>CC</span>
+            </div>
+            <div>
+              <div style=${{color:'#fff',fontWeight:700,fontSize:'1.05rem',letterSpacing:'-.01em'}}>Welcome to ClashControl</div>
+              <div style=${{color:'rgba(255,255,255,.6)',fontSize:'.65rem',marginTop:'.15rem'}}>Free, open-source BIM clash detection</div>
+            </div>
           </div>
         </div>
-        <div style=${{padding:'1rem 1.2rem'}}>
-          <div style=${{fontSize:'.75rem',color:'var(--text-primary)',lineHeight:1.65,marginBottom:'.7rem'}}>
-            ClashControl works with a <strong>local AI assistant</strong> to help you run clash checks using plain English. You can connect your own LLM:
+
+        <!-- Body -->
+        <div style=${{padding:'1rem 1.3rem 1.2rem'}}>
+          <div style=${{fontSize:'.74rem',color:'var(--text-secondary)',lineHeight:1.6,marginBottom:'.85rem'}}>
+            Connect your own LLM to run clash checks with plain English and sync with Revit:
           </div>
-          <div style=${{display:'flex',flexDirection:'column',gap:'.45rem',marginBottom:'.8rem'}}>
-            <div style=${{display:'flex',gap:'.5rem',alignItems:'flex-start'}}>
-              <span style=${{color:'#22c55e',fontWeight:700,fontSize:'.7rem',flexShrink:0,marginTop:1}}>1</span>
-              <span style=${{fontSize:'.68rem',color:'var(--text-secondary)',lineHeight:1.55}}>
-                <strong style=${{color:'var(--text-primary)'}}>Local (free):</strong> Install <a href="https://ollama.com" target="_blank" rel="noopener" style=${{color:'#60a5fa'}}>Ollama</a>, then run <code style=${{background:isDark?'#1e293b':'#e2e8f0',padding:'1px 4px',borderRadius:3,fontSize:'.6rem'}}>ollama pull qwen2.5:7b</code>. ClashControl detects it automatically.
-              </span>
+
+          <div style=${{display:'flex',flexDirection:'column',gap:'.5rem',marginBottom:'1rem'}}>
+
+            <!-- Option 1: Local -->
+            <div style=${CARD}>
+              <div style=${{...ICON_WRAP,background:isDark?'#052e16':'#dcfce7'}}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke=${isDark?'#4ade80':'#16a34a'} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+                  <line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>
+                </svg>
+              </div>
+              <div style=${{flex:1,minWidth:0}}>
+                <div style=${{fontSize:'.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.15rem'}}>Local AI <span style=${{fontSize:'.55rem',fontWeight:600,color:isDark?'#4ade80':'#16a34a',background:isDark?'#052e16':'#dcfce7',padding:'1px 5px',borderRadius:99,marginLeft:'.3rem'}}>Free</span></div>
+                <div style=${{fontSize:'.63rem',color:'var(--text-secondary)',lineHeight:1.5}}>
+                  Install <a href="https://ollama.com" target="_blank" rel="noopener" style=${{color:'#60a5fa',textDecoration:'none',fontWeight:500}}>Ollama</a> and run:
+                  <code style=${{display:'inline-block',background:codeBg,padding:'1px 5px',borderRadius:4,fontSize:'.58rem',marginLeft:'.2rem',fontFamily:'monospace'}}>ollama pull qwen2.5:7b</code>
+                  <br/>Auto-detected when running. No data leaves your machine.
+                </div>
+              </div>
             </div>
-            <div style=${{display:'flex',gap:'.5rem',alignItems:'flex-start'}}>
-              <span style=${{color:'#22c55e',fontWeight:700,fontSize:'.7rem',flexShrink:0,marginTop:1}}>2</span>
-              <span style=${{fontSize:'.68rem',color:'var(--text-secondary)',lineHeight:1.55}}>
-                <strong style=${{color:'var(--text-primary)'}}>Cloud API (BYOK):</strong> Click the <strong>Revit Bridge</strong> button (left sidebar) to connect Claude, GPT-4o, or Gemini with your own API key. Enables push/pull to Revit via MCP.
-              </span>
+
+            <!-- Option 2: Cloud -->
+            <div style=${CARD}>
+              <div style=${{...ICON_WRAP,background:isDark?'#172554':'#dbeafe'}}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke=${isDark?'#60a5fa':'#2563eb'} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
+                </svg>
+              </div>
+              <div style=${{flex:1,minWidth:0}}>
+                <div style=${{fontSize:'.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.15rem'}}>Cloud API <span style=${{fontSize:'.55rem',fontWeight:500,color:'var(--text-muted)'}}>Bring your own key</span></div>
+                <div style=${{fontSize:'.63rem',color:'var(--text-secondary)',lineHeight:1.5}}>
+                  Connect <strong style=${{color:'var(--text-primary)',fontWeight:500}}>Claude</strong>, <strong style=${{color:'var(--text-primary)',fontWeight:500}}>GPT-4o</strong>, or <strong style=${{color:'var(--text-primary)',fontWeight:500}}>Gemini</strong> via the
+                  <button onClick=${openBridge} style=${{background:'none',border:'none',color:'#60a5fa',cursor:'pointer',fontFamily:'inherit',fontSize:'.63rem',padding:0,fontWeight:600,textDecoration:'underline',textUnderlineOffset:2}}>Revit Bridge</button>
+                  panel. Enables AI-powered push/pull to Revit via MCP.
+                </div>
+              </div>
             </div>
-            <div style=${{display:'flex',gap:'.5rem',alignItems:'flex-start'}}>
-              <span style=${{color:'#22c55e',fontWeight:700,fontSize:'.7rem',flexShrink:0,marginTop:1}}>3</span>
-              <span style=${{fontSize:'.68rem',color:'var(--text-secondary)',lineHeight:1.55}}>
-                <strong style=${{color:'var(--text-primary)'}}>No AI? No problem.</strong> Everything works without AI — load IFC files, run clashes, export BCF, all in-browser.
-              </span>
+
+            <!-- Option 3: No AI -->
+            <div style=${CARD}>
+              <div style=${{...ICON_WRAP,background:isDark?'#422006':'#fef3c7'}}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke=${isDark?'#fbbf24':'#d97706'} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+              </div>
+              <div style=${{flex:1,minWidth:0}}>
+                <div style=${{fontSize:'.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.15rem'}}>No AI needed</div>
+                <div style=${{fontSize:'.63rem',color:'var(--text-secondary)',lineHeight:1.5}}>
+                  Everything works without AI — load IFC models, detect clashes, manage issues, and export BCF. All processing runs in your browser.
+                </div>
+              </div>
             </div>
           </div>
-          <div style=${{display:'flex',gap:'.4rem',justifyContent:'flex-end'}}>
-            <button onClick=${dismiss} style=${{border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:8,padding:'.45rem 1.2rem',background:accent,color:'#fff',fontWeight:600}}>
+
+          <!-- Footer actions -->
+          <div style=${{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <span style=${{fontSize:'.58rem',color:'var(--text-muted)'}}>You can configure this anytime in Settings</span>
+            <button onClick=${dismiss} style=${{border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:8,padding:'.5rem 1.4rem',background:'#2563eb',color:'#fff',fontWeight:600,boxShadow:'0 2px 8px rgba(37,99,235,.35)',transition:'background .15s'}}>
               Get Started
             </button>
           </div>
