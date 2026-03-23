@@ -178,7 +178,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.41',hash:'73ad61c',date:'2026-03-23T14:49:42Z'};
+  var CC_VERSION = {v:'1.2.42',hash:'c8876f5',date:'2026-03-23T14:50:47Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -6259,13 +6259,9 @@ function startApp() {
           <path d="M2 4h12M2 8h8M2 12h10" stroke="#60a5fa" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
         <span style=${{fontSize:'.76rem', fontWeight:600, color:textCol, flex:1}}>ClashControl</span>
-        ${isDetecting && html`<span style=${{fontSize:'.6rem', color:'#f59e0b', display:'flex', alignItems:'center', gap:'.25rem'}}>
-          <span class="spin" style=${{display:'inline-block', width:'.55rem', height:'.55rem', borderRadius:'50%', border:'1.5px solid rgba(245,158,11,.3)', borderTopColor:'#f59e0b'}}></span>
-          Detecting…
-        </span>`}
-        ${!isDetecting && modelLoading && html`<span style=${{fontSize:'.6rem', color:'#60a5fa', display:'flex', alignItems:'center', gap:'.25rem'}}>
+        ${(isDetecting || modelLoading) && html`<span style=${{fontSize:'.6rem', color:'#60a5fa', display:'flex', alignItems:'center', gap:'.25rem'}}>
           <span class="spin" style=${{display:'inline-block', width:'.55rem', height:'.55rem', borderRadius:'50%', border:'1.5px solid rgba(96,165,250,.3)', borderTopColor:'#60a5fa'}}></span>
-          Loading model…
+          ${isDetecting ? 'Detecting…' : 'Loading model…'}
         </span>`}
         ${!modelLoading && llmStatus === 'loading' && html`<span style=${{fontSize:'.6rem', color:'#60a5fa', display:'flex', alignItems:'center', gap:'.25rem'}}>
           <span class="spin" style=${{display:'inline-block', width:'.55rem', height:'.55rem', borderRadius:'50%', border:'1.5px solid rgba(96,165,250,.3)', borderTopColor:'#60a5fa'}}></span>

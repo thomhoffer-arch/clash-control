@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.42 (2026-03-23)
+- Improve project deletion UX
+
 ## v1.2.41 (2026-03-23)
 - Replace triangle spatial hash with dual-BVH traversal
 
