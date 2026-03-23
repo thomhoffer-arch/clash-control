@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.42 (2026-03-23)
+- Fix view cube 3D depth, orientation stability, IFC/2D buttons, resizable panel
+
 ## v1.2.41 (2026-03-23)
 - Replace folder icon in left rail with IFC and 2D label buttons
 

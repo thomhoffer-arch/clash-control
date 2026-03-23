@@ -178,7 +178,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.41',hash:'af06834',date:'2026-03-23T10:26:36Z'};
+  var CC_VERSION = {v:'1.2.42',hash:'0001676',date:'2026-03-23T10:30:24Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -5946,12 +5946,13 @@ function startApp() {
   function SidePanel(props) {
     var s=props.s, d=props.d;
     var tab=s.tab;
+    // Hooks MUST be called unconditionally (before any early return)
+    var widthSt=useState(300), panelW=widthSt[0], setPanelW=widthSt[1];
+    var dragRef=useRef(null);
     if (!tab) return null;
     var projects=s.projectList||[];
     var activeProj=projects.find(function(p){return p.id===s.activeProject;})||projects[0]||{name:'Default'};
     var TITLES={models:'Models',clashes:'Clashes',issues:'Issues',explorer:'Explorer'};
-    var widthSt=useState(300), panelW=widthSt[0], setPanelW=widthSt[1];
-    var dragRef=useRef(null);
     function onResizeDown(e){
       e.preventDefault();
       dragRef.current={startX:e.clientX,startW:panelW};
