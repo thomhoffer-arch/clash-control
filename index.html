@@ -178,7 +178,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.43',hash:'25325db',date:'2026-03-23T14:55:17Z'};
+  var CC_VERSION = {v:'1.2.44',hash:'555f55e',date:'2026-03-23T15:08:29Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -1187,114 +1187,181 @@ function startApp() {
     });
   }
 
+  // ── L0: Sweep and Prune broad phase ─────────────────────────────
+  // Replaces the O(n²) element-pair loop. Sorts elements along the axis
+  // with highest AABB-centre variance, then sweeps an active set — only
+  // elements that still overlap on that axis are retained. Y/Z overlap
+  // checked inline. Result: O(n log n + k) where k = true candidates.
+  function _sweepAndPrune(grpA, grpB, rules, clearanceM) {
+    // Expand AABBs by this much when testing overlap
+    var margin = Math.max((rules.hardTolerance||0)/1000, rules.soft ? clearanceM : 0);
+
+    // Fast-lookup sets for model group membership
+    var inA = {}, inB = {};
+    grpA.forEach(function(m){ inA[m.id]=true; });
+    grpB.forEach(function(m){ inB[m.id]=true; });
+
+    // Collect unique elements across all relevant models (no duplicates)
+    var seenModels = {}, items = [];
+    grpA.concat(grpB).forEach(function(m) {
+      if (seenModels[m.id]) return; seenModels[m.id]=true;
+      (m.elements||[]).forEach(function(el) {
+        if (el.box) items.push({el:el, m:m});
+      });
+    });
+    if (items.length < 2) return [];
+
+    // Pick the axis whose AABB centres have the highest variance.
+    // High variance → fewer simultaneous active-set members → smaller inner loop.
+    var n=items.length, sx=0,sy=0,sz=0,sx2=0,sy2=0,sz2=0;
+    items.forEach(function(it) {
+      var b=it.el.box;
+      var cx=(b.min.x+b.max.x)*0.5, cy=(b.min.y+b.max.y)*0.5, cz=(b.min.z+b.max.z)*0.5;
+      sx+=cx; sy+=cy; sz+=cz; sx2+=cx*cx; sy2+=cy*cy; sz2+=cz*cz;
+    });
+    var vx=sx2/n-(sx/n)*(sx/n), vy=sy2/n-(sy/n)*(sy/n), vz=sz2/n-(sz/n)*(sz/n);
+    var axis  = vx>=vy&&vx>=vz ? 'x' : vy>=vz ? 'y' : 'z';
+    var axis2 = axis==='x' ? 'y' : 'x';
+    var axis3 = axis==='z' ? 'y' : 'z';
+
+    // Sort by (min − margin) on the chosen axis
+    items.sort(function(a,b){
+      return (a.el.box.min[axis]-margin)-(b.el.box.min[axis]-margin);
+    });
+
+    var pairs = [], active = [];
+
+    for (var i=0; i<items.length; i++) {
+      var cur = items[i];
+      var curMin = cur.el.box.min[axis]-margin;
+
+      // Expire elements whose interval ended before cur starts
+      active = active.filter(function(it){
+        return it.el.box.max[axis]+margin >= curMin;
+      });
+
+      var bC = cur.el.box;
+
+      for (var j=0; j<active.length; j++) {
+        var oth = active[j];
+        var sameModel = cur.m.id === oth.m.id;
+
+        // Apply model rules
+        if (sameModel) {
+          // Self-clash only valid if model is in both groups and not excluded
+          if (rules.excludeSelf || !inA[cur.m.id] || !inB[cur.m.id]) continue;
+        } else {
+          // Cross-model: one must be from A, the other from B
+          if (!(inA[cur.m.id]&&inB[oth.m.id]) && !(inB[cur.m.id]&&inA[oth.m.id])) continue;
+        }
+
+        // Check overlap on the other two axes
+        var bO = oth.el.box;
+        if (bC.max[axis2]+margin < bO.min[axis2]-margin ||
+            bC.min[axis2]-margin > bO.max[axis2]+margin) continue;
+        if (bC.max[axis3]+margin < bO.min[axis3]-margin ||
+            bC.min[axis3]-margin > bO.max[axis3]+margin) continue;
+
+        // Emit with canonical A/B model ordering
+        if (inA[cur.m.id] && inB[oth.m.id]) {
+          pairs.push({eA:cur.el, mA:cur.m, eB:oth.el, mB:oth.m, sameModel:sameModel});
+        } else {
+          pairs.push({eA:oth.el, mA:oth.m, eB:cur.el, mB:cur.m, sameModel:sameModel});
+        }
+      }
+      active.push(cur);
+    }
+    return pairs;
+  }
+
   function detectClashes(models, rules) {
     var pick = function(id) { return id === 'all' ? models : models.filter(function(m){return m.id===id}); };
     var grpA = pick(rules.modelA), grpB = pick(rules.modelB);
-    var clashes = [], seen = {};
-    // Reusable temp boxes to avoid O(n²) clone allocations
-    var _tmpBoxA = new THREE.Box3(), _tmpBoxB = new THREE.Box3();
+    var clearanceM = (rules.clearance||0)/1000;
+    var clashes = [];
     var _tmpSizeA = new THREE.Vector3(), _tmpSizeB = new THREE.Vector3();
-    var _tmpCtrA = new THREE.Vector3(), _tmpCtrB = new THREE.Vector3();
-    var hardTol = (rules.hardTolerance||0)/1000; // mm to m
+    var _tmpCtrA  = new THREE.Vector3(), _tmpCtrB  = new THREE.Vector3();
 
     // Change-aware: track which elements changed since last run
-    var newHashes = {};
-    var changedElements = {};
+    var newHashes = {}, changedElements = {};
     if (rules.changeAware) {
       models.forEach(function(m) {
         (m.elements||[]).forEach(function(el) {
           var h = _hashElement(el);
-          var key = m.id + ':' + el.expressId;
+          var key = m.id+':'+el.expressId;
           newHashes[key] = h;
           if (_prevElementHashes[key] !== h) changedElements[key] = true;
         });
       });
     }
 
-    grpA.forEach(function(mA) { grpB.forEach(function(mB) {
-      var sameModel = mA.id === mB.id;
-      if (rules.excludeSelf && sameModel) return;
-      var key = [mA.id, mB.id].sort().join('|');
-      if (seen[key]) return; seen[key] = true;
-      (mA.elements||[]).forEach(function(eA, iA) { (mB.elements||[]).forEach(function(eB, iB) {
-        if (sameModel && iB <= iA) return;
-        // Change-aware: skip pairs where neither element changed
-        if (rules.changeAware && !changedElements[mA.id+':'+eA.expressId] && !changedElements[mB.id+':'+eB.expressId]) return;
+    // ── L0: Sweep and Prune — O(n log n + k) candidate pairs ───────
+    var candidates = _sweepAndPrune(grpA, grpB, rules, clearanceM);
 
-        var bA = eA.box, bB = eB.box;
+    candidates.forEach(function(pair) {
+      var eA=pair.eA, mA=pair.mA, eB=pair.eB, mB=pair.mB, sameModel=pair.sameModel;
 
-        // Duplicate detection: identical bounding boxes at same location
-        if (rules.duplicates) {
-          var sizeA = bA.getSize(_tmpSizeA);
-          var sizeB = bB.getSize(_tmpSizeB);
-          var ctrA = bA.getCenter(_tmpCtrA);
-          var ctrB = bB.getCenter(_tmpCtrB);
-          var sizeDiff = Math.abs(sizeA.x-sizeB.x) + Math.abs(sizeA.y-sizeB.y) + Math.abs(sizeA.z-sizeB.z);
-          var posDiff = ctrA.distanceTo(ctrB);
-          if (sizeDiff < 0.01 && posDiff < 0.01) {
-            var pA=eA.props||{}, pB=eB.props||{};
-            var tA=pA.ifcType||'Element', tB=pB.ifcType||'Element';
-            var nA=pA.name||('#'+eA.expressId), nB=pB.name||('#'+eB.expressId);
-            clashes.push({
-              id:uid(), source:'auto', type:'duplicate', status:'open',
-              title:'Duplicate: '+tA,
-              description:nA+' ≡ '+nB+' (same location & size)',
-              modelAId:mA.id, modelBId:mB.id, elemA:eA.expressId, elemB:eB.expressId,
-              point:[ctrA.x,ctrA.y,ctrA.z], createdAt:new Date().toISOString(),
-              distance:0, elevation:Math.round(ctrA.y*1000)/1000,
-              disciplines:[mA.discipline,mB.discipline], selfClash:sameModel,
-              elemAType:tA, elemBType:tB, elemAName:nA, elemBName:nB,
-              elemAStorey:pA.storey||'', elemBStorey:pB.storey||'',
-              elemAMaterial:pA.material||'', elemBMaterial:pB.material||''
-            });
-            return; // don't also report as hard/soft
-          }
-        }
+      // Change-aware: skip pairs where neither element changed
+      if (rules.changeAware &&
+          !changedElements[mA.id+':'+eA.expressId] &&
+          !changedElements[mB.id+':'+eB.expressId]) return;
 
-        // ── Broad phase: AABB overlap check (fast reject) ──────────
-        var clearanceM = (rules.clearance || 0) / 1000;
-        var broadMargin = Math.max(hardTol, rules.soft ? clearanceM : 0);
-        if (broadMargin > 0) {
-          _tmpBoxA.copy(bA).expandByScalar(broadMargin);
-          if (!_tmpBoxA.intersectsBox(bB)) return; // AABBs don't overlap even with margin
-        } else {
-          if (!bA.intersectsBox(bB)) return; // AABBs don't overlap at all
-        }
+      var bA=eA.box, bB=eB.box;
 
-        // ── Narrow phase: geometry-level check ─────────────────────
-        // Hard clash = triangles physically intersect (not just touching)
-        // Soft clash = actual mesh distance within clearance
-        var isHard = false, isSoft = false, geoDist = Infinity;
-
-        if (rules.hard) {
-          isHard = _meshesIntersect(eA, eB);
-        }
-        if (!isHard && rules.soft && clearanceM > 0) {
-          geoDist = _meshMinDist(eA, eB, clearanceM);
-          isSoft = geoDist <= clearanceM;
-        }
-
-        if (isHard || isSoft) {
-          var ctr = bA.getCenter(_tmpCtrA);
-          var dist = isHard ? 0 : Math.round(geoDist * 1000); // metres → mm
-          var pA = eA.props||{}, pB = eB.props||{};
-          var tA = pA.ifcType||'Element', tB = pB.ifcType||'Element';
-          var nA = pA.name||('#'+eA.expressId), nB = pB.name||('#'+eB.expressId);
+      // Duplicate detection: identical bounding boxes at same location
+      if (rules.duplicates) {
+        var sizeA=bA.getSize(_tmpSizeA), sizeB=bB.getSize(_tmpSizeB);
+        var ctrA=bA.getCenter(_tmpCtrA), ctrB=bB.getCenter(_tmpCtrB);
+        var sizeDiff=Math.abs(sizeA.x-sizeB.x)+Math.abs(sizeA.y-sizeB.y)+Math.abs(sizeA.z-sizeB.z);
+        if (sizeDiff<0.01 && ctrA.distanceTo(ctrB)<0.01) {
+          var pA=eA.props||{}, pB=eB.props||{};
+          var tA=pA.ifcType||'Element', tB=pB.ifcType||'Element';
+          var nA=pA.name||('#'+eA.expressId), nB=pB.name||('#'+eB.expressId);
           clashes.push({
-            id:uid(), source:'auto', type:isHard?'hard':'soft', status:'open',
-            title:sameModel?mA.name+' (self)':mA.discipline.toUpperCase()+' \u2194 '+mB.discipline.toUpperCase(),
-            description:tA+': '+nA+' ('+mA.name+') vs '+tB+': '+nB+' ('+mB.name+')',
+            id:uid(), source:'auto', type:'duplicate', status:'open',
+            title:'Duplicate: '+tA,
+            description:nA+' ≡ '+nB+' (same location & size)',
             modelAId:mA.id, modelBId:mB.id, elemA:eA.expressId, elemB:eB.expressId,
-            point:[ctr.x,ctr.y,ctr.z], createdAt:new Date().toISOString(),
-            distance:dist, elevation:Math.round(ctr.y*1000)/1000,
+            point:[ctrA.x,ctrA.y,ctrA.z], createdAt:new Date().toISOString(),
+            distance:0, elevation:Math.round(ctrA.y*1000)/1000,
             disciplines:[mA.discipline,mB.discipline], selfClash:sameModel,
             elemAType:tA, elemBType:tB, elemAName:nA, elemBName:nB,
             elemAStorey:pA.storey||'', elemBStorey:pB.storey||'',
             elemAMaterial:pA.material||'', elemBMaterial:pB.material||''
           });
+          return;
         }
-      }); });
-    }); });
+      }
+
+      // ── L1+L2: BVH dual-tree + Möller tri-tri ──────────────────
+      // (SAP already guarantees AABB overlap — no redundant box check needed)
+      var isHard=false, isSoft=false, geoDist=Infinity;
+      if (rules.hard) isHard = _meshesIntersect(eA, eB);
+      if (!isHard && rules.soft && clearanceM>0) {
+        geoDist = _meshMinDist(eA, eB, clearanceM);
+        isSoft = geoDist<=clearanceM;
+      }
+
+      if (isHard || isSoft) {
+        var ctr = bA.getCenter(_tmpCtrA);
+        var dist = isHard ? 0 : Math.round(geoDist*1000);
+        var pA=eA.props||{}, pB=eB.props||{};
+        var tA=pA.ifcType||'Element', tB=pB.ifcType||'Element';
+        var nA=pA.name||('#'+eA.expressId), nB=pB.name||('#'+eB.expressId);
+        clashes.push({
+          id:uid(), source:'auto', type:isHard?'hard':'soft', status:'open',
+          title:sameModel?mA.name+' (self)':mA.discipline.toUpperCase()+' \u2194 '+mB.discipline.toUpperCase(),
+          description:tA+': '+nA+' ('+mA.name+') vs '+tB+': '+nB+' ('+mB.name+')',
+          modelAId:mA.id, modelBId:mB.id, elemA:eA.expressId, elemB:eB.expressId,
+          point:[ctr.x,ctr.y,ctr.z], createdAt:new Date().toISOString(),
+          distance:dist, elevation:Math.round(ctr.y*1000)/1000,
+          disciplines:[mA.discipline,mB.discipline], selfClash:sameModel,
+          elemAType:tA, elemBType:tB, elemAName:nA, elemBName:nB,
+          elemAStorey:pA.storey||'', elemBStorey:pB.storey||'',
+          elemAMaterial:pA.material||'', elemBMaterial:pB.material||''
+        });
+      }
+    });
 
     // Update element hashes for next change-aware run
     if (rules.changeAware) _prevElementHashes = newHashes;

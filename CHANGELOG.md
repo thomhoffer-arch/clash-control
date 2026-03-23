@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.44 (2026-03-23)
+- Add element type exclusion checkboxes + detecting chat bubble
+
 ## v1.2.43 (2026-03-23)
 - Match clash detection indicator style to model loading
 
