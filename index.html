@@ -178,7 +178,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.37',hash:'81c4ba7',date:'2026-03-23T14:18:15Z'};
+  var CC_VERSION = {v:'1.2.38',hash:'8b7839b',date:'2026-03-23T14:20:35Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -228,7 +228,7 @@ function startApp() {
   };
   var INIT_PREFS = {
     autoFlyTo:true, autoHighlight:true, showGrid:true, showAxes:true,
-    showClashMarkers:true, hoverHighlight:true, outlineSelected:true,
+    showClashMarkers:false, hoverHighlight:true, outlineSelected:true,
     defaultPriority:'normal', defaultCategory:'design', defaultStatus:'open',
     defaultClearance:50, resetFiltersOnRun:true,
     theme:(function(){ try { return localStorage.getItem('cc_theme')||'dark'; } catch(e){ return 'dark'; } })(),
