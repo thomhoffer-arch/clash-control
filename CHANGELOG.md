@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.47 (2026-03-23)
+- Fix phantom section plane caused by stale clipping planes
+
 ## v1.2.46 (2026-03-23)
 - Convert multi-option filters to dropdown checkboxes & add delete to sidebar projects
 

@@ -178,7 +178,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.46',hash:'fecff92',date:'2026-03-23T15:46:45Z'};
+  var CC_VERSION = {v:'1.2.47',hash:'c375cc4',date:'2026-03-23T16:01:02Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -1275,7 +1275,14 @@ function startApp() {
   }
 
   function detectClashes(models, rules) {
-    var pick = function(id) { return id === 'all' ? models : models.filter(function(m){return m.id===id}); };
+    var pick = function(id) {
+      if (id === 'all') return models;
+      if (typeof id === 'string' && id.indexOf('disc:') === 0) {
+        var disc = id.slice(5);
+        return models.filter(function(m){ return m.discipline === disc; });
+      }
+      return models.filter(function(m){return m.id===id});
+    };
     var grpA = pick(rules.modelA), grpB = pick(rules.modelB);
     var clearanceM = (rules.clearance||0)/1000;
     var clashes = [];
@@ -6101,7 +6108,8 @@ function startApp() {
     if (/what.*rules?|current.*(?:settings?|setup|config)|clash.*settings?|what(?:'s| is) set up/.test(text)) {
       var r = s.rules;
       var types = [r.hard&&'hard', r.soft&&'soft'].filter(Boolean).join(' + ') || 'none';
-      var against = r.modelA==='all'&&r.modelB==='all' ? 'all models against all' : (r.modelA||'all') + ' vs ' + (r.modelB||'all');
+      function _ruleLabel(id){ if(id==='all')return 'all'; if(typeof id==='string'&&id.indexOf('disc:')===0){var dd=DISC.find(function(x){return x.id===id.slice(5)});return dd?dd.label:id.slice(5);} var mm=s.models.find(function(x){return x.id===id});return mm?mm.name:id; }
+      var against = r.modelA==='all'&&r.modelB==='all' ? 'all models against all' : _ruleLabel(r.modelA) + ' vs ' + _ruleLabel(r.modelB);
       return 'Current setup: ' + types + ' clashes, ' + against + ', clearance ' + (r.clearance||50) + 'mm' + (r.hardTolerance?' tolerance '+r.hardTolerance+'mm':'') + (r.duplicates?', including duplicates':'.');
     }
     if (/(?:what|which).*storey|worst.*storey|most clashes.*storey|storey.*most/.test(text)) {
@@ -6135,8 +6143,18 @@ function startApp() {
     }
     function resolveModel(hint) {
       if (!hint || /^all$/.test(hint.trim())) return null;
-      var h = hint.trim();
-      return s.models.find(function(m){ return m.name.toLowerCase().indexOf(h) !== -1; }) || null;
+      var h = hint.trim().toLowerCase();
+      // Try matching by model name first
+      var byName = s.models.find(function(m){ return m.name.toLowerCase().indexOf(h) !== -1; });
+      if (byName) return {type:'model', id:byName.id, name:byName.name};
+      // Try matching by discipline label or id
+      var disc = DISC.find(function(d){ return d.id.toLowerCase()===h || d.label.toLowerCase()===h
+        || h.indexOf(d.id.toLowerCase())!==-1 || h.indexOf(d.label.toLowerCase())!==-1; });
+      if (disc) {
+        var matching = s.models.filter(function(m){ return m.discipline===disc.id; });
+        if (matching.length) return {type:'disc', id:'disc:'+disc.id, name:disc.label+' model'+(matching.length>1?'s':'')};
+      }
+      return null;
     }
     function runSetup(rawA, rawB) {
       if (!s.models.length) return 'No models loaded yet — drop IFC files onto the viewer first.';
@@ -6152,7 +6170,7 @@ function startApp() {
 
     // "X vs/versus/against Y"
     var vsMatch = text.match(/(.+?)\s+(?:vs\.?|versus|against)\s+(.+?)(?:\s+with\s+.*)?$/);
-    if (vsMatch) return runSetup(vsMatch[1].replace(/^(?:check|compare|run|detect|find|look\s+for|scan|anal[yz]se?|test|search\s+for)\s+(?:(?:for\s+)?(?:clashes?|conflicts?|collisions?)\s+)?/,'').trim(), vsMatch[2].split(/\s+with\s+/)[0].trim());
+    if (vsMatch) return runSetup(vsMatch[1].replace(/^(?:check|compare|run|detect|find|look\s+for|scan|anal[yz]se?|test|search\s+for)\s+(?:(?:for\s+)?(?:clashes?|conflicts?|collisions?|clashcontrol)\s+)?(?:on\s+)?/,'').trim(), vsMatch[2].split(/\s+with\s+/)[0].replace(/\s*models?\s*$/i,'').trim());
 
     // "between X and Y"
     var betweenMatch = text.match(/between\s+(.+?)\s+and\s+(.+?)(?:\s+with\s+.*)?$/);
