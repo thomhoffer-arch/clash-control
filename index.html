@@ -178,7 +178,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.43',hash:'96b1c7f',date:'2026-03-23T10:42:39Z'};
+  var CC_VERSION = {v:'1.2.45',hash:'85465b6',date:'2026-03-23T10:52:36Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -231,7 +231,7 @@ function startApp() {
     showClashMarkers:true, hoverHighlight:true, outlineSelected:true,
     defaultPriority:'normal', defaultCategory:'design', defaultStatus:'open',
     defaultClearance:50, resetFiltersOnRun:true,
-    theme:'dark', // 'dark' or 'light'
+    theme:(function(){ try { return localStorage.getItem('cc_theme')||'dark'; } catch(e){ return 'dark'; } })(),
     renderStyle:'standard' // 'standard','shaded','rendered','wireframe'
   };
   var INIT = {
@@ -5871,6 +5871,9 @@ function startApp() {
     var s=props.s, d=props.d;
     var isDark=(s.prefs.theme||'dark')==='dark';
     var all=s.clashes.concat(s.issues);
+    var po=useState(false), projOpen=po[0], setProjOpen=po[1];
+    var projects=s.projectList||[];
+    var activeProj=projects.find(function(p){return p.id===s.activeProject;})||projects[0]||{name:'Default'};
 
     function iconBtn(onClick, content, title) {
       return html`<button class="cc-tip" data-tip=${title} onClick=${onClick}
@@ -5901,6 +5904,47 @@ function startApp() {
       ${iconBtn(function(){window._ccNLOpen&&window._ccNLOpen();},
         html`<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_CHAT}}></svg>`,
         'AI Assistant')}
+      <!-- Project switcher -->
+      <div style=${{position:'relative'}}>
+        <button onClick=${function(){setProjOpen(!projOpen)}}
+          title=${activeProj.name}
+          style=${{width:'100%',height:36,background:projOpen?'rgba(37,99,235,.12)':'none',border:'none',cursor:'pointer',
+            display:'flex',alignItems:'center',justifyContent:'center',
+            color:projOpen?'#60a5fa':'var(--text-muted)',transition:'background .12s,color .12s'}}>
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
+          </svg>
+        </button>
+        ${projOpen && html`<div style=${{position:'absolute',top:0,left:'100%',marginLeft:4,
+          background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:8,
+          boxShadow:'0 8px 24px rgba(0,0,0,.4)',minWidth:200,zIndex:200,overflow:'hidden'}}>
+          <div style=${{padding:'.4rem .6rem',borderBottom:'1px solid var(--border-subtle)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <span style=${{fontSize:'.65rem',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'.05em'}}>Projects</span>
+            <button onClick=${function(){
+              var name=prompt('New project name:');
+              if(!name||!name.trim()) return;
+              var id=uid();
+              var list=getProjects().concat([{id:id,name:name.trim(),createdAt:Date.now()}]);
+              saveProjects(list);
+              d({t:'SET_PROJECT_LIST',v:list});
+              _switchProject(id,s,d);
+              setProjOpen(false);
+            }} style=${{...S_BTN,fontSize:'.6rem',padding:'.1rem .35rem',background:'#1e3a5f',color:'#93c5fd'}}>+ New</button>
+          </div>
+          ${projects.map(function(p){
+            var isActive=p.id===s.activeProject;
+            return html`<div key=${p.id}
+              onClick=${function(){if(!isActive){_switchProject(p.id,s,d);}setProjOpen(false);}}
+              style=${{display:'flex',alignItems:'center',gap:'.4rem',padding:'.4rem .6rem',cursor:'pointer',
+                background:isActive?'rgba(37,99,235,.1)':'transparent',
+                borderLeft:isActive?'2px solid #3b82f6':'2px solid transparent'}}>
+              <span style=${{fontSize:'.6rem',flex:1,color:isActive?'#93c5fd':'var(--text-primary)',
+                whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis'}}>${p.name}</span>
+              ${isActive && html`<span style=${{fontSize:'.5rem',color:'#22c55e'}}>✓</span>`}
+            </div>`;
+          })}
+        </div>`}
+      </div>
       <div style=${{flex:1}}></div>
       ${iconBtn(function(){
           if(window._ccOpenIFC){window._ccOpenIFC();}
@@ -6020,9 +6064,11 @@ function startApp() {
   function App() {
     var st = useReducer(reducer, INIT), s=st[0], d=st[1];
     window._ccDispatch = d;
-    // Apply theme to document
+    // Apply theme to document and persist to localStorage
     useEffect(function(){
-      document.documentElement.setAttribute('data-theme', s.prefs.theme||'dark');
+      var t = s.prefs.theme||'dark';
+      document.documentElement.setAttribute('data-theme', t);
+      try { localStorage.setItem('cc_theme', t); } catch(e) {}
     }, [s.prefs.theme]);
     // Auto-save project data (debounced) when clashes/issues/viewpoints change
     var _latestSRef = useRef(s);
