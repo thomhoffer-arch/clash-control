@@ -178,7 +178,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.40',hash:'0c6dd52',date:'2026-03-23T14:45:52Z'};
+  var CC_VERSION = {v:'1.2.44',hash:'555f55e',date:'2026-03-23T15:08:29Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -222,7 +222,7 @@ function startApp() {
   var INIT_FILTERS = {
     search:'', status:'all', type:'all', discipline:'all',
     floor:'all', distMin:0, distMax:9999, elementId:'', selfClash:'all',
-    ifcType:'all', storey:'all', material:'all',
+    ifcType:'all', storey:'all', material:'all', excludedTypes:[],
     // Issue-specific filters
     priority:'all', category:'all', assignee:'all', issueElementType:'all', issueStorey:'all'
   };
@@ -1187,114 +1187,181 @@ function startApp() {
     });
   }
 
+  // ── L0: Sweep and Prune broad phase ─────────────────────────────
+  // Replaces the O(n²) element-pair loop. Sorts elements along the axis
+  // with highest AABB-centre variance, then sweeps an active set — only
+  // elements that still overlap on that axis are retained. Y/Z overlap
+  // checked inline. Result: O(n log n + k) where k = true candidates.
+  function _sweepAndPrune(grpA, grpB, rules, clearanceM) {
+    // Expand AABBs by this much when testing overlap
+    var margin = Math.max((rules.hardTolerance||0)/1000, rules.soft ? clearanceM : 0);
+
+    // Fast-lookup sets for model group membership
+    var inA = {}, inB = {};
+    grpA.forEach(function(m){ inA[m.id]=true; });
+    grpB.forEach(function(m){ inB[m.id]=true; });
+
+    // Collect unique elements across all relevant models (no duplicates)
+    var seenModels = {}, items = [];
+    grpA.concat(grpB).forEach(function(m) {
+      if (seenModels[m.id]) return; seenModels[m.id]=true;
+      (m.elements||[]).forEach(function(el) {
+        if (el.box) items.push({el:el, m:m});
+      });
+    });
+    if (items.length < 2) return [];
+
+    // Pick the axis whose AABB centres have the highest variance.
+    // High variance → fewer simultaneous active-set members → smaller inner loop.
+    var n=items.length, sx=0,sy=0,sz=0,sx2=0,sy2=0,sz2=0;
+    items.forEach(function(it) {
+      var b=it.el.box;
+      var cx=(b.min.x+b.max.x)*0.5, cy=(b.min.y+b.max.y)*0.5, cz=(b.min.z+b.max.z)*0.5;
+      sx+=cx; sy+=cy; sz+=cz; sx2+=cx*cx; sy2+=cy*cy; sz2+=cz*cz;
+    });
+    var vx=sx2/n-(sx/n)*(sx/n), vy=sy2/n-(sy/n)*(sy/n), vz=sz2/n-(sz/n)*(sz/n);
+    var axis  = vx>=vy&&vx>=vz ? 'x' : vy>=vz ? 'y' : 'z';
+    var axis2 = axis==='x' ? 'y' : 'x';
+    var axis3 = axis==='z' ? 'y' : 'z';
+
+    // Sort by (min − margin) on the chosen axis
+    items.sort(function(a,b){
+      return (a.el.box.min[axis]-margin)-(b.el.box.min[axis]-margin);
+    });
+
+    var pairs = [], active = [];
+
+    for (var i=0; i<items.length; i++) {
+      var cur = items[i];
+      var curMin = cur.el.box.min[axis]-margin;
+
+      // Expire elements whose interval ended before cur starts
+      active = active.filter(function(it){
+        return it.el.box.max[axis]+margin >= curMin;
+      });
+
+      var bC = cur.el.box;
+
+      for (var j=0; j<active.length; j++) {
+        var oth = active[j];
+        var sameModel = cur.m.id === oth.m.id;
+
+        // Apply model rules
+        if (sameModel) {
+          // Self-clash only valid if model is in both groups and not excluded
+          if (rules.excludeSelf || !inA[cur.m.id] || !inB[cur.m.id]) continue;
+        } else {
+          // Cross-model: one must be from A, the other from B
+          if (!(inA[cur.m.id]&&inB[oth.m.id]) && !(inB[cur.m.id]&&inA[oth.m.id])) continue;
+        }
+
+        // Check overlap on the other two axes
+        var bO = oth.el.box;
+        if (bC.max[axis2]+margin < bO.min[axis2]-margin ||
+            bC.min[axis2]-margin > bO.max[axis2]+margin) continue;
+        if (bC.max[axis3]+margin < bO.min[axis3]-margin ||
+            bC.min[axis3]-margin > bO.max[axis3]+margin) continue;
+
+        // Emit with canonical A/B model ordering
+        if (inA[cur.m.id] && inB[oth.m.id]) {
+          pairs.push({eA:cur.el, mA:cur.m, eB:oth.el, mB:oth.m, sameModel:sameModel});
+        } else {
+          pairs.push({eA:oth.el, mA:oth.m, eB:cur.el, mB:cur.m, sameModel:sameModel});
+        }
+      }
+      active.push(cur);
+    }
+    return pairs;
+  }
+
   function detectClashes(models, rules) {
     var pick = function(id) { return id === 'all' ? models : models.filter(function(m){return m.id===id}); };
     var grpA = pick(rules.modelA), grpB = pick(rules.modelB);
-    var clashes = [], seen = {};
-    // Reusable temp boxes to avoid O(n²) clone allocations
-    var _tmpBoxA = new THREE.Box3(), _tmpBoxB = new THREE.Box3();
+    var clearanceM = (rules.clearance||0)/1000;
+    var clashes = [];
     var _tmpSizeA = new THREE.Vector3(), _tmpSizeB = new THREE.Vector3();
-    var _tmpCtrA = new THREE.Vector3(), _tmpCtrB = new THREE.Vector3();
-    var hardTol = (rules.hardTolerance||0)/1000; // mm to m
+    var _tmpCtrA  = new THREE.Vector3(), _tmpCtrB  = new THREE.Vector3();
 
     // Change-aware: track which elements changed since last run
-    var newHashes = {};
-    var changedElements = {};
+    var newHashes = {}, changedElements = {};
     if (rules.changeAware) {
       models.forEach(function(m) {
         (m.elements||[]).forEach(function(el) {
           var h = _hashElement(el);
-          var key = m.id + ':' + el.expressId;
+          var key = m.id+':'+el.expressId;
           newHashes[key] = h;
           if (_prevElementHashes[key] !== h) changedElements[key] = true;
         });
       });
     }
 
-    grpA.forEach(function(mA) { grpB.forEach(function(mB) {
-      var sameModel = mA.id === mB.id;
-      if (rules.excludeSelf && sameModel) return;
-      var key = [mA.id, mB.id].sort().join('|');
-      if (seen[key]) return; seen[key] = true;
-      (mA.elements||[]).forEach(function(eA, iA) { (mB.elements||[]).forEach(function(eB, iB) {
-        if (sameModel && iB <= iA) return;
-        // Change-aware: skip pairs where neither element changed
-        if (rules.changeAware && !changedElements[mA.id+':'+eA.expressId] && !changedElements[mB.id+':'+eB.expressId]) return;
+    // ── L0: Sweep and Prune — O(n log n + k) candidate pairs ───────
+    var candidates = _sweepAndPrune(grpA, grpB, rules, clearanceM);
 
-        var bA = eA.box, bB = eB.box;
+    candidates.forEach(function(pair) {
+      var eA=pair.eA, mA=pair.mA, eB=pair.eB, mB=pair.mB, sameModel=pair.sameModel;
 
-        // Duplicate detection: identical bounding boxes at same location
-        if (rules.duplicates) {
-          var sizeA = bA.getSize(_tmpSizeA);
-          var sizeB = bB.getSize(_tmpSizeB);
-          var ctrA = bA.getCenter(_tmpCtrA);
-          var ctrB = bB.getCenter(_tmpCtrB);
-          var sizeDiff = Math.abs(sizeA.x-sizeB.x) + Math.abs(sizeA.y-sizeB.y) + Math.abs(sizeA.z-sizeB.z);
-          var posDiff = ctrA.distanceTo(ctrB);
-          if (sizeDiff < 0.01 && posDiff < 0.01) {
-            var pA=eA.props||{}, pB=eB.props||{};
-            var tA=pA.ifcType||'Element', tB=pB.ifcType||'Element';
-            var nA=pA.name||('#'+eA.expressId), nB=pB.name||('#'+eB.expressId);
-            clashes.push({
-              id:uid(), source:'auto', type:'duplicate', status:'open',
-              title:'Duplicate: '+tA,
-              description:nA+' ≡ '+nB+' (same location & size)',
-              modelAId:mA.id, modelBId:mB.id, elemA:eA.expressId, elemB:eB.expressId,
-              point:[ctrA.x,ctrA.y,ctrA.z], createdAt:new Date().toISOString(),
-              distance:0, elevation:Math.round(ctrA.y*1000)/1000,
-              disciplines:[mA.discipline,mB.discipline], selfClash:sameModel,
-              elemAType:tA, elemBType:tB, elemAName:nA, elemBName:nB,
-              elemAStorey:pA.storey||'', elemBStorey:pB.storey||'',
-              elemAMaterial:pA.material||'', elemBMaterial:pB.material||''
-            });
-            return; // don't also report as hard/soft
-          }
-        }
+      // Change-aware: skip pairs where neither element changed
+      if (rules.changeAware &&
+          !changedElements[mA.id+':'+eA.expressId] &&
+          !changedElements[mB.id+':'+eB.expressId]) return;
 
-        // ── Broad phase: AABB overlap check (fast reject) ──────────
-        var clearanceM = (rules.clearance || 0) / 1000;
-        var broadMargin = Math.max(hardTol, rules.soft ? clearanceM : 0);
-        if (broadMargin > 0) {
-          _tmpBoxA.copy(bA).expandByScalar(broadMargin);
-          if (!_tmpBoxA.intersectsBox(bB)) return; // AABBs don't overlap even with margin
-        } else {
-          if (!bA.intersectsBox(bB)) return; // AABBs don't overlap at all
-        }
+      var bA=eA.box, bB=eB.box;
 
-        // ── Narrow phase: geometry-level check ─────────────────────
-        // Hard clash = triangles physically intersect (not just touching)
-        // Soft clash = actual mesh distance within clearance
-        var isHard = false, isSoft = false, geoDist = Infinity;
-
-        if (rules.hard) {
-          isHard = _meshesIntersect(eA, eB);
-        }
-        if (!isHard && rules.soft && clearanceM > 0) {
-          geoDist = _meshMinDist(eA, eB, clearanceM);
-          isSoft = geoDist <= clearanceM;
-        }
-
-        if (isHard || isSoft) {
-          var ctr = bA.getCenter(_tmpCtrA);
-          var dist = isHard ? 0 : Math.round(geoDist * 1000); // metres → mm
-          var pA = eA.props||{}, pB = eB.props||{};
-          var tA = pA.ifcType||'Element', tB = pB.ifcType||'Element';
-          var nA = pA.name||('#'+eA.expressId), nB = pB.name||('#'+eB.expressId);
+      // Duplicate detection: identical bounding boxes at same location
+      if (rules.duplicates) {
+        var sizeA=bA.getSize(_tmpSizeA), sizeB=bB.getSize(_tmpSizeB);
+        var ctrA=bA.getCenter(_tmpCtrA), ctrB=bB.getCenter(_tmpCtrB);
+        var sizeDiff=Math.abs(sizeA.x-sizeB.x)+Math.abs(sizeA.y-sizeB.y)+Math.abs(sizeA.z-sizeB.z);
+        if (sizeDiff<0.01 && ctrA.distanceTo(ctrB)<0.01) {
+          var pA=eA.props||{}, pB=eB.props||{};
+          var tA=pA.ifcType||'Element', tB=pB.ifcType||'Element';
+          var nA=pA.name||('#'+eA.expressId), nB=pB.name||('#'+eB.expressId);
           clashes.push({
-            id:uid(), source:'auto', type:isHard?'hard':'soft', status:'open',
-            title:sameModel?mA.name+' (self)':mA.discipline.toUpperCase()+' \u2194 '+mB.discipline.toUpperCase(),
-            description:tA+': '+nA+' ('+mA.name+') vs '+tB+': '+nB+' ('+mB.name+')',
+            id:uid(), source:'auto', type:'duplicate', status:'open',
+            title:'Duplicate: '+tA,
+            description:nA+' ≡ '+nB+' (same location & size)',
             modelAId:mA.id, modelBId:mB.id, elemA:eA.expressId, elemB:eB.expressId,
-            point:[ctr.x,ctr.y,ctr.z], createdAt:new Date().toISOString(),
-            distance:dist, elevation:Math.round(ctr.y*1000)/1000,
+            point:[ctrA.x,ctrA.y,ctrA.z], createdAt:new Date().toISOString(),
+            distance:0, elevation:Math.round(ctrA.y*1000)/1000,
             disciplines:[mA.discipline,mB.discipline], selfClash:sameModel,
             elemAType:tA, elemBType:tB, elemAName:nA, elemBName:nB,
             elemAStorey:pA.storey||'', elemBStorey:pB.storey||'',
             elemAMaterial:pA.material||'', elemBMaterial:pB.material||''
           });
+          return;
         }
-      }); });
-    }); });
+      }
+
+      // ── L1+L2: BVH dual-tree + Möller tri-tri ──────────────────
+      // (SAP already guarantees AABB overlap — no redundant box check needed)
+      var isHard=false, isSoft=false, geoDist=Infinity;
+      if (rules.hard) isHard = _meshesIntersect(eA, eB);
+      if (!isHard && rules.soft && clearanceM>0) {
+        geoDist = _meshMinDist(eA, eB, clearanceM);
+        isSoft = geoDist<=clearanceM;
+      }
+
+      if (isHard || isSoft) {
+        var ctr = bA.getCenter(_tmpCtrA);
+        var dist = isHard ? 0 : Math.round(geoDist*1000);
+        var pA=eA.props||{}, pB=eB.props||{};
+        var tA=pA.ifcType||'Element', tB=pB.ifcType||'Element';
+        var nA=pA.name||('#'+eA.expressId), nB=pB.name||('#'+eB.expressId);
+        clashes.push({
+          id:uid(), source:'auto', type:isHard?'hard':'soft', status:'open',
+          title:sameModel?mA.name+' (self)':mA.discipline.toUpperCase()+' \u2194 '+mB.discipline.toUpperCase(),
+          description:tA+': '+nA+' ('+mA.name+') vs '+tB+': '+nB+' ('+mB.name+')',
+          modelAId:mA.id, modelBId:mB.id, elemA:eA.expressId, elemB:eB.expressId,
+          point:[ctr.x,ctr.y,ctr.z], createdAt:new Date().toISOString(),
+          distance:dist, elevation:Math.round(ctr.y*1000)/1000,
+          disciplines:[mA.discipline,mB.discipline], selfClash:sameModel,
+          elemAType:tA, elemBType:tB, elemAName:nA, elemBName:nB,
+          elemAStorey:pA.storey||'', elemBStorey:pB.storey||'',
+          elemAMaterial:pA.material||'', elemBMaterial:pB.material||''
+        });
+      }
+    });
 
     // Update element hashes for next change-aware run
     if (rules.changeAware) _prevElementHashes = newHashes;
@@ -3841,6 +3908,7 @@ function startApp() {
     var po = useState(false), projOpen=po[0], setProjOpen=po[1];
     var rn = useState(false), renaming=rn[0], setRenaming=rn[1];
     var rnv = useState(''), renameVal=rnv[0], setRenameVal=rnv[1];
+    var cf = useState(null), confirmDelete=cf[0], setConfirmDelete=cf[1];
 
     function createProject() {
       var name = prompt('New project name:');
@@ -3853,19 +3921,19 @@ function startApp() {
       setProjOpen(false);
     }
     function switchTo(id) {
-      if(id===s.activeProject) { setProjOpen(false); return; }
+      if(id===s.activeProject) { setProjOpen(false); setConfirmDelete(null); return; }
       _switchProject(id, s, d);
-      setProjOpen(false);
+      setProjOpen(false); setConfirmDelete(null);
     }
     function deleteProject(id) {
-      if(id==='default') return;
-      if(!confirm('Delete this project and all its stored IFC files?')) return;
       idbDeleteProjectFiles(id);
       idbDeleteProjectData(id);
       var list = getProjects().filter(function(p){return p.id!==id;});
+      if(!list.length) { list = [{id:'default', name:'Default Project', createdAt:Date.now()}]; }
       saveProjects(list);
       d({t:'SET_PROJECT_LIST', v:list});
-      if(s.activeProject===id) _switchProject('default', s, d);
+      if(s.activeProject===id) _switchProject(list[0].id, s, d);
+      setConfirmDelete(null);
       setProjOpen(false);
     }
     function startRename(p) {
@@ -3895,15 +3963,30 @@ function startApp() {
           ${projOpen && html`<div style=${{position:'absolute',top:'100%',left:0,marginTop:4,background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:8,boxShadow:'0 8px 24px rgba(0,0,0,.4)',minWidth:220,zIndex:100,overflow:'hidden'}}>
             ${projects.map(function(p){
               var isActive = p.id===s.activeProject;
-              return html`<div key=${p.id} style=${{display:'flex',alignItems:'center',gap:'.3rem',padding:'.4rem .6rem',cursor:'pointer',background:isActive?'var(--accent)':'transparent',borderBottom:'1px solid var(--border-subtle)'}}>
-                ${renaming===p.id ? html`<input type="text" value=${renameVal} autofocus
-                  onInput=${function(e){setRenameVal(e.target.value)}}
-                  onKeyDown=${function(e){if(e.key==='Enter')finishRename(p.id);if(e.key==='Escape')setRenaming(false);}}
-                  onBlur=${function(){finishRename(p.id)}}
-                  style=${{...S_INPUT,fontSize:'.65rem',padding:'.15rem .3rem',flex:1}} />` :
-                html`<span onClick=${function(){switchTo(p.id)}} style=${{flex:1,fontSize:'.7rem',color:isActive?'#fff':'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${p.name}</span>`}
-                <button onClick=${function(e){e.stopPropagation();startRename(p)}} style=${{...S_BTN,padding:'0 3px',background:'none',color:isActive?'#fff':'var(--text-faint)',fontSize:'.55rem'}} title="Rename">✎</button>
-                ${p.id!=='default' && html`<button onClick=${function(e){e.stopPropagation();deleteProject(p.id)}} style=${{...S_BTN,padding:'0 3px',background:'none',color:isActive?'#fff':'var(--text-faint)',fontSize:'.55rem'}} title="Delete project">✕</button>`}
+              var isConfirming = confirmDelete===p.id;
+              var rowBg = isActive ? 'var(--accent)' : 'transparent';
+              var txtCol = isActive ? '#fff' : 'var(--text-primary)';
+              var mutedCol = isActive ? 'rgba(255,255,255,.6)' : 'var(--text-faint)';
+              return html`<div key=${p.id} style=${{borderBottom:'1px solid var(--border-subtle)',background:rowBg}}>
+                <div style=${{display:'flex',alignItems:'center',gap:'.3rem',padding:'.4rem .6rem'}}>
+                  ${renaming===p.id ? html`<input type="text" value=${renameVal} autofocus
+                    onInput=${function(e){setRenameVal(e.target.value)}}
+                    onKeyDown=${function(e){if(e.key==='Enter')finishRename(p.id);if(e.key==='Escape')setRenaming(false);}}
+                    onBlur=${function(){finishRename(p.id)}}
+                    style=${{...S_INPUT,fontSize:'.65rem',padding:'.15rem .3rem',flex:1}} />` :
+                  html`<span onClick=${function(){switchTo(p.id)}} style=${{flex:1,fontSize:'.7rem',color:txtCol,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',cursor:'pointer'}}>${p.name}</span>`}
+                  <button onClick=${function(e){e.stopPropagation();startRename(p)}} style=${{...S_BTN,padding:'2px 4px',background:'none',color:mutedCol,fontSize:'.6rem',lineHeight:1}} title="Rename">✎</button>
+                  <button onClick=${function(e){e.stopPropagation();setConfirmDelete(isConfirming?null:p.id);setRenaming(false);}}
+                    style=${{...S_BTN,padding:'2px 5px',background:isConfirming?(isActive?'rgba(255,255,255,.2)':'rgba(239,68,68,.15)'):'none',color:isConfirming?'#ef4444':mutedCol,fontSize:'.65rem',lineHeight:1,borderRadius:4,border:isConfirming?'1px solid rgba(239,68,68,.4)':'1px solid transparent'}}
+                    title="Delete project">🗑</button>
+                </div>
+                ${isConfirming && html`<div style=${{padding:'.35rem .6rem .45rem',borderTop:'1px solid '+(isActive?'rgba(255,255,255,.2)':'var(--border-subtle)'),display:'flex',alignItems:'center',gap:'.4rem',background:isActive?'rgba(0,0,0,.15)':'rgba(239,68,68,.06)'}}>
+                  <span style=${{flex:1,fontSize:'.62rem',color:isActive?'rgba(255,255,255,.85)':'var(--text-secondary)'}}>Delete "${p.name}"?</span>
+                  <button onClick=${function(e){e.stopPropagation();deleteProject(p.id)}}
+                    style=${{...S_BTN,padding:'2px 8px',background:'#ef4444',color:'#fff',fontSize:'.62rem',fontWeight:600}}>Delete</button>
+                  <button onClick=${function(e){e.stopPropagation();setConfirmDelete(null)}}
+                    style=${{...S_BTN,padding:'2px 8px',background:'none',color:isActive?'rgba(255,255,255,.7)':'var(--text-muted)',fontSize:'.62rem',border:'1px solid '+(isActive?'rgba(255,255,255,.3)':'var(--border)')}}>Cancel</button>
+                </div>`}
               </div>`;
             })}
             <button onClick=${createProject} style=${{...S_BTN,width:'100%',textAlign:'left',padding:'.4rem .6rem',background:'none',color:'var(--accent)',fontSize:'.7rem',borderRadius:0}}>+ New Project</button>
@@ -4506,6 +4589,7 @@ function startApp() {
     if(f.elementId) activeCount++;
     if(f.distMin>0||f.distMax<9999) activeCount++;
     if(f.ifcType!=='all') activeCount++;
+    if(f.excludedTypes&&f.excludedTypes.length) activeCount++;
     if(f.storey!=='all') activeCount++;
     if(f.material!=='all') activeCount++;
     if(f.priority!=='all') activeCount++;
@@ -4547,6 +4631,7 @@ function startApp() {
           if(f.selfClash==='self' && !it.selfClash) return false;
           if(f.selfClash==='cross' && it.selfClash) return false;
           if(f.ifcType!=='all' && it.elemAType!==f.ifcType && it.elemBType!==f.ifcType) return false;
+          if(f.excludedTypes&&f.excludedTypes.length){var ex=f.excludedTypes;if(ex.indexOf(it.elemAType)!==-1||ex.indexOf(it.elemBType)!==-1) return false;}
           if(f.storey!=='all' && it.elemAStorey!==f.storey && it.elemBStorey!==f.storey) return false;
           if(f.material!=='all' && it.elemAMaterial!==f.material && it.elemBMaterial!==f.material) return false;
         } else {
@@ -4655,13 +4740,35 @@ function startApp() {
           </div>
         </div>`}
 
-        ${isClashTab && typeList.length>0 && html`<div>
-          <span style=${FL}>Element Type</span>
-          <select value=${f.ifcType} onChange=${function(e){d({t:'UPD_FILTERS',u:{ifcType:e.target.value}})}} style=${SELSTYLE}>
-            <option value="all">All types</option>
-            ${typeList.map(function(t){return html`<option key=${t} value=${t}>${t}</option>`})}
-          </select>
-        </div>`}
+        ${isClashTab && typeList.length>0 && function(){
+          var excl = f.excludedTypes||[];
+          var allVisible = excl.length===0;
+          function toggleType(t){
+            var next = excl.indexOf(t)===-1 ? excl.concat(t) : excl.filter(function(x){return x!==t;});
+            d({t:'UPD_FILTERS',u:{excludedTypes:next}});
+          }
+          function toggleAll(){
+            d({t:'UPD_FILTERS',u:{excludedTypes:allVisible?typeList.slice():[]}});
+          }
+          return html`<div>
+            <div style=${{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'.2rem'}}>
+              <span style=${FL}>Element Type</span>
+              <button onClick=${toggleAll} style=${{...S_BTN,padding:'1px 5px',fontSize:'.55rem',background:'none',color:allVisible?'var(--text-faint)':'var(--accent)',border:'1px solid var(--border)',borderRadius:3}}>
+                ${allVisible?'Exclude all':'Show all'}
+              </button>
+            </div>
+            <div style=${{display:'flex',flexDirection:'column',gap:'1px',maxHeight:'9rem',overflowY:'auto',background:'var(--bg-primary)',border:'1px solid var(--border)',borderRadius:4,padding:'.15rem'}}>
+              ${typeList.map(function(t){
+                var excluded = excl.indexOf(t)!==-1;
+                return html`<label key=${t} style=${{display:'flex',alignItems:'center',gap:'.3rem',padding:'.18rem .3rem',borderRadius:3,cursor:'pointer',background:excluded?'rgba(239,68,68,.06)':'transparent',opacity:excluded?.55:1}}>
+                  <input type="checkbox" checked=${!excluded} onChange=${function(){toggleType(t)}}
+                    style=${{accentColor:'var(--accent)',cursor:'pointer',flexShrink:0}} />
+                  <span style=${{fontSize:'.62rem',color:excluded?'var(--text-faint)':'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${t}</span>
+                </label>`;
+              })}
+            </div>
+          </div>`;
+        }()}
 
         ${isClashTab && storeyList.length>0 && html`<div>
           <span style=${FL}>Storey</span>
@@ -6118,6 +6225,8 @@ function startApp() {
     var stShowOllamaTip = useState(false), showOllamaTip = stShowOllamaTip[0], setShowOllamaTip = stShowOllamaTip[1];
     var inputRef = useRef(null);
     var bottomRef = useRef(null);
+    var detectMsgIdx = useRef(-1);
+    var prevDetecting = useRef(s.detecting);
 
     // Track model loading state for glow effect
     useEffect(function() {
@@ -6125,6 +6234,31 @@ function startApp() {
       window.addEventListener('cc-model-loading', onModelLoad);
       return function() { window.removeEventListener('cc-model-loading', onModelLoad); };
     }, []);
+
+    // Show a chat bubble while detection runs, replace with result when done
+    useEffect(function() {
+      var was = prevDetecting.current;
+      prevDetecting.current = s.detecting;
+      if (s.detecting && !was) {
+        setOpen(true);
+        setMsgs(function(prev) {
+          detectMsgIdx.current = prev.length;
+          return prev.concat([{role:'assistant', detecting:true}]);
+        });
+      } else if (!s.detecting && was) {
+        var n = s.clashes.length;
+        var op = s.clashes.filter(function(c){return c.status==='open';}).length;
+        var txt = n===0 ? 'No clashes detected.' : 'Found '+n+' clash'+(n!==1?'es':'')+' ('+op+' open).';
+        setMsgs(function(prev) {
+          var idx = detectMsgIdx.current;
+          var next = prev.slice();
+          if (idx>=0 && idx<next.length) next[idx]={role:'assistant',text:txt};
+          else next = next.concat([{role:'assistant',text:txt}]);
+          return next;
+        });
+        detectMsgIdx.current = -1;
+      }
+    }, [s.detecting]);
 
     useEffect(function() {
       function onKey(e) {
@@ -6243,13 +6377,9 @@ function startApp() {
           <path d="M2 4h12M2 8h8M2 12h10" stroke="#60a5fa" stroke-width="1.6" stroke-linecap="round"/>
         </svg>
         <span style=${{fontSize:'.76rem', fontWeight:600, color:textCol, flex:1}}>ClashControl</span>
-        ${isDetecting && html`<span style=${{fontSize:'.6rem', color:'#f59e0b', display:'flex', alignItems:'center', gap:'.25rem'}}>
-          <span class="spin" style=${{display:'inline-block', width:'.55rem', height:'.55rem', borderRadius:'50%', border:'1.5px solid rgba(245,158,11,.3)', borderTopColor:'#f59e0b'}}></span>
-          Detecting…
-        </span>`}
-        ${!isDetecting && modelLoading && html`<span style=${{fontSize:'.6rem', color:'#60a5fa', display:'flex', alignItems:'center', gap:'.25rem'}}>
+        ${(isDetecting || modelLoading) && html`<span style=${{fontSize:'.6rem', color:'#60a5fa', display:'flex', alignItems:'center', gap:'.25rem'}}>
           <span class="spin" style=${{display:'inline-block', width:'.55rem', height:'.55rem', borderRadius:'50%', border:'1.5px solid rgba(96,165,250,.3)', borderTopColor:'#60a5fa'}}></span>
-          Loading model…
+          ${isDetecting ? 'Detecting…' : 'Loading model…'}
         </span>`}
         ${!modelLoading && llmStatus === 'loading' && html`<span style=${{fontSize:'.6rem', color:'#60a5fa', display:'flex', alignItems:'center', gap:'.25rem'}}>
           <span class="spin" style=${{display:'inline-block', width:'.55rem', height:'.55rem', borderRadius:'50%', border:'1.5px solid rgba(96,165,250,.3)', borderTopColor:'#60a5fa'}}></span>
@@ -6295,7 +6425,12 @@ function startApp() {
               background: isUser ? '#2563eb' : aiBubbleBg,
               color: isUser ? '#fff' : textCol,
               fontSize:'.73rem', lineHeight:1.55, wordBreak:'break-word'
-            }}>${m.text}</div>
+            }}>
+              ${m.detecting ? html`<span style=${{display:'flex',alignItems:'center',gap:'.4rem',color:'#60a5fa'}}>
+                <span class="spin" style=${{display:'inline-block',width:'.6rem',height:'.6rem',borderRadius:'50%',border:'1.5px solid rgba(96,165,250,.3)',borderTopColor:'#60a5fa',flexShrink:0}}></span>
+                Detecting clashes…
+              </span>` : m.text}
+            </div>
           </div>`;
         })}
         ${loading && html`<div style=${{display:'flex'}}>

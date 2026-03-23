@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.2.44 (2026-03-23)
+- Add element type exclusion checkboxes + detecting chat bubble
+
+## v1.2.43 (2026-03-23)
+- Match clash detection indicator style to model loading
+
+## v1.2.42 (2026-03-23)
+- Improve project deletion UX
+
+## v1.2.41 (2026-03-23)
+- Replace triangle spatial hash with dual-BVH traversal
+
 ## v1.2.40 (2026-03-23)
 - Replace vertex-distance hard clash with triangle-triangle intersection
 
