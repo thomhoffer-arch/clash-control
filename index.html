@@ -178,7 +178,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.37',hash:'f0aecd8',date:'2026-03-23T09:50:31Z'};
+  var CC_VERSION = {v:'1.2.38',hash:'32f2ee9',date:'2026-03-23T09:54:25Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -5906,7 +5906,7 @@ function startApp() {
     return html`<div style=${{
       width:48,flexShrink:0,background:'var(--bg-primary)',
       borderRight:'1px solid var(--border-subtle)',
-      display:'flex',flexDirection:'column',overflow:'hidden',userSelect:'none'
+      display:'flex',flexDirection:'column',overflow:'visible',userSelect:'none',position:'relative',zIndex:10
     }}>
       <div style=${{height:48,display:'flex',alignItems:'center',justifyContent:'center',
         borderBottom:'1px solid var(--border-subtle)',flexShrink:0}}>
@@ -5968,7 +5968,7 @@ function startApp() {
     return html`<div style=${{
       width:48,flexShrink:0,background:'var(--bg-primary)',
       borderLeft:'1px solid var(--border-subtle)',
-      display:'flex',flexDirection:'column',overflow:'hidden',userSelect:'none'
+      display:'flex',flexDirection:'column',overflow:'visible',userSelect:'none',position:'relative',zIndex:10
     }}>
       <div style=${{height:48,borderBottom:'1px solid var(--border-subtle)',flexShrink:0}}></div>
       ${tabBtn('models',  SVG_MODELS,  'Models',   0)}
