@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.51 (2026-03-23)
+- Hide unchecked model elements from all filter lists and panels
+
 ## v1.2.50 (2026-03-23)
 - Word-based NL parsing for clash detection commands
 

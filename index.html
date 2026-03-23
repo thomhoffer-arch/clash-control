@@ -182,7 +182,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.50',hash:'7ebb1c3',date:'2026-03-23T16:08:04Z'};
+  var CC_VERSION = {v:'1.2.51',hash:'a93cfc5',date:'2026-03-23T16:17:44Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -6112,7 +6112,7 @@ function startApp() {
 
     // ── Help ───────────────────────────────────────────────────────
     if (/^help$|what can you do|how (?:do i|to) use|what.*commands?/.test(text)) {
-      return 'You can describe a clash check in plain English — e.g. "check structural vs MEP with 50mm clearance" or "find conflicts between pipes and beams". Ask questions like "how many open clashes?" or "what models are loaded?" You can also filter ("show only resolved"), group ("group by storey"), and export ("export BCF").';
+      return 'Describe a clash check in plain English:\n• Hard clashes: "check structural vs MEP"\n• Near misses: "check clashes within 100mm" or "find near misses"\n• Both: "structural vs MEP with 50mm clearance"\n• Set distance: "clearance 75mm"\nAlso: "how many clashes?", "group by storey", "show resolved", "export BCF".';
     }
 
     // ── Q&A ────────────────────────────────────────────────────────
@@ -6162,8 +6162,8 @@ function startApp() {
       return null;
     }
     function applyClashOpts(updRules) {
-      var clr = parseMM(text); if (clr !== null) updRules.clearance = clr;
-      if (/\bsoft\b/.test(text) && !/no\s+soft|disable\s+soft|exclude\s+soft/.test(text)) { updRules.soft=true; updRules.hard=true; }
+      var clr = parseMM(text); if (clr !== null) { updRules.clearance = clr; updRules.soft = true; updRules.hard = true; }
+      if (/\bsoft\b|\bnear[\s-]*miss|\bclearance\b|\bproximity\b|\bwithin\b|\bnearby\b|\bclose\s+to\b/.test(text) && !/no\s+soft|disable\s+soft|exclude\s+soft/.test(text)) { updRules.soft=true; updRules.hard=true; }
       if (/hard\s+only|no\s+soft|soft\s+(?:clashes?\s+)?off/.test(text)) { updRules.hard=true; updRules.soft=false; }
       if (/\bduplicates?\b/.test(text) && !/no\s+dup|exclude\s+dup|ignore\s+dup/.test(text)) updRules.duplicates=true;
       // Cross-model only (exclude self-clashes)
@@ -6244,6 +6244,29 @@ function startApp() {
       }
     }
 
+    // ── "within Xmm" / "near miss" / proximity phrasing ──
+    var withinMatch = text.match(/(?:within|closer\s+than|nearer\s+than|distance\s+(?:of\s+)?(?:under|less\s+than|below)?)\s*(\d+(?:\.\d+)?)\s*(mm|cm|m(?!m))/);
+    if (withinMatch && /check|find|detect|run|scan|clash|near|proximity|within/.test(text)) {
+      if (!s.models.length) return 'No models loaded yet.';
+      var wv = parseFloat(withinMatch[1]), wu = withinMatch[2];
+      var wmm = wu==='cm' ? Math.round(wv*10) : wu==='m' ? Math.round(wv*1000) : Math.round(wv);
+      var updW = applyClashOpts({ modelA:'all', modelB:'all', clearance:wmm, soft:true, hard:true });
+      d({t:'UPD_RULES', u:updW});
+      if (!s.detecting){ d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
+        setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, Object.assign({},s.rules,updW))}); }, 20);
+      }
+      return 'Running: hard clashes + soft clashes within ' + wmm + 'mm…';
+    }
+    if (/(?:find|check|detect|run|scan)\s+(?:for\s+)?(?:near[\s-]*miss|proximity|soft\s+clash|clearance\s+clash)/.test(text)) {
+      if (!s.models.length) return 'No models loaded yet.';
+      var updNM = applyClashOpts({ modelA:'all', modelB:'all', soft:true, hard:true });
+      d({t:'UPD_RULES', u:updNM});
+      if (!s.detecting){ d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
+        setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, Object.assign({},s.rules,updNM))}); }, 20);
+      }
+      return 'Running: hard + soft clashes (' + (updNM.clearance||s.rules.clearance||50) + 'mm clearance)…';
+    }
+
     // ── "run clash …" generic fallback (no model/discipline found) ──
     if (/(?:run|start|do|execute|detect|find|check|scan|re-?run|again)\s+(?:the\s+)?(?:clash|detection|conflicts?|collisions?|scan|check|clashcontrol)/i.test(text)) {
       if (!s.models.length) return 'No models loaded yet.';
@@ -6260,12 +6283,12 @@ function startApp() {
     }
 
     // ── Individual rule settings (no run, just tweak) ────────────
-    var clrSet = text.match(/clearance\s+(?:to\s+|of\s+)?(\d+(?:\.\d+)?)\s*(mm|cm)|(\d+(?:\.\d+)?)\s*(mm|cm)\s+(?:clearance|gap)/);
+    var clrSet = text.match(/clearance\s+(?:to\s+|of\s+)?(\d+(?:\.\d+)?)\s*(mm|cm)|(\d+(?:\.\d+)?)\s*(mm|cm)\s+(?:clearance|gap|distance|proximity)/);
     if (clrSet) {
       var cv = clrSet[1]||clrSet[3], cu = clrSet[2]||clrSet[4];
       var cmm = cu==='cm' ? Math.round(parseFloat(cv)*10) : Math.round(parseFloat(cv));
-      d({t:'UPD_RULES', u:{clearance:cmm}});
-      return 'Clearance set to ' + cmm + 'mm. Re-run detection to apply.';
+      d({t:'UPD_RULES', u:{clearance:cmm, soft:true}});
+      return 'Clearance set to ' + cmm + 'mm (soft clashes enabled). Re-run detection to apply.';
     }
     var tolSet = text.match(/tolerance\s+(?:to\s+|of\s+)?(\d+(?:\.\d+)?)\s*(mm|cm)|(\d+(?:\.\d+)?)\s*(mm|cm)\s+tolerance/);
     if (tolSet) {
@@ -6331,7 +6354,7 @@ function startApp() {
     var s = props.s, d = props.d;
     var stOpen = useState(false), open = stOpen[0], setOpen = stOpen[1];
     window._ccNLOpen = function(){ setOpen(true); };
-    var stMsgs = useState([{role:'assistant', text:'Describe a clash check in plain English — e.g. "structural vs MEP with 50mm clearance", "find pipe vs beam conflicts", "show resolved", "group by storey". Ask "help" for all commands.'}]);
+    var stMsgs = useState([{role:'assistant', text:'Describe a clash check — e.g. "structural vs MEP", "check clashes within 100mm", "find near misses". Set a distance to include elements that are close but not touching. Ask "help" for all commands.'}]);
     var msgs = stMsgs[0], setMsgs = stMsgs[1];
     var stInput = useState(''), input = stInput[0], setInput = stInput[1];
     var stLoading = useState(false), loading = stLoading[0], setLoading = stLoading[1];
@@ -6365,7 +6388,12 @@ function startApp() {
       } else if (!s.detecting && was) {
         var n = s.clashes.length;
         var op = s.clashes.filter(function(c){return c.status==='open';}).length;
-        var txt = n===0 ? 'No clashes detected.' : 'Found '+n+' clash'+(n!==1?'es':'')+' ('+op+' open).';
+        var nHard = s.clashes.filter(function(c){return c.type==='hard';}).length;
+        var nSoft = s.clashes.filter(function(c){return c.type==='soft';}).length;
+        var breakdown = [];
+        if(nHard) breakdown.push(nHard+' hard');
+        if(nSoft) breakdown.push(nSoft+' soft');
+        var txt = n===0 ? 'No clashes detected.' : 'Found '+n+' clash'+(n!==1?'es':'')+' ('+breakdown.join(', ')+(breakdown.length?', ':'')+op+' open).';
         setMsgs(function(prev) {
           var idx = detectMsgIdx.current;
           var next = prev.slice();
@@ -6428,7 +6456,7 @@ function startApp() {
       setLoading(true);
       processNLCommandWithLLM(text, s, d).then(function(result) {
         var reply = result !== null ? result
-          : 'Not sure what you mean. Try: "check structural vs MEP with 50mm clearance", "how many clashes?", "group by storey", "export BCF", or "help".';
+          : 'Not sure what you mean. Try: "check structural vs MEP", "check clashes within 100mm", "find near misses", "how many clashes?", or "help".';
         setMsgs(function(m){ return m.concat([{role:'assistant', text:reply}]); });
         setLoading(false);
       });
