@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.26 (2026-03-23)
+- Fix 7 bugs found in review: stale camera, material leak, dead code, URL leaks
+
 ## v1.2.25 (2026-03-23)
 - Simplify: remove dRef, fix img cache pattern, deduplicate hasProjectData, fix unmount leak
 
