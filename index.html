@@ -152,6 +152,53 @@
     input[type=range]::-moz-range-thumb{height:10px;width:10px;border-radius:50%;background:#3b82f6;border:2px solid #1e3a5f;cursor:pointer;pointer-events:auto;box-shadow:0 1px 3px rgba(0,0,0,.4)}
     input[type=range]::-webkit-slider-runnable-track{height:4px;background:transparent;border-radius:2px}
     input[type=range]::-moz-range-track{height:4px;background:transparent;border-radius:2px}
+
+    /* ── Responsive / Mobile ───────────────────────────────── */
+    @media(max-width:768px){
+      /* Hide rails on tablet/mobile — replaced by bottom nav */
+      .cc-left-rail,.cc-right-rail{display:none!important}
+      /* Side panel becomes full-width overlay */
+      .cc-side-panel{position:fixed!important;inset:0!important;width:100%!important;z-index:1100!important;border:none!important}
+      /* Bottom mobile nav bar */
+      .cc-mobile-nav{display:flex!important}
+      /* Header: compact */
+      .cc-header{padding:.35rem .5rem!important}
+      .cc-header-actions{gap:.25rem!important}
+      .cc-header-actions .cc-hide-mobile{display:none!important}
+      /* Nav cube smaller */
+      .cc-viewcube-wrap{width:100px!important;height:100px!important}
+      .cc-viewcube-wrap canvas{width:80px!important;height:80px!important;top:10px!important;left:10px!important}
+      /* Chatbox full width */
+      .cc-nlpanel{width:calc(100vw - 1rem)!important;bottom:4.2rem!important}
+      .cc-nlpanel-closed{bottom:4.2rem!important}
+      /* Overlay buttons: wrap */
+      .cc-overlay-top{flex-wrap:wrap!important;max-width:calc(100vw - 6rem)!important}
+      .cc-overlay-top button{font-size:.58rem!important;padding:.2rem .35rem!important}
+      /* Tooltips: hide on touch */
+      .cc-tip::after{display:none!important}
+      /* Training button on 3D view */
+      .cc-training-btn-3d{display:none!important}
+    }
+    @media(max-width:480px){
+      .cc-header-brand-text{display:none!important}
+      .cc-header-version{display:none!important}
+      .cc-header-project{max-width:120px!important}
+      .cc-header-project span{font-size:.6rem!important}
+      .cc-overlay-info{font-size:.6rem!important;gap:.3rem!important}
+      .cc-viewcube-wrap{width:80px!important;height:80px!important;top:.25rem!important;right:.25rem!important}
+      .cc-viewcube-wrap canvas{width:64px!important;height:64px!important;top:8px!important;left:8px!important}
+    }
+    /* Mobile nav hidden by default, shown via media query */
+    .cc-mobile-nav{display:none;position:fixed;bottom:0;left:0;right:0;z-index:1050;
+      background:var(--bg-primary);border-top:1px solid var(--border-subtle);
+      justify-content:space-around;align-items:center;padding:.25rem 0;padding-bottom:env(safe-area-inset-bottom,.25rem);
+      -webkit-backdrop-filter:blur(12px);backdrop-filter:blur(12px)}
+    .cc-mobile-nav button{background:none;border:none;cursor:pointer;color:var(--text-muted);
+      display:flex;flex-direction:column;align-items:center;gap:.1rem;padding:.35rem .5rem;
+      font-size:.55rem;font-family:inherit;min-width:44px;min-height:44px;justify-content:center;
+      border-radius:8px;transition:color .15s,background .15s}
+    .cc-mobile-nav button.active{color:#60a5fa;background:rgba(37,99,235,.1)}
+    .cc-mobile-nav button svg{width:20px;height:20px}
   </style>
 </head>
 <body>
@@ -193,7 +240,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.30',hash:'f486bb3',date:'2026-03-24T19:47:55Z'};
+  var CC_VERSION = {v:'2.0.31',hash:'dca7ffd',date:'2026-03-24T20:32:29Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -4058,7 +4105,7 @@ function startApp() {
         }}></div>
         <span style=${{fontSize:'.85rem',color:'#93c5fd',fontWeight:500,letterSpacing:'.03em'}}>Switching project…</span>
       </div>`}
-      <div style=${{...P,top:'.75rem',left:'.75rem',background:'var(--overlay-bg)',color:'var(--text-muted)',display:'flex',alignItems:'center',gap:'.5rem'}}>
+      <div class="cc-overlay-info" style=${{...P,top:'.75rem',left:'.75rem',background:'var(--overlay-bg)',color:'var(--text-muted)',display:'flex',alignItems:'center',gap:'.5rem'}}>
         <span>${s.models.length===0?'Load an IFC file to begin':s.models.length+' model'+(s.models.length>1?'s':'')+' loaded'}</span>
         ${s.clashes.length>0 && html`<span style=${{color:'#ef4444'}}>· ${s.clashes.length} clashes</span>`}
         <span style=${{color:perfData.fps>=50?'#22c55e':perfData.fps>=25?'#f59e0b':'#ef4444',cursor:'pointer',pointerEvents:'auto'}}
@@ -4102,7 +4149,7 @@ function startApp() {
           <span style=${{color:'var(--text-muted)'}}>${CC_VERSION.v} (${CC_VERSION.hash})</span>
         </div>
       </div>`}
-      ${s.clashes.length>0 && html`<div style=${{position:'absolute',top:'.75rem',left:'50%',transform:'translateX(-50%)',display:'flex',gap:'.3rem',pointerEvents:'auto'}}>
+      ${s.clashes.length>0 && html`<div class="cc-overlay-top" style=${{position:'absolute',top:'.75rem',left:'50%',transform:'translateX(-50%)',display:'flex',gap:'.3rem',pointerEvents:'auto'}}>
         <button onClick=${function(){if(_fitToClashes)_fitToClashes(s.clashes);}}
           style=${{...S_BTN,background:'var(--overlay-bg)',color:'#93c5fd',border:'1px solid var(--border)',fontSize:'.65rem',padding:'.25rem .5rem'}}>
           Fit All Clashes
@@ -4116,7 +4163,7 @@ function startApp() {
           ${s.prefs.showIssueMarkers!==false?'Issue Markers On':'Issue Markers Off'}
         </button>
       </div>`}
-      ${s.clashes.length>0 && html`<button onClick=${function(){d({t:'TRAINING_MODE'});}}
+      ${s.clashes.length>0 && html`<button class="cc-training-btn-3d" onClick=${function(){d({t:'TRAINING_MODE'});}}
         style=${{position:'absolute',top:'2.6rem',left:'50%',transform:'translateX(-50%)',
           zIndex:20,display:'flex',alignItems:'center',gap:'.4rem',pointerEvents:'auto',
           padding:'.45rem 1.1rem',borderRadius:999,
@@ -4375,7 +4422,6 @@ function startApp() {
   function ViewCube(props) {
     var state3d = props.state3d;
     var canvasRef = useRef(null);
-    var compassRef = useRef(null);
     var vcState = useRef(null);
 
     // Face definitions: label + normal. Order MUST stay fixed (BOX_FACE_MAP depends on it).
@@ -4515,12 +4561,6 @@ function startApp() {
       // Rotation is derived from orbit spherical angles (theta/phi) rather than
       // camera.quaternion, which suffers gimbal-lock when looking straight up/down.
       var animId;
-      // HTML compass: cache label elements once, update positions per frame
-      var compEl = compassRef.current;
-      var compLabels = compEl ? compEl.querySelectorAll('[data-compass]') : [];
-      // Compass angles: N at top (-PI/2 in screen coords), E=right(0), S=bottom(PI/2), W=left(PI)
-      var COMP_A = [-Math.PI/2, 0, Math.PI/2, Math.PI];
-      var COMP_R = 62, COMP_CX = 70, COMP_CY = 70;
       function animate() {
         animId = requestAnimationFrame(animate);
         var S = state3d.current;
@@ -4535,12 +4575,6 @@ function startApp() {
         // Invert so the face in the camera's direction faces the mini-camera
         vc.cubeGroup.quaternion.copy(_qCam).invert();
         vc.renderer.render(vc.scene, vc.camera);
-        // Update HTML compass labels — orbit around center, text stays upright
-        for(var i=0;i<compLabels.length;i++){
-          var a = COMP_A[i] - theta;
-          compLabels[i].style.left = (COMP_CX + Math.cos(a) * COMP_R) + 'px';
-          compLabels[i].style.top  = (COMP_CY + Math.sin(a) * COMP_R) + 'px';
-        }
       }
       animate();
 
@@ -4649,14 +4683,7 @@ function startApp() {
       return function(){ cancelAnimationFrame(animId); renderer.dispose(); };
     }, []);
 
-    var compassLblStyle = {position:'absolute',transform:'translate(-50%,-50%)',fontSize:'10px',fontWeight:'bold',pointerEvents:'none',userSelect:'none'};
-    return html`<div style=${{position:'absolute',top:'.5rem',right:'.5rem',pointerEvents:'auto',width:140,height:140}}>
-      <div ref=${compassRef} style=${{position:'absolute',top:0,left:0,width:'100%',height:'100%',pointerEvents:'none'}}>
-        <span data-compass style=${{...compassLblStyle,color:'#ef4444'}}>N</span>
-        <span data-compass style=${{...compassLblStyle,color:'#94a3b8'}}>E</span>
-        <span data-compass style=${{...compassLblStyle,color:'#94a3b8'}}>S</span>
-        <span data-compass style=${{...compassLblStyle,color:'#94a3b8'}}>W</span>
-      </div>
+    return html`<div class="cc-viewcube-wrap" style=${{position:'absolute',top:'.5rem',right:'.5rem',pointerEvents:'auto',width:140,height:140}}>
       <canvas ref=${canvasRef} width="120" height="120" style=${{cursor:'pointer',position:'absolute',top:10,left:10,width:120,height:120}} />
     </div>`;
   }
@@ -4851,16 +4878,16 @@ function startApp() {
       setRenaming(false);
     }
 
-    return html`<header style=${{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'.5rem 1rem',background:'var(--bg-primary)',borderBottom:'1px solid var(--border-subtle)',flexShrink:0}}>
+    return html`<header class="cc-header" style=${{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'.5rem 1rem',background:'var(--bg-primary)',borderBottom:'1px solid var(--border-subtle)',flexShrink:0}}>
       <div style=${{display:'flex',alignItems:'center',gap:'.75rem'}}>
         <div style=${{width:32,height:32,background:'var(--accent)',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',cursor:'default'}} title="ClashControl — Free, open-source IFC clash detection for the browser. Load BIM models, detect geometric clashes, manage issues, and export to BCF."><span style=${{color:'#fff',fontWeight:900,fontSize:14}}>CC</span></div>
         <div>
-          <span style=${{fontWeight:600,cursor:'default'}} title="ClashControl — Free, open-source IFC clash detection for the browser. Load BIM models, detect geometric clashes, manage issues, and export to BCF.">ClashControl</span>
-          <span style=${{color:'var(--text-muted)',fontSize:'.7rem',marginLeft:'.4rem',cursor:'default'}} title=${'v'+CC_VERSION.v+' — Latest features:\n• Natural language app control (theme, files, viewer, tools)\n• Revit Bridge: AI-powered sync with Autodesk Revit\n• Soft clash / proximity detection\n• Light & dark theme with full UI polish\n• BCF 2.1 & 3.0 import/export\n• Floor plans, section planes & measurements\n\nBuild: '+CC_VERSION.hash+' ('+new Date(CC_VERSION.date).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})+')'}>v${CC_VERSION.v}</span>
+          <span class="cc-header-brand-text" style=${{fontWeight:600,cursor:'default'}} title="ClashControl — Free, open-source IFC clash detection for the browser. Load BIM models, detect geometric clashes, manage issues, and export to BCF.">ClashControl</span>
+          <span class="cc-header-version" style=${{color:'var(--text-muted)',fontSize:'.7rem',marginLeft:'.4rem',cursor:'default'}} title=${'v'+CC_VERSION.v+' — Latest features:\n• Natural language app control (theme, files, viewer, tools)\n• Revit Bridge: AI-powered sync with Autodesk Revit\n• Soft clash / proximity detection\n• Light & dark theme with full UI polish\n• BCF 2.1 & 3.0 import/export\n• Floor plans, section planes & measurements\n\nBuild: '+CC_VERSION.hash+' ('+new Date(CC_VERSION.date).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})+')'}>v${CC_VERSION.v}</span>
         </div>
-        <div style=${{position:'relative'}}>
+        <div class="cc-header-project" style=${{position:'relative'}}>
           <button onClick=${function(){setProjOpen(!projOpen)}}
-            style=${{...S_BTN,background:'var(--bg-secondary)',color:'var(--text-primary)',border:'1px solid var(--border)',display:'flex',alignItems:'center',gap:'.3rem',fontSize:'.7rem',padding:'.3rem .6rem'}}>
+            style=${{...S_BTN,background:'var(--bg-secondary)',color:'var(--text-primary)',border:'1px solid var(--border)',display:'flex',alignItems:'center',gap:'.3rem',fontSize:'.7rem',padding:'.3rem .6rem',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>
             <span style=${{fontSize:'.6rem'}}>📁</span> ${activeProj.name} <span style=${{fontSize:'.5rem',color:'var(--text-faint)'}}>${projOpen?'▲':'▼'}</span>
           </button>
           ${projOpen && html`<div style=${{position:'absolute',top:'100%',left:0,marginTop:4,background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:8,boxShadow:'0 8px 24px rgba(0,0,0,.4)',minWidth:220,zIndex:100,overflow:'hidden'}}>
@@ -4905,25 +4932,25 @@ function startApp() {
           </div>`}
         </div>
       </div>
-      <div style=${{display:'flex',alignItems:'center',gap:'.5rem'}}>
+      <div class="cc-header-actions" style=${{display:'flex',alignItems:'center',gap:'.5rem'}}>
         ${openN>0 && html`<span style=${{background:'#ef4444',color:'#fff',fontSize:'.65rem',padding:'.1rem .5rem',borderRadius:99}}>${openN} open</span>`}
-        <button onClick=${function(){loadProject(d)}}
+        <button class="cc-hide-mobile" onClick=${function(){loadProject(d)}}
           style=${{...S_BTN,background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',fontSize:'.65rem'}}>
           Open Project
         </button>
-        <button onClick=${function(){saveProject(s)}} disabled=${!all.length&&!s.models.length}
+        <button class="cc-hide-mobile" onClick=${function(){saveProject(s)}} disabled=${!all.length&&!s.models.length}
           style=${{...S_BTN,background:s.models.length||all.length?'#0f4c81':'var(--bg-secondary)',color:s.models.length||all.length?'#93c5fd':'var(--text-faint)',cursor:s.models.length||all.length?'pointer':'not-allowed',fontSize:'.65rem'}}>
           Save Project
         </button>
-        <button onClick=${function(){importBCF(d)}}
+        <button class="cc-hide-mobile" onClick=${function(){importBCF(d)}}
           style=${{...S_BTN,background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)'}}>
           ↑ Import BCF
         </button>
-        <button onClick=${function(){exportBCF(all, '2.1', s.viewpoints)}} disabled=${!all.length}
+        <button class="cc-hide-mobile" onClick=${function(){exportBCF(all, '2.1', s.viewpoints)}} disabled=${!all.length}
           style=${{...S_BTN,background:all.length?'var(--accent)':'var(--bg-secondary)',color:all.length?'#fff':'var(--text-faint)',cursor:all.length?'pointer':'not-allowed'}}>
           ↓ BCF 2.1
         </button>
-        <button onClick=${function(){exportBCF(all, '3.0', s.viewpoints)}} disabled=${!all.length}
+        <button class="cc-hide-mobile" onClick=${function(){exportBCF(all, '3.0', s.viewpoints)}} disabled=${!all.length}
           style=${{...S_BTN,background:all.length?'#1d4ed8':'var(--bg-secondary)',color:all.length?'#fff':'var(--text-faint)',cursor:all.length?'pointer':'not-allowed'}}>
           ↓ BCF 3.0
         </button>
@@ -8881,7 +8908,7 @@ function startApp() {
       var closedAnim = closedGlow ? 'nlBorderPulse 2s ease-in-out infinite' : 'none';
       var closedBorder = closedGlow ? '1px solid rgba(96,165,250,.5)' : '1px solid ' + borderCol;
       var closedLabel = isDetecting ? 'Detecting clashes…' : modelLoading ? 'Model loading…' : 'ClashControl';
-      return html`<button
+      return html`<button class="cc-nlpanel-closed"
         onClick=${function(){ setOpen(true); }}
         title=${isDetecting ? 'Clash detection running…' : modelLoading ? 'Model is loading… click to set up clashes' : 'ClashControl — describe tasks in plain English (Ctrl+/)'}
         style=${{
@@ -8906,7 +8933,7 @@ function startApp() {
     var panelBorderCol = panelGlow ? 'rgba(96,165,250,.5)' : borderCol;
     var backendLabel = backend === 'ollama' ? 'Ollama (' + _ollamaModel + ')' : backend === 'browser' ? 'In-browser (0.5B)' : null;
     var backendColor = backend === 'ollama' ? '#22c55e' : backend === 'browser' ? '#f59e0b' : mutedCol;
-    return html`<div style=${{
+    return html`<div class="cc-nlpanel" style=${{
       position:'fixed', bottom:'1rem', left:'50%', transform:'translateX(-50%)',
       zIndex:1200, width:'min('+panelW+'px, calc(100vw - 2rem))',
       background:panelBg, border:'1px solid '+panelBorderCol,
@@ -8937,6 +8964,17 @@ function startApp() {
           <span style=${{width:'.4rem', height:'.4rem', borderRadius:'50%', background:backendColor, display:'inline-block'}}></span>
           ${backendLabel}
         </span>`}
+        ${s.clashes.length>0 && html`<button onClick=${function(){d({t:'TRAINING_MODE'});}} style=${{
+          background:s.trainingMode?'rgba(124,58,237,.85)':'none', border:'1px solid '+(s.trainingMode?'#a78bfa':'var(--border)'),
+          borderRadius:6, cursor:'pointer', display:'flex', alignItems:'center', gap:'.25rem',
+          padding:'.15rem .45rem', color:s.trainingMode?'#e9d5ff':mutedCol, fontSize:'.6rem', whiteSpace:'nowrap',
+          transition:'background .15s, border-color .15s'
+        }}>
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93V12h3.5a2.25 2.25 0 0 1 0 4.5h-3.5v1.25A3.25 3.25 0 0 1 9.5 21 3.25 3.25 0 0 1 6.25 17.75V14.5h-1A2.25 2.25 0 0 1 3 12.25 2.25 2.25 0 0 1 5.25 10h3.5V9.93A4 4 0 0 1 12 2z"/>
+          </svg>
+          ${s.trainingMode?'Training On':'Training'}
+        </button>`}
         <button onClick=${function(){ setOpen(false); }} style=${{
           background:'none', border:'none', cursor:'pointer',
           color:mutedCol, fontSize:'1.1rem', lineHeight:1, padding:'0 .1rem'
@@ -9066,7 +9104,7 @@ function startApp() {
     var SVG_EXPORT = '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>';
     var SVG_GEAR   = '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>';
 
-    return html`<div style=${{
+    return html`<div class="cc-left-rail" style=${{
       width:48,flexShrink:0,background:'var(--bg-primary)',
       borderRight:'1px solid var(--border-subtle)',
       display:'flex',flexDirection:'column',overflow:'visible',userSelect:'none',position:'relative',zIndex:10
@@ -9360,7 +9398,7 @@ function startApp() {
     var SVG_ISSUES  = '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>';
     var SVG_EXPLORE = '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>';
 
-    return html`<div style=${{
+    return html`<div class="cc-right-rail" style=${{
       width:48,flexShrink:0,background:'var(--bg-primary)',
       borderLeft:'1px solid var(--border-subtle)',
       display:'flex',flexDirection:'column',overflow:'visible',userSelect:'none',position:'relative',zIndex:10
@@ -9403,7 +9441,7 @@ function startApp() {
       window.addEventListener('mousemove',onMove);
       window.addEventListener('mouseup',onUp);
     }
-    return html`<div style=${{
+    return html`<div class="cc-side-panel" style=${{
       width:panelW,flexShrink:0,display:'flex',flexDirection:'column',overflow:'hidden',
       background:'var(--bg-primary)',borderLeft:'1px solid var(--border-subtle)',position:'relative'
     }}>
@@ -9547,6 +9585,35 @@ function startApp() {
         </div>
       </div>
     </div>`;
+  }
+
+  // ── Mobile Bottom Nav ─────────────────────────────────────────
+
+  function MobileNav(props) {
+    var s=props.s, d=props.d;
+    var clashN=s.clashes.filter(function(c){return (c.status||'new')!=='resolved';}).length;
+    var issueN=s.issues.filter(function(i){return (i.status||'open')==='open';}).length;
+    function navBtn(id, svgPath, label, badge) {
+      var active=s.tab===id;
+      return html`<button class=${active?'active':''} onClick=${function(){d({t:'TAB',v:s.tab===id?null:id});}}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:svgPath}}></svg>
+        ${badge>0 && html`<span style=${{position:'absolute',top:2,right:2,background:'#ef4444',color:'#fff',
+          fontSize:'.5rem',fontWeight:600,padding:'0 3px',borderRadius:99,lineHeight:1.4,minWidth:12,textAlign:'center'}}>${badge>99?'99+':badge}</span>`}
+        <span>${label}</span>
+      </button>`;
+    }
+    return html`<nav class="cc-mobile-nav">
+      ${navBtn('models','<path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/><path d="M12 2L2 7l10 5 10-5-10-5z"/>','Models',0)}
+      ${navBtn('clashes','<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>','Clashes',clashN)}
+      ${navBtn('issues','<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>','Issues',issueN)}
+      ${navBtn('explorer','<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>','Explorer',0)}
+      <button onClick=${function(){window._ccNLOpen&&window._ccNLOpen();}}>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+        </svg>
+        <span>Chat</span>
+      </button>
+    </nav>`;
   }
 
   // ── App ────────────────────────────────────────────────────────
@@ -9806,6 +9873,7 @@ function startApp() {
       ${s.showSettings && html`<${SettingsModal} d=${d} prefs=${s.prefs} />`}
       ${s.showRevitBridge && html`<${RevitBridgePanel} s=${s} d=${d} />`}
       <${NLCommandPanel} s=${s} d=${d} />
+      <${MobileNav} s=${s} d=${d} />
       <${WelcomePopup} d=${d} theme=${s.prefs.theme} />
       <${TrainingModePopup} d=${d} active=${s.trainingMode} />
     </div>`;

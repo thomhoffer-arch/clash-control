@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.31 (2026-03-24)
+- Move AI training annotations to a dedicated Training Mode tab
+
 ## v2.0.30 (2026-03-24)
 - Add Phase 0 AI training data collection (export + share)
 
