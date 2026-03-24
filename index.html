@@ -1183,7 +1183,7 @@ function startApp() {
     var bA = _getBVH(elA), bB = _getBVH(elB);
     if (!bA || !bB) return false;
     var pts = [];
-    _bvhTraverseAll(bA.root, bA.tris, bB.root, bB.tris, pts, 150);
+    _bvhTraverseAll(bA.root, bA.tris, bB.root, bB.tris, pts, 24);
     if (!pts.length) return false;
     // Average all intersection points for accurate centroid
     var sx=0, sy=0, sz=0, n=pts.length/3;
