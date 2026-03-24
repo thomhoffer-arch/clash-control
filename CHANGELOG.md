@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.21 (2026-03-24)
+- Add periodic memory cleanup and flush geo caches after detection
+
 ## v2.0.20 (2026-03-24)
 - Fix model visibility not persisting on refresh; default issue markers off
 

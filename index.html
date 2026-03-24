@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.20',hash:'54b7275',date:'2026-03-24T12:38:12Z'};
+  var CC_VERSION = {v:'2.0.21',hash:'014eb6c',date:'2026-03-24T13:22:57Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -316,7 +316,7 @@ function startApp() {
       case 'RESET_FILTERS': return Object.assign({},s,{filters:Object.assign({},INIT_FILTERS)});
       case 'SECTION':     return Object.assign({},s,{sectionAxis:a.axis, sectionPos:a.pos!=null?a.pos:s.sectionPos, sectionCustom:null});
       case 'SECTION_CUSTOM': return Object.assign({},s,{sectionAxis:null, sectionCustom:a.v, sectionPos:a.pos!=null?a.pos:0.5});
-      case 'TAB':         return Object.assign({},s,{tab:a.v});
+      case 'TAB':         var tabUpd={tab:a.v}; if(a.v!==s.tab&&(a.v==='clashes'||a.v==='issues'||s.tab==='clashes'||s.tab==='issues'))tabUpd.activeId=null; return Object.assign({},s,tabUpd);
       case 'SETTINGS':    return Object.assign({},s,{showSettings:a.v});
       case 'UPD_PREFS':   return Object.assign({},s,{prefs:Object.assign({},s.prefs,a.u)});
       case 'MEASURE_MODE': return Object.assign({},s,{measureMode:a.v});
@@ -6218,7 +6218,7 @@ function startApp() {
     </div>`;
     // Virtualized rendering for large lists
     var totalHeight = items.length * ROW_HEIGHT;
-    var containerH = scrollRef.current ? scrollRef.current.clientHeight : 600;
+    var containerH = scrollRef.current && scrollRef.current.clientHeight > 0 ? scrollRef.current.clientHeight : 600;
     var overscan = 5;
     var startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - overscan);
     var endIdx = Math.min(items.length, Math.ceil((scrollTop + containerH) / ROW_HEIGHT) + overscan);
@@ -8878,9 +8878,9 @@ function startApp() {
             fontSize:'1.1rem',lineHeight:1,padding:'2px 4px',borderRadius:4}} title="Close panel">×</button>
       </div>
       ${tab==='models'   && html`<${ModelSidebar}  s=${s} d=${d} />`}
-      ${tab==='clashes'  && html`<${IssuePanel} s=${s} d=${d} hideTabBar=${true} />`}
-      ${tab==='issues'   && html`<${IssuePanel} s=${s} d=${d} hideTabBar=${true} />`}
-      ${tab==='explorer' && html`<${IssuePanel} s=${s} d=${d} hideTabBar=${true} />`}
+      ${tab==='clashes'  && html`<${IssuePanel} key="clashes" s=${s} d=${d} hideTabBar=${true} />`}
+      ${tab==='issues'   && html`<${IssuePanel} key="issues" s=${s} d=${d} hideTabBar=${true} />`}
+      ${tab==='explorer' && html`<${IssuePanel} key="explorer" s=${s} d=${d} hideTabBar=${true} />`}
     </div>`;
   }
 
@@ -9017,6 +9017,11 @@ function startApp() {
       document.documentElement.setAttribute('data-theme', t);
       try { localStorage.setItem('cc_theme', t); } catch(e) {}
     }, [s.prefs.theme]);
+    // ── Clean up 3D state when switching tabs ──
+    useEffect(function(){
+      if(_unghostAll) _unghostAll();
+      if(window._ccRemoveActiveClashMarker) window._ccRemoveActiveClashMarker();
+    }, [s.tab]);
     // ── Restore project files on initial load (runs once, before any tab is opened) ──
     useEffect(function(){
       var key = '_ccRestored_' + (s.activeProject || 'default');
