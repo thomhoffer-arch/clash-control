@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.88',hash:'91817c0',date:'2026-03-24T09:46:23Z'};
+  var CC_VERSION = {v:'1.2.89',hash:'ff76eac',date:'2026-03-24T09:48:08Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -1596,7 +1596,7 @@ function startApp() {
       // Find a nearby existing clash to merge with
       var mergedIdx = null;
       var mergedSide = null; // 'A' or 'B'
-      var MERGE_DIST_SQ = 0.5*0.5; // 500mm max merge radius
+      var MERGE_DIST_SQ = 0.05*0.05; // 50mm — only merge when clash points nearly overlap
       [['A',keyA],['B',keyB]].forEach(function(pair) {
         if (mergedIdx != null) return;
         var candidates = mergeMap[pair[1]];
