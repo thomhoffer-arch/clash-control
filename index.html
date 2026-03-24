@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.69',hash:'2b0170d',date:'2026-03-24T08:14:08Z'};
+  var CC_VERSION = {v:'1.2.70',hash:'35341e3',date:'2026-03-24T08:16:24Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -625,13 +625,14 @@ function startApp() {
   }
 
   function extractProperties(api, modelID, expressID) {
-    var props = {expressId:expressID, ifcType:'', name:'', description:'', objectType:'', storey:'', storeyId:null, material:'', quantities:{}, psets:{}};
+    var props = {expressId:expressID, globalId:'', ifcType:'', name:'', description:'', objectType:'', storey:'', storeyId:null, material:'', quantities:{}, psets:{}};
     try {
       var line = api.GetLine(modelID, expressID);
       if (line) {
         props.ifcType = String(line.__proto__.constructor.name || line.type || '');
         // Try to get a readable type name from the IFC type number
         if (line.constructor && line.constructor.name) props.ifcType = line.constructor.name;
+        props.globalId = safeStr(line.GlobalId);
         props.name = safeStr(line.Name);
         props.description = safeStr(line.Description);
         props.objectType = safeStr(line.ObjectType);
@@ -1405,6 +1406,7 @@ function startApp() {
             distance:0, elevation:Math.round(ctrA.y*1000)/1000,
             disciplines:[mA.discipline,mB.discipline], selfClash:sameModel,
             elemAType:tA, elemBType:tB, elemAName:nA, elemBName:nB,
+            globalIdA:pA.globalId||'', globalIdB:pB.globalId||'',
             elemAStorey:pA.storey||'', elemBStorey:pB.storey||'',
             elemAMaterial:pA.material||'', elemBMaterial:pB.material||''
           });
@@ -1453,6 +1455,7 @@ function startApp() {
           distance:dist, elevation:Math.round(cpy*1000)/1000,
           disciplines:[mA.discipline,mB.discipline], selfClash:sameModel,
           elemAType:tA, elemBType:tB, elemAName:nA, elemBName:nB,
+          globalIdA:pA.globalId||'', globalIdB:pB.globalId||'',
           elemAStorey:pA.storey||'', elemBStorey:pB.storey||'',
           elemAMaterial:pA.material||'', elemBMaterial:pB.material||''
         });
@@ -5305,6 +5308,7 @@ function startApp() {
       ${p.objectType && html`<div style=${ROW}><span style=${LS}>Object Type</span><span style=${VS}>${p.objectType}</span></div>`}
       ${p.storey && html`<div style=${ROW}><span style=${LS}>Storey</span><span style=${VS}>${p.storey}</span></div>`}
       ${p.material && html`<div style=${ROW}><span style=${LS}>Material</span><span style=${VS}>${p.material}</span></div>`}
+      ${p.globalId && html`<div style=${ROW}><span style=${LS}>GlobalId</span><span style=${VS}>${p.globalId}</span></div>`}
       <div style=${ROW}><span style=${LS}>Express ID</span><span style=${VS}>#${p.expressId}</span></div>
       ${qKeys.length>0 && html`<div style=${{marginTop:'.2rem',borderTop:'1px solid var(--border-subtle)',paddingTop:'.2rem'}}>
         <div style=${{fontSize:'.55rem',fontWeight:600,color:'var(--text-muted)',marginBottom:'.1rem'}}>Quantities</div>

@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.70 (2026-03-24)
+- Fix clash marker placement using exact intersection line midpoints
+
 ## v1.2.69 (2026-03-24)
 - Move info button from header to bottom of left sidebar
 
