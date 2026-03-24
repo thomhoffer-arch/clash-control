@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.23',hash:'937b276',date:'2026-03-24T15:48:35Z'};
+  var CC_VERSION = {v:'2.0.24',hash:'9dadfaa',date:'2026-03-24T16:00:53Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -5563,17 +5563,27 @@ function startApp() {
     function applyPreset(preset) {
       d({t:'UPD_RULES', u:preset.r});
     }
+    function _confirmIfClashes(cb) {
+      if (s.clashes && s.clashes.length > 0) {
+        if (!confirm('Running detection will replace your current ' + s.clashes.length + ' clash result' + (s.clashes.length===1?'':'s') + '. Continue?')) return;
+      }
+      cb();
+    }
     function runDetection() {
       if (!canRun) return;
-      d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
-      setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, s.rules)}); }, 20);
+      _confirmIfClashes(function(){
+        d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
+        setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, s.rules)}); }, 20);
+      });
     }
     function applyAndRun(preset) {
       if (!canRun) return;
-      var merged = Object.assign({}, s.rules, preset.r);
-      d({t:'UPD_RULES', u:preset.r});
-      d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
-      setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, merged)}); }, 20);
+      _confirmIfClashes(function(){
+        var merged = Object.assign({}, s.rules, preset.r);
+        d({t:'UPD_RULES', u:preset.r});
+        d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
+        setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, merged)}); }, 20);
+      });
     }
 
     var FL={fontSize:'.62rem',fontWeight:600,color:'var(--text-muted)',marginBottom:'.15rem',display:'block'};
@@ -5668,7 +5678,7 @@ function startApp() {
           </select>
         </div>
         <div style=${TOGROW}>
-          <span style=${{fontSize:'.68rem',color:'var(--text-primary)'}}>Hard clashes</span>
+          <span class="cc-tip cc-tip-delay" data-tip="Detect elements that physically intersect. Disable to only check for near misses using the max gap distance." style=${{fontSize:'.68rem',color:'var(--text-primary)',cursor:'help'}}>Hard clashes</span>
           <${MiniToggle} on=${rules.hard} onToggle=${function(){d({t:'UPD_RULES',u:{hard:!rules.hard}})}} />
         </div>
         <div style=${{marginBottom:'.25rem'}}>
@@ -5726,7 +5736,7 @@ function startApp() {
           </div>`;
         }()}
         <div style=${TOGROW}>
-          <span style=${{fontSize:'.68rem',color:'var(--text-primary)'}}>Duplicates</span>
+          <span class="cc-tip cc-tip-delay" data-tip="Include clashes where the same pair of elements overlap in multiple locations. Off by default to reduce noise." style=${{fontSize:'.68rem',color:'var(--text-primary)',cursor:'help'}}>Duplicates</span>
           <${MiniToggle} on=${rules.duplicates} onToggle=${function(){d({t:'UPD_RULES',u:{duplicates:!rules.duplicates}})}} />
         </div>
         <div style=${{marginBottom:'.25rem'}}>
@@ -5740,7 +5750,7 @@ function startApp() {
           </select>
         </div>
         <div style=${TOGROW}>
-          <span style=${{fontSize:'.68rem',color:'var(--text-primary)'}}>Change-aware</span>
+          <span class="cc-tip cc-tip-delay" data-tip="Only report clashes involving elements that changed since the last detection run. Useful for iterative workflows on evolving models." style=${{fontSize:'.68rem',color:'var(--text-primary)',cursor:'help'}}>Change-aware</span>
           <${MiniToggle} on=${rules.changeAware} onToggle=${function(){d({t:'UPD_RULES',u:{changeAware:!rules.changeAware}})}} />
         </div>
         <div style=${TOGROW}>
