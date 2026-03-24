@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.13',hash:'94d7278',date:'2026-03-24T12:01:44Z'};
+  var CC_VERSION = {v:'2.0.16',hash:'4bd06d8',date:'2026-03-24T12:14:53Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -298,7 +298,7 @@ function startApp() {
   };
   function reducer(s,a) {
     switch(a.t) {
-      case 'ADD_MODEL':   return Object.assign({},s,{models:s.models.concat([a.v])});
+      case 'ADD_MODEL':   var _am=a.v; if(s.modelMeta){var _mm=s.modelMeta.find(function(m){return m.id===_am.id});if(_mm){if(_mm.visible===false)_am=Object.assign({},_am,{visible:false});if(_mm.discipline)_am=Object.assign({},_am,{discipline:_mm.discipline});if(_mm.color)_am=Object.assign({},_am,{color:_mm.color});}} return Object.assign({},s,{models:s.models.concat([_am])});
       case 'DEL_MODEL':   return Object.assign({},s,{models:s.models.filter(function(m){return m.id!==a.id})});
       case 'UPD_MODEL':   return Object.assign({},s,{models:s.models.map(function(m){return m.id===a.id?Object.assign({},m,a.u):m})});
       case 'TOGGLE_STOREY': return Object.assign({},s,{models:s.models.map(function(m){if(m.id!==a.id)return m;var hs=Object.assign({},m.hiddenStoreys||{});if(hs[a.storey])delete hs[a.storey];else hs[a.storey]=true;return Object.assign({},m,{hiddenStoreys:hs});})});
@@ -3824,7 +3824,11 @@ function startApp() {
         </button>
         <button onClick=${function(){d({t:'UPD_PREFS',u:{showClashMarkers:!s.prefs.showClashMarkers}})}}
           style=${{...S_BTN,background:s.prefs.showClashMarkers!==false?'rgba(37,99,235,.7)':'var(--overlay-bg)',color:s.prefs.showClashMarkers!==false?'#fff':'var(--text-muted)',border:'1px solid var(--border)',fontSize:'.65rem',padding:'.25rem .5rem'}}>
-          ${s.prefs.showClashMarkers!==false?'Markers On':'Markers Off'}
+          ${s.prefs.showClashMarkers!==false?'Clash Markers On':'Clash Markers Off'}
+        </button>
+        <button onClick=${function(){d({t:'UPD_PREFS',u:{showIssueMarkers:!s.prefs.showIssueMarkers}})}}
+          style=${{...S_BTN,background:s.prefs.showIssueMarkers!==false?'rgba(34,197,94,.7)':'var(--overlay-bg)',color:s.prefs.showIssueMarkers!==false?'#fff':'var(--text-muted)',border:'1px solid var(--border)',fontSize:'.65rem',padding:'.25rem .5rem'}}>
+          ${s.prefs.showIssueMarkers!==false?'Issue Markers On':'Issue Markers Off'}
         </button>
       </div>`}
       ${s.models.length>0 && html`<div style=${{position:'absolute',top:'.75rem',right:'50%',transform:'translateX(50%)',marginRight:'-45%',pointerEvents:'auto'}}>
@@ -5848,10 +5852,6 @@ function startApp() {
       </div>`}
       ${s.tab==='issues' && html`<div style=${{padding:'.4rem',borderBottom:'1px solid var(--border-subtle)',flexShrink:0,display:'flex',gap:'.3rem'}}>
         <button onClick=${function(){d({t:'MODAL',v:true,el:window._ccSelectedEl||undefined})}} style=${{...S_BTN,flex:1,background:'#2563eb',color:'#fff'}}>+ New Issue</button>
-        <button onClick=${function(){d({t:'UPD_PREFS',u:{showIssueMarkers:!s.prefs.showIssueMarkers}})}}
-          style=${{...S_BTN,background:s.prefs.showIssueMarkers!==false?'rgba(34,197,94,.7)':'var(--overlay-bg)',color:s.prefs.showIssueMarkers!==false?'#fff':'var(--text-muted)',border:'1px solid var(--border)',fontSize:'.65rem',padding:'.25rem .5rem',whiteSpace:'nowrap'}}>
-          ${s.prefs.showIssueMarkers!==false?'Markers On':'Markers Off'}
-        </button>
       </div>`}
       ${!isExplorerTab && items.length>0 && function(){
         var grpAction = isClashTab ? 'CLASH_GROUP_BY' : 'ISSUE_GROUP_BY';
@@ -6111,9 +6111,52 @@ function startApp() {
 
     // Auto-scroll to active item when it changes (e.g. clicking a 3D marker)
     useEffect(function(){
-      if(!activeId||!scrollRef.current) return;
-      var row = scrollRef.current.querySelector('[data-item-id="'+activeId+'"]');
-      if(row) row.scrollIntoView({block:'nearest',behavior:'smooth'});
+      if(!activeId) return;
+      // If grouped, ensure the group containing the active item is expanded and visible
+      if(groups) {
+        var needUpdate = false;
+        for(var gi=0;gi<groups.length;gi++){
+          var g = groups[gi];
+          var posInGroup = -1;
+          for(var ii=0;ii<g.items.length;ii++){if(g.items[ii].id===activeId){posInGroup=ii;break;}}
+          if(posInGroup>=0){
+            if(collapsed[g.label]){
+              setCollapsed(function(prev){var n=Object.assign({},prev);delete n[g.label];return n;});
+              needUpdate = true;
+            }
+            var curLimit = groupLimits[g.label] || GROUP_PAGE_SIZE;
+            if(posInGroup >= curLimit){
+              var newLimit = Math.ceil((posInGroup+1)/GROUP_PAGE_SIZE)*GROUP_PAGE_SIZE;
+              setGroupLimits(function(prev){var n=Object.assign({},prev);n[g.label]=newLimit;return n;});
+              needUpdate = true;
+            }
+            break;
+          }
+        }
+        if(needUpdate){
+          // State will re-render, schedule scroll for after that render
+          setTimeout(function(){
+            if(!scrollRef.current) return;
+            var row = scrollRef.current.querySelector('[data-item-id="'+activeId+'"]');
+            if(row) row.scrollIntoView({block:'nearest',behavior:'smooth'});
+          }, 50);
+          return;
+        }
+      }
+      if(!scrollRef.current) return;
+      // For virtualized lists, the row may not be in DOM — scroll by index first
+      var idx = -1;
+      for(var i=0;i<items.length;i++){if(items[i].id===activeId){idx=i;break;}}
+      if(idx>=0 && items.length>50 && !groups) {
+        scrollRef.current.scrollTop = Math.max(0, idx * ROW_HEIGHT - scrollRef.current.clientHeight / 2);
+        setScrollTop(scrollRef.current.scrollTop);
+      }
+      // For grouped/small lists or after virtualized scroll, find the DOM row
+      requestAnimationFrame(function(){
+        if(!scrollRef.current) return;
+        var row = scrollRef.current.querySelector('[data-item-id="'+activeId+'"]');
+        if(row) row.scrollIntoView({block:'nearest',behavior:'smooth'});
+      });
     }, [activeId]);
 
     if(items.length===0) return html`<div style=${{flex:1,overflowY:'auto'}}>
@@ -6138,7 +6181,7 @@ function startApp() {
           return n;
         });
       }
-      return html`<div style=${{flex:1,overflowY:'auto'}}>
+      return html`<div ref=${scrollRef} style=${{flex:1,overflowY:'auto'}}>
         ${groups.map(function(g) {
           var isOpen = !collapsed[g.label];
           var statusColors = {open:'#ef4444',in_progress:'#f59e0b',resolved:'#22c55e',closed:'#64748b',hard:'#ef4444',soft:'#f59e0b',duplicate:'#8b5cf6'};
@@ -6164,7 +6207,7 @@ function startApp() {
       </div>`;
     }
     // For small lists, render all (no virtualization overhead)
-    if(items.length <= 50) return html`<div style=${{flex:1,overflowY:'auto'}}>
+    if(items.length <= 50) return html`<div ref=${scrollRef} style=${{flex:1,overflowY:'auto'}}>
       ${items.map(function(it){return html`<${IssueRow} key=${it.id} item=${it} active=${activeId===it.id} d=${d} isClash=${isClash} prefs=${prefs} models=${models} selectMode=${selectMode} isSelected=${!!selected[it.id]} />`})}
     </div>`;
     // Virtualized rendering for large lists
@@ -6295,7 +6338,7 @@ function startApp() {
     var ep = el ? el.props||{} : null;
     var hasEl = !!el;
     var defaultTitle = hasEl ? ('Issue: '+(ep.ifcType||'Element')+' '+(ep.name||'#'+el.expressId)) : '';
-    var defaultDesc = hasEl ? ('Model: '+el.modelName+'\nType: '+(ep.ifcType||'Unknown')+'\nName: '+(ep.name||'N/A')+'\nStorey: '+(ep.storey||'N/A')+'\nMaterial: '+(ep.material||'N/A')+'\nExpress ID: #'+el.expressId) : '';
+    var defaultDesc = '';
 
     var f=useState({title:defaultTitle,desc:defaultDesc,priority:pr.defaultPriority||'normal',status:pr.defaultStatus||'open',category:pr.defaultCategory||'design',assignee:'',dueDate:''}), form=f[0], setForm=f[1];
     useEffect(function(){

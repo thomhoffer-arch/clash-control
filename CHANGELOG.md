@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.0.16 (2026-03-24)
+- Split markers button into separate clash/issue toggles, remove from issues tab
+
+## v2.0.15 (2026-03-24)
+- Persist model visibility on refresh, clear issue description box
+
+## v2.0.14 (2026-03-24)
+- Fix issue panel: adapt ClashProps for single-element issues, pass selected element to new issue modal
+
 ## v2.0.13 (2026-03-24)
 - Switch to relevant tab when clicking 3D markers
 
