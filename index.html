@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.89',hash:'ff76eac',date:'2026-03-24T09:48:08Z'};
+  var CC_VERSION = {v:'2.0.2',hash:'c08a984',date:'2026-03-24T10:22:37Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -1582,7 +1582,7 @@ function startApp() {
 
     // ── Merge related clashes (IFC segment grouping) ─────────────
     // Multiple pipe/duct segments clashing with the same element get merged
-    // into a single clash. Only merges when clash points are nearby (<0.5m),
+    // into a single clash. Only merges when clash points are nearby (<250mm),
     // ensuring segments from different pipe runs aren't incorrectly combined.
     // This is purely additive — no detected clashes are removed, only grouped.
     var merged = [];
@@ -1596,7 +1596,7 @@ function startApp() {
       // Find a nearby existing clash to merge with
       var mergedIdx = null;
       var mergedSide = null; // 'A' or 'B'
-      var MERGE_DIST_SQ = 0.05*0.05; // 50mm — only merge when clash points nearly overlap
+      var MERGE_DIST_SQ = 0.25*0.25; // 250mm — covers different pipe faces on the same element
       [['A',keyA],['B',keyB]].forEach(function(pair) {
         if (mergedIdx != null) return;
         var candidates = mergeMap[pair[1]];
@@ -1625,6 +1625,12 @@ function startApp() {
           exist.distance = c.distance;
           exist.point = c.point;
         }
+        // Add this clash's point to candidates so chains can form
+        // (A near B, B near C → all merge even if A not near C)
+        if (!mergeMap[keyA]) mergeMap[keyA] = [];
+        if (!mergeMap[keyB]) mergeMap[keyB] = [];
+        mergeMap[keyA].push({idx:mergedIdx, point:c.point});
+        mergeMap[keyB].push({idx:mergedIdx, point:c.point});
       } else {
         var newIdx = merged.length;
         if (!mergeMap[keyA]) mergeMap[keyA] = [];
@@ -2059,6 +2065,10 @@ function startApp() {
     prefsRef.current = s.prefs;
     var measureModeRef = useRef(s.measureMode);
     measureModeRef.current = s.measureMode;
+    var clashesRef = useRef(s.clashes);
+    clashesRef.current = s.clashes;
+    var issuesRef = useRef(s.issues);
+    issuesRef.current = s.issues;
 
     // Init scene
     useEffect(function() {
@@ -2337,11 +2347,15 @@ function startApp() {
           var pin = new THREE.Mesh(pinGeo, mat);
           pin.position.set(c.point[0],c.point[1],c.point[2]);
           pin.userData.clashId = c.id;
+          // Scale up markers for grouped clashes
+          var mc = c.mergedCount||1;
+          if(mc>1){var sc=Math.min(1+mc*0.25,2.5);pin.scale.setScalar(sc);}
           grp.add(pin);
           // Add a horizontal ring around the marker
           var ring = new THREE.Mesh(ringGeo, ringMat);
           ring.position.set(c.point[0],c.point[1],c.point[2]);
           ring.rotation.x = -Math.PI/2;
+          if(mc>1){ring.scale.setScalar(Math.min(1+mc*0.25,2.5));}
           grp.add(ring);
         });
         scene.add(grp);
@@ -2796,6 +2810,56 @@ function startApp() {
             // Otherwise keep collecting points
           }
           return; // Don't do element picking when measuring
+        }
+
+        // ── Check clash/issue markers first ──
+        if(clashMarkersRef.current) {
+          var markerHits = raycaster.intersectObjects(clashMarkersRef.current.children, false);
+          for(var mhi=0;mhi<markerHits.length;mhi++){
+            var mh = markerHits[mhi].object;
+            if(mh.userData.clashId){
+              // Select this clash — dispatch ACTIVE and let IssueRow handle highlight/fly
+              d({t:'ACTIVE',id:mh.userData.clashId});
+              // Find the clash and do highlight/fly
+              var allClashes = clashesRef.current||[];
+              var hitClash = null;
+              for(var ci=0;ci<allClashes.length;ci++){if(allClashes[ci].id===mh.userData.clashId){hitClash=allClashes[ci];break;}}
+              if(hitClash){
+                var cids=[];
+                if(hitClash.elemA) cids.push(hitClash.elemA);
+                if(hitClash.elemB) cids.push(hitClash.elemB);
+                if(hitClash._groupedElems) hitClash._groupedElems.forEach(function(eid2){cids.push(eid2);});
+                if(cids.length&&_ghostOthers) _ghostOthers(cids);
+                if(hitClash.elemA&&_highlightById) _highlightById(hitClash.elemA,false);
+                if(hitClash.point && window._ccShowActiveClashMarker) window._ccShowActiveClashMarker(hitClash.point);
+                if(_flyToElements && cids.length) _flyToElements(cids, hitClash.point);
+                else if(hitClash.point && _flyTo) _flyTo(hitClash.point);
+              }
+              return;
+            }
+          }
+        }
+        if(issueMarkersRef.current) {
+          var iMarkerHits = raycaster.intersectObjects(issueMarkersRef.current.children, false);
+          for(var imhi=0;imhi<iMarkerHits.length;imhi++){
+            var imh = iMarkerHits[imhi].object;
+            if(imh.userData.issueId){
+              d({t:'ACTIVE',id:imh.userData.issueId});
+              var allIssues = issuesRef.current||[];
+              var hitIssue = null;
+              for(var ii=0;ii<allIssues.length;ii++){if(allIssues[ii].id===imh.userData.issueId){hitIssue=allIssues[ii];break;}}
+              if(hitIssue){
+                var iids=[];
+                if(hitIssue.elementId) iids.push(hitIssue.elementId);
+                if(iids.length&&_ghostOthers) _ghostOthers(iids);
+                if(hitIssue.elementId&&_highlightById) _highlightById(hitIssue.elementId,false);
+                if(hitIssue.point && window._ccShowActiveClashMarker) window._ccShowActiveClashMarker(hitIssue.point);
+                if(_flyToElements && iids.length) _flyToElements(iids, hitIssue.point);
+                else if(hitIssue.point && _flyTo) _flyTo(hitIssue.point);
+              }
+              return;
+            }
+          }
         }
 
         if(hits.length>0) {
@@ -3578,6 +3642,7 @@ function startApp() {
     var fs = useState(''), findQuery=fs[0], setFindQuery=fs[1];
     var fr = useState([]), findResults=fr[0], setFindResults=fr[1];
     var fo2 = useState(false), finderOpen=fo2[0], setFinderOpen=fo2[1];
+    window._ccToggleFinder = function(){setFinderOpen(function(o){if(o){doFind('');setFindQuery('');}return !o;});};
 
     function doFind(q) {
       setFindQuery(q);
@@ -4820,6 +4885,89 @@ function startApp() {
     var hiddenCount = classView ? keys.filter(function(k){return s.hiddenClasses[classView+':'+k]}).length : 0;
     var CLASS_COLORS = ['#60a5fa','#f87171','#34d399','#fbbf24','#c084fc','#fb923c','#22d3ee','#e879f9','#a3e635','#f472b6','#38bdf8','#facc15','#4ade80','#f97316','#818cf8'];
     var VIEWS=[{id:'tree',label:'Tree'},{id:'byType',label:'IFC Type'},{id:'byStorey',label:'Storey'},{id:'byDiscipline',label:'Discipline'},{id:'byMaterial',label:'Material'}];
+    // Explorer keyboard navigation
+    var _ef = useState(null), explorerFocus=_ef[0], setExplorerFocus=_ef[1];
+    var explorerScrollRef = useRef(null);
+    useEffect(function(){
+      function onKey(e){
+        if(s.tab!=='explorer') return;
+        if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
+        if(viewMode!=='tree') return;
+        if(e.key!=='ArrowDown'&&e.key!=='ArrowUp'&&e.key!=='ArrowLeft'&&e.key!=='ArrowRight'&&e.key!=='Enter') return;
+        e.preventDefault();
+        // Build flat list of visible tree nodes
+        var nodes = [];
+        var q = treeSearch.toLowerCase();
+        s.models.filter(function(m){return m.visible!==false}).forEach(function(model){
+          var mKey='m_'+model.id;
+          nodes.push({key:mKey,type:'model',model:model});
+          if(!expanded[mKey]) return;
+          var storeyGroups={};var noStorey=[];
+          (model.elements||[]).forEach(function(el){
+            var st=(el.props&&el.props.storey)||'';
+            if(!st){noStorey.push(el);return;}
+            if(!storeyGroups[st])storeyGroups[st]=[];
+            storeyGroups[st].push(el);
+          });
+          Object.keys(storeyGroups).sort().forEach(function(st){
+            var sKey='s_'+model.id+'_'+st;
+            var els=storeyGroups[st];
+            var filtered=q?els.filter(function(el){var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1||String(el.expressId).indexOf(q)!==-1;}):els;
+            if(q&&filtered.length===0) return;
+            nodes.push({key:sKey,type:'storey',model:model,storey:st});
+            if(!expanded[sKey]) return;
+            filtered.slice(0,200).forEach(function(el){
+              nodes.push({key:'e_'+el.expressId,type:'element',model:model,element:el});
+            });
+          });
+          if(noStorey.length>0){
+            var nsKey='s_'+model.id+'_none';
+            nodes.push({key:nsKey,type:'storey',model:model,storey:'(No storey)'});
+            if(expanded[nsKey]){
+              noStorey.filter(function(el){if(!q)return true;var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1;}).slice(0,100).forEach(function(el){
+                nodes.push({key:'e_'+el.expressId,type:'element',model:model,element:el});
+              });
+            }
+          }
+        });
+        if(!nodes.length) return;
+        var curIdx=-1;
+        if(explorerFocus!=null){for(var i=0;i<nodes.length;i++){if(nodes[i].key===explorerFocus){curIdx=i;break;}}}
+        var nextIdx=curIdx;
+        if(e.key==='ArrowDown') nextIdx=curIdx===-1?0:Math.min(nodes.length-1,curIdx+1);
+        else if(e.key==='ArrowUp') nextIdx=curIdx<=0?0:curIdx-1;
+        else if(e.key==='ArrowRight'&&curIdx>=0&&(nodes[curIdx].type==='model'||nodes[curIdx].type==='storey')){
+          if(!expanded[nodes[curIdx].key]) toggle(nodes[curIdx].key);
+          return;
+        } else if(e.key==='ArrowLeft'&&curIdx>=0){
+          if((nodes[curIdx].type==='model'||nodes[curIdx].type==='storey')&&expanded[nodes[curIdx].key]){
+            toggle(nodes[curIdx].key); return;
+          } else if(nodes[curIdx].type==='element'){
+            for(var pi=curIdx-1;pi>=0;pi--){if(nodes[pi].type!=='element'){nextIdx=pi;break;}}
+          }
+        } else if(e.key==='Enter'&&curIdx>=0){
+          var n=nodes[curIdx];
+          if(n.type==='model'||n.type==='storey') toggle(n.key);
+          else if(n.type==='element'){
+            if(_fitToElement){var p2=n.element.props||{};var isFloor=(p2.ifcType||'').match(/slab|floor/i);_fitToElement(n.element.expressId,isFloor?{normal:[0,1,0]}:null);}
+            if(_highlightById) _highlightById(n.element.expressId);
+          }
+          return;
+        }
+        if(nextIdx!==curIdx||curIdx===-1){
+          var nk=nodes[nextIdx].key;
+          setExplorerFocus(nk);
+          if(nodes[nextIdx].type==='element'&&_highlightById) _highlightById(nodes[nextIdx].element.expressId,false);
+          requestAnimationFrame(function(){
+            if(!explorerScrollRef.current) return;
+            var el=explorerScrollRef.current.querySelector('[data-tree-key="'+nk+'"]');
+            if(el) el.scrollIntoView({block:'nearest'});
+          });
+        }
+      }
+      document.addEventListener('keydown', onKey);
+      return function(){document.removeEventListener('keydown', onKey);};
+    },[s.tab, viewMode, s.models, expanded, treeSearch, explorerFocus]);
 
     return html`<div style=${{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <div style=${{padding:'.4rem',borderBottom:'1px solid var(--border-subtle)',flexShrink:0}}>
@@ -4854,7 +5002,7 @@ function startApp() {
         </div>`}
         ${classView && hiddenCount>0 && html`<div style=${{fontSize:'.5rem',color:'#f59e0b',marginTop:'.15rem'}}>${hiddenCount} group${hiddenCount>1?'s':''} hidden</div>`}
       </div>
-      <div style=${{flex:1,overflowY:'auto',fontSize:'.6rem'}}>
+      <div ref=${explorerScrollRef} style=${{flex:1,overflowY:'auto',fontSize:'.6rem'}}>
         ${s.models.length===0 && html`<div style=${{textAlign:'center',color:'var(--text-faint)',fontSize:'.7rem',padding:'2rem 1rem'}}>Load models to explore</div>`}
         ${viewMode==='tree' && s.models.filter(function(m){return m.visible!==false}).map(function(model){
           var mKey = 'm_'+model.id;
@@ -4871,7 +5019,7 @@ function startApp() {
           var storeyKeys = Object.keys(storeyGroups).sort();
           var q = treeSearch.toLowerCase();
           return html`<div key=${model.id}>
-            <div onClick=${function(){toggle(mKey);}} style=${{padding:'.3rem .5rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.3rem',background:mOpen?'var(--bg-secondary)':'transparent',borderBottom:'1px solid var(--border-subtle)'}}>
+            <div data-tree-key=${mKey} class=${explorerFocus===mKey?'cc-tree-focus':''} onClick=${function(){toggle(mKey);setExplorerFocus(mKey);}} style=${{padding:'.3rem .5rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.3rem',background:explorerFocus===mKey?'rgba(37,99,235,.15)':mOpen?'var(--bg-secondary)':'transparent',borderBottom:'1px solid var(--border-subtle)',outline:explorerFocus===mKey?'1px solid rgba(59,130,246,.5)':'none'}}>
               <span style=${{color:'var(--text-faint)',fontSize:'.5rem'}}>${mOpen?'▼':'▶'}</span>
               <span style=${{width:8,height:8,borderRadius:'50%',background:disc?disc.c:'var(--text-muted)',flexShrink:0}}></span>
               <span style=${{color:'var(--text-primary)',fontWeight:500,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${model.name}</span>
@@ -4885,7 +5033,7 @@ function startApp() {
                 var filtered = q ? els.filter(function(el){var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1||String(el.expressId).indexOf(q)!==-1;}) : els;
                 if(q && filtered.length===0) return null;
                 return html`<div key=${st}>
-                  <div onClick=${function(){toggle(sKey);}} style=${{padding:'.2rem .4rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',borderBottom:'1px solid var(--border-subtle)'}}>
+                  <div data-tree-key=${sKey} class=${explorerFocus===sKey?'cc-tree-focus':''} onClick=${function(){toggle(sKey);setExplorerFocus(sKey);}} style=${{padding:'.2rem .4rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===sKey?'rgba(37,99,235,.15)':'transparent',outline:explorerFocus===sKey?'1px solid rgba(59,130,246,.5)':'none'}}>
                     <span style=${{color:'var(--text-faint)',fontSize:'.45rem'}}>${sOpen?'▼':'▶'}</span>
                     <span style=${{color:'#34d399',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title=${st}>${st}</span>
                     <span style=${{color:'var(--text-faint)'}}>${filtered.length}</span>
@@ -4893,10 +5041,11 @@ function startApp() {
                   ${sOpen && html`<div style=${{paddingLeft:'.4rem'}}>
                     ${filtered.slice(0,200).map(function(el){
                       var p=el.props||{};
-                      return html`<div key=${el.expressId}
-                        onClick=${function(){if(_highlightById)_highlightById(el.expressId,false);}}
+                      var eKey='e_'+el.expressId;
+                      return html`<div key=${el.expressId} data-tree-key=${eKey} class=${explorerFocus===eKey?'cc-tree-focus':''}
+                        onClick=${function(){if(_highlightById)_highlightById(el.expressId,false);setExplorerFocus(eKey);}}
                         onDblClick=${function(e){e.stopPropagation();if(_fitToElement){var isFloor=(p.ifcType||'').match(/slab|floor/i);_fitToElement(el.expressId,isFloor?{normal:[0,1,0]}:null);}if(_highlightById)_highlightById(el.expressId);}}
-                        style=${{padding:'.15rem .3rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.2rem',borderBottom:'1px solid var(--border-subtle)'}}>
+                        style=${{padding:'.15rem .3rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.2rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===eKey?'rgba(37,99,235,.15)':'transparent',outline:explorerFocus===eKey?'1px solid rgba(59,130,246,.5)':'none'}}>
                         <span style=${{color:'#c084fc',flexShrink:0}}>${p.ifcType||'Element'}</span>
                         <span style=${{color:'var(--text-secondary)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${p.name||'#'+el.expressId}</span>
                       </div>`;
@@ -4906,7 +5055,7 @@ function startApp() {
                 </div>`;
               })}
               ${noStorey.length>0 && html`<div>
-                <div onClick=${function(){toggle('s_'+model.id+'_none');}} style=${{padding:'.2rem .4rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',borderBottom:'1px solid var(--border-subtle)',fontStyle:'italic'}}>
+                <div data-tree-key=${'s_'+model.id+'_none'} class=${explorerFocus==='s_'+model.id+'_none'?'cc-tree-focus':''} onClick=${function(){toggle('s_'+model.id+'_none');setExplorerFocus('s_'+model.id+'_none');}} style=${{padding:'.2rem .4rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',borderBottom:'1px solid var(--border-subtle)',fontStyle:'italic',background:explorerFocus==='s_'+model.id+'_none'?'rgba(37,99,235,.15)':'transparent',outline:explorerFocus==='s_'+model.id+'_none'?'1px solid rgba(59,130,246,.5)':'none'}}>
                   <span style=${{color:'var(--text-faint)',fontSize:'.45rem'}}>${expanded['s_'+model.id+'_none']?'▼':'▶'}</span>
                   <span style=${{color:'var(--text-muted)',flex:1}}>(No storey)</span>
                   <span style=${{color:'var(--text-faint)'}}>${noStorey.length}</span>
@@ -4914,10 +5063,11 @@ function startApp() {
                 ${expanded['s_'+model.id+'_none'] && html`<div style=${{paddingLeft:'.4rem'}}>
                   ${noStorey.filter(function(el){if(!q)return true;var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1;}).slice(0,100).map(function(el){
                     var p=el.props||{};
-                    return html`<div key=${el.expressId}
-                      onClick=${function(){if(_highlightById)_highlightById(el.expressId,false);}}
+                    var eKey2='e_'+el.expressId;
+                    return html`<div key=${el.expressId} data-tree-key=${eKey2} class=${explorerFocus===eKey2?'cc-tree-focus':''}
+                      onClick=${function(){if(_highlightById)_highlightById(el.expressId,false);setExplorerFocus(eKey2);}}
                       onDblClick=${function(e){e.stopPropagation();if(_fitToElement){var isFloor=(p.ifcType||'').match(/slab|floor/i);_fitToElement(el.expressId,isFloor?{normal:[0,1,0]}:null);}if(_highlightById)_highlightById(el.expressId);}}
-                      style=${{padding:'.15rem .3rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.2rem',borderBottom:'1px solid var(--border-subtle)'}}>
+                      style=${{padding:'.15rem .3rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.2rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===eKey2?'rgba(37,99,235,.15)':'transparent',outline:explorerFocus===eKey2?'1px solid rgba(59,130,246,.5)':'none'}}>
                       <span style=${{color:'#c084fc',flexShrink:0}}>${p.ifcType||'Element'}</span>
                       <span style=${{color:'var(--text-secondary)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${p.name||'#'+el.expressId}</span>
                     </div>`;
@@ -5626,6 +5776,94 @@ function startApp() {
     var _st = useState(0), scrollTop=_st[0], setScrollTop=_st[1];
     var coll = useState({}), collapsed=coll[0], setCollapsed=coll[1];
     var grpLimits = useState({}), groupLimits=grpLimits[0], setGroupLimits=grpLimits[1];
+    // ── Keyboard navigation: Arrow Down/Up = next/prev item, Tab/Shift+Tab = next/prev group ──
+    var groups = groupAndSort(items, groupBy, sortBy);
+    // Build flat visible item list (respecting collapsed groups)
+    var flatItems = useMemo(function(){
+      if(!groups) return items;
+      var flat = [];
+      groups.forEach(function(g){
+        if(!collapsed[g.label]){
+          var limit = groupLimits[g.label] || GROUP_PAGE_SIZE;
+          g.items.slice(0, limit).forEach(function(it){ flat.push({item:it, group:g.label}); });
+        }
+      });
+      return flat.map(function(f){return f.item;});
+    }, [items, groups, collapsed, groupLimits]);
+    // Group boundaries for Tab navigation
+    var groupStarts = useMemo(function(){
+      if(!groups) return [];
+      var starts = [], idx = 0;
+      groups.forEach(function(g){
+        if(!collapsed[g.label]){
+          starts.push(idx);
+          var limit = groupLimits[g.label] || GROUP_PAGE_SIZE;
+          idx += Math.min(g.items.length, limit);
+        }
+      });
+      return starts;
+    }, [groups, collapsed, groupLimits]);
+
+    useEffect(function(){
+      function onKey(e){
+        if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA'||e.target.tagName==='SELECT') return;
+        if(e.key==='Escape'&&activeId!=null){
+          d({t:'ACTIVE',id:null});
+          if(_unghostAll)_unghostAll();
+          if(window._ccRemoveActiveClashMarker) window._ccRemoveActiveClashMarker();
+          return;
+        }
+        if(e.key!=='ArrowDown'&&e.key!=='ArrowUp'&&e.key!=='Tab') return;
+        if(flatItems.length===0) return;
+        e.preventDefault();
+        var curIdx = -1;
+        if(activeId!=null){
+          for(var i=0;i<flatItems.length;i++){if(flatItems[i].id===activeId){curIdx=i;break;}}
+        }
+        var nextIdx;
+        if(e.key==='Tab'){
+          // Tab = next group, Shift+Tab = prev group
+          if(groupStarts.length<2){
+            nextIdx = e.shiftKey ? 0 : flatItems.length-1;
+          } else {
+            // Find which group we're in
+            var curGroup = 0;
+            for(var gi=groupStarts.length-1;gi>=0;gi--){if(curIdx>=groupStarts[gi]){curGroup=gi;break;}}
+            if(e.shiftKey) nextIdx = groupStarts[Math.max(0, curGroup-1)];
+            else nextIdx = groupStarts[Math.min(groupStarts.length-1, curGroup+1)];
+          }
+        } else {
+          // ArrowDown/Up
+          if(curIdx===-1) nextIdx = 0;
+          else if(e.key==='ArrowDown') nextIdx = Math.min(flatItems.length-1, curIdx+1);
+          else nextIdx = Math.max(0, curIdx-1);
+        }
+        if(nextIdx!=null && nextIdx>=0 && nextIdx<flatItems.length){
+          var nxt = flatItems[nextIdx];
+          d({t:'ACTIVE',id:nxt.id});
+          // Trigger highlight + fly-to for the newly selected item
+          var hIds=[];
+          if(nxt.elemA) hIds.push(nxt.elemA);
+          if(nxt.elemB) hIds.push(nxt.elemB);
+          if(nxt.elementId) hIds.push(nxt.elementId);
+          if(nxt._groupedElems) nxt._groupedElems.forEach(function(eid){hIds.push(eid);});
+          if(hIds.length&&_ghostOthers) _ghostOthers(hIds);
+          if(nxt.elemA&&_highlightById) _highlightById(nxt.elemA,false);
+          if(nxt.elementId&&_highlightById) _highlightById(nxt.elementId,false);
+          if(nxt.point && window._ccShowActiveClashMarker) window._ccShowActiveClashMarker(nxt.point);
+          if(_flyToElements && hIds.length) _flyToElements(hIds, nxt.point);
+          else if(nxt.point && _flyTo) _flyTo(nxt.point);
+          // Scroll into view
+          if(scrollRef.current){
+            var rows = scrollRef.current.querySelectorAll('[data-item-id]');
+            rows.forEach(function(row){if(row.dataset.itemId===nxt.id) row.scrollIntoView({block:'nearest'});});
+          }
+        }
+      }
+      document.addEventListener('keydown', onKey);
+      return function(){document.removeEventListener('keydown', onKey);};
+    }, [flatItems, activeId, groupStarts]);
+
     if(items.length===0) return html`<div style=${{flex:1,overflowY:'auto'}}>
       <div style=${{textAlign:'center',color:'var(--text-faint)',fontSize:'.75rem',padding:'2.5rem 1rem'}}>
         <div style=${{fontSize:'2rem',marginBottom:'.3rem'}}>${isClash?'✅':'📋'}</div>
@@ -5633,7 +5871,6 @@ function startApp() {
       </div>
     </div>`;
     // Grouped rendering
-    var groups = groupAndSort(items, groupBy, sortBy);
     if (groups) {
       function toggleGroup(label) {
         setCollapsed(function(prev) {
@@ -5712,16 +5949,25 @@ function startApp() {
     })();
     return html`<div onClick=${function(){
         var wasActive=active;
-        d({t:'ACTIVE',id:wasActive?null:it.id});
-        // Auto turn off section box when selecting a different clash/issue
-        if(!wasActive && window._ccCurrentSbox && window._ccDispatch){
-          window._ccDispatch({t:'SECTION_BOX',v:null});
-        }
         if(wasActive){
-          // Deselecting: restore transparency, remove clash marker
-          if(_unghostAll)_unghostAll();
-          if(window._ccRemoveActiveClashMarker) window._ccRemoveActiveClashMarker();
+          // Already active — re-zoom to both elements (restore ghost + fly to both)
+          var reIds=[];
+          if(it.elemA) reIds.push(it.elemA);
+          if(it.elemB) reIds.push(it.elemB);
+          if(it.elementId) reIds.push(it.elementId);
+          if(it._groupedElems) it._groupedElems.forEach(function(eid){reIds.push(eid);});
+          if(reIds.length&&_ghostOthers) _ghostOthers(reIds);
+          if(it.elemA&&_highlightById) _highlightById(it.elemA,false);
+          if(it.elementId&&_highlightById) _highlightById(it.elementId,false);
+          if(it.point && window._ccShowActiveClashMarker) window._ccShowActiveClashMarker(it.point);
+          if(_flyToElements && reIds.length) _flyToElements(reIds, it.point);
+          else if(it.point && _flyTo) _flyTo(it.point);
           return;
+        }
+        d({t:'ACTIVE',id:it.id});
+        // Auto turn off section box when selecting a different clash/issue
+        if(window._ccCurrentSbox && window._ccDispatch){
+          window._ccDispatch({t:'SECTION_BOX',v:null});
         }
         if(pr.autoHighlight!==false){
           var ids=[];
@@ -5745,6 +5991,7 @@ function startApp() {
           else if(it.point && _flyTo) _flyTo(it.point);
         }
       }}
+      data-item-id=${it.id}
       style=${{padding:'.6rem .7rem',borderBottom:'1px solid var(--border-subtle)',cursor:'pointer',background:active?'var(--bg-secondary)':'transparent',borderLeft:active?'2px solid #3b82f6':'2px solid transparent'}}>
       <div style=${{display:'flex',gap:'.35rem',alignItems:'flex-start'}}>
         ${selectMode && html`<input type="checkbox" checked=${isSelected} onClick=${function(e){e.stopPropagation();d({t:'SELECT_TOGGLE',id:it.id});}}
@@ -8296,6 +8543,11 @@ function startApp() {
         setShow(false);
       }, 200);
     }
+    useEffect(function(){
+      function onKey(e){if(e.key==='Escape') dismiss();}
+      window.addEventListener('keydown', onKey);
+      return function(){window.removeEventListener('keydown', onKey);};
+    },[]);
     function openBridge() { dismiss(); setTimeout(function(){ d({t:'REVIT_BRIDGE',v:true}); },250); }
 
     var cardBg = 'var(--card-bg)';
@@ -8450,6 +8702,134 @@ function startApp() {
         _cc2DOutlines = null;
       }
     }, [s.underlayMode, s.floorPlan, s.models]);
+
+    // ── Global Keyboard Shortcuts (single keys + Revit-style two-key chords) ──
+    var _chordRef = useRef({key:null,timer:null});
+    useEffect(function(){
+      function gk(e){
+        var tag=e.target.tagName;
+        var inInput = tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||e.target.contentEditable==='true';
+        var ctrl = e.ctrlKey||e.metaKey;
+
+        // Ctrl+O — Open IFC file
+        if(ctrl && e.key==='o'){ e.preventDefault(); if(window._ccOpenIFC)window._ccOpenIFC(); return; }
+        // Ctrl+, — Open settings
+        if(ctrl && e.key===','){ e.preventDefault(); d({t:'SETTINGS',v:!s.showSettings}); return; }
+        // Ctrl+/ — AI assistant (handled by NLCommandPanel, but ensure it works)
+        // Escape — Close modals/popups in priority order
+        if(e.key==='Escape'){
+          if(s.showSettings){ d({t:'SETTINGS',v:false}); return; }
+          if(s.showModal){ d({t:'MODAL',v:false}); return; }
+          if(s.showRevitBridge){ d({t:'REVIT_BRIDGE',v:false}); return; }
+          // Let other Escape handlers (VirtualList, NLCommandPanel) handle the rest
+        }
+
+        // Skip remaining shortcuts if typing in an input
+        if(inInput) return;
+
+        // ── Two-key chord system (Revit-style) ──
+        var ch = _chordRef.current;
+        if(ch.key){
+          // Second key of chord
+          var chord = ch.key + e.key.toLowerCase();
+          clearTimeout(ch.timer);
+          ch.key=null; ch.timer=null;
+
+          // Helper: get expressIds from active clash/issue
+          function getActiveEids(){
+            var all=s.clashes.concat(s.issues);
+            var item=all.find(function(c){return c.id===s.activeId;});
+            if(!item) return null;
+            var ids=[];
+            if(item.elemA) ids.push(item.elemA);
+            if(item.elemB) ids.push(item.elemB);
+            return ids.length?ids:null;
+          }
+
+          // BX — Section box around selected/active elements
+          if(chord==='bx'){
+            var eids=getActiveEids();
+            if(eids&&_sboxAroundElements) _sboxAroundElements(eids);
+            else if(_getSectionBoxFromScene){var box=_getSectionBoxFromScene();if(box&&window._ccDispatch)window._ccDispatch({t:'SECTION_BOX',v:{enabled:true,min:[box.min.x,box.min.y,box.min.z],max:[box.max.x,box.max.y,box.max.z]}});}
+            return;
+          }
+          // SC — Cycle section plane (off → X → Y → Z → off)
+          if(chord==='sc'){
+            var next=s.sectionAxis===null?'x':s.sectionAxis==='x'?'y':s.sectionAxis==='y'?'z':null;
+            d({t:'SECTION',axis:next}); return;
+          }
+          // ZF — Zoom to fit (reset view)
+          if(chord==='zf'){ if(_resetView)_resetView(); if(s.floorPlan)d({t:'FLOOR_PLAN',v:null}); return; }
+          // ZA — Zoom to fit all (same as ZF, Revit alias)
+          if(chord==='za'){ if(_resetView)_resetView(); if(s.floorPlan)d({t:'FLOOR_PLAN',v:null}); return; }
+          // VV — Restore last viewpoint
+          if(chord==='vv'){
+            if(s.viewpoints.length>0&&_restoreViewpoint) _restoreViewpoint(s.viewpoints[s.viewpoints.length-1]);
+            return;
+          }
+          // VP — Save viewpoint (alias)
+          if(chord==='vp'){
+            if(_captureViewpoint){var vp=_captureViewpoint('Viewpoint '+(s.viewpoints.length+1));d({t:'ADD_VIEWPOINT',v:vp});}
+            return;
+          }
+          // DL — Toggle measure/distance length
+          if(chord==='dl'){ d({t:'MEASURE_MODE',v:s.measureMode==='length'?null:'length'}); return; }
+          // DA — Measure angle
+          if(chord==='da'){ d({t:'MEASURE_MODE',v:s.measureMode==='angle'?null:'angle'}); return; }
+          // CS — Clear section planes + section box
+          if(chord==='cs'){ d({t:'SECTION',axis:null}); d({t:'SECTION_BOX',v:null}); return; }
+          // WT — Toggle wireframe (render style)
+          if(chord==='wt'){ d({t:'PREF',k:'renderStyle',v:s.prefs.renderStyle==='wireframe'?'standard':'wireframe'}); return; }
+
+          // Chord not recognized — fall through (don't consume)
+          return;
+        }
+
+        // ── Start a chord if this is a chord-starter key ──
+        var k=e.key.toLowerCase();
+        var chordStarters = {b:1,s:1,z:1,v:1,d:1,c:1,w:1};
+        if(!ctrl && !e.altKey && !e.shiftKey && chordStarters[k]){
+          ch.key=k;
+          ch.timer=setTimeout(function(){
+            // Chord timed out — execute single-key fallback
+            var sk=ch.key; ch.key=null; ch.timer=null;
+            if(sk==='v'){ if(_captureViewpoint){var vp2=_captureViewpoint('Viewpoint '+(s.viewpoints.length+1));d({t:'ADD_VIEWPOINT',v:vp2});} }
+          }, 500);
+          return;
+        }
+
+        // ── Single-key shortcuts (non-chord keys) ──
+        if(!ctrl && !e.altKey && !e.shiftKey){
+          if(e.key==='1'){ d({t:'TAB',v:'clashes'}); return; }
+          if(e.key==='2'){ d({t:'TAB',v:'issues'}); return; }
+          if(e.key==='3'){ d({t:'TAB',v:'explorer'}); return; }
+        }
+
+        // H — Home / reset view
+        if(e.key==='h'&&!ctrl){ if(_resetView)_resetView(); if(s.floorPlan)d({t:'FLOOR_PLAN',v:null}); return; }
+        // M — Toggle measure mode
+        if(e.key==='m'&&!ctrl){ d({t:'MEASURE_MODE',v:s.measureMode?null:'length'}); return; }
+        // L/A/R — Measure length/angle/area (only when measure mode is active)
+        if(s.measureMode){
+          if(e.key==='l'){d({t:'MEASURE_MODE',v:'length'});return;}
+          if(e.key==='a'){d({t:'MEASURE_MODE',v:'angle'});return;}
+          if(e.key==='r'){d({t:'MEASURE_MODE',v:'area'});return;}
+        }
+        // F — Toggle finder search
+        if(e.key==='f'&&!ctrl){ if(window._ccToggleFinder) window._ccToggleFinder(); return; }
+        // X/Y/Z — Section planes (direct toggle)
+        if(e.key==='x'&&!ctrl){ d({t:'SECTION',axis:s.sectionAxis==='x'?null:'x'}); return; }
+        if(e.key==='y'&&!ctrl){ d({t:'SECTION',axis:s.sectionAxis==='y'?null:'y'}); return; }
+        // G — Toggle grid
+        if(e.key==='g'&&!ctrl){ d({t:'PREF',k:'showGrid',v:!(s.prefs.showGrid!==false)}); return; }
+        // Delete — Delete active measurement or viewpoint (when none selected in clash list)
+        if(e.key==='Delete'&&!s.activeId){
+          if(s.measurements.length>0){d({t:'DEL_MEASUREMENT',id:s.measurements[s.measurements.length-1].id});return;}
+        }
+      }
+      window.addEventListener('keydown', gk);
+      return function(){window.removeEventListener('keydown', gk);};
+    },[s.showSettings, s.showModal, s.showRevitBridge, s.measureMode, s.sectionAxis, s.prefs.showGrid, s.prefs.renderStyle, s.viewpoints, s.measurements, s.activeId, s.floorPlan, s.clashes, s.issues]);
 
     var is2D = s.underlayMode === 'view2d' || s.underlayMode === 'compare';
     return html`<div style=${{height:'100vh',display:'flex',flexDirection:'row',overflow:'hidden'}}>
