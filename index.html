@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.90',hash:'37df75c',date:'2026-03-24T10:03:38Z'};
+  var CC_VERSION = {v:'2.0.1',hash:'6d8a37d',date:'2026-03-24T10:11:52Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -3642,6 +3642,7 @@ function startApp() {
     var fs = useState(''), findQuery=fs[0], setFindQuery=fs[1];
     var fr = useState([]), findResults=fr[0], setFindResults=fr[1];
     var fo2 = useState(false), finderOpen=fo2[0], setFinderOpen=fo2[1];
+    window._ccToggleFinder = function(){setFinderOpen(function(o){if(o){doFind('');setFindQuery('');}return !o;});};
 
     function doFind(q) {
       setFindQuery(q);
@@ -4884,6 +4885,89 @@ function startApp() {
     var hiddenCount = classView ? keys.filter(function(k){return s.hiddenClasses[classView+':'+k]}).length : 0;
     var CLASS_COLORS = ['#60a5fa','#f87171','#34d399','#fbbf24','#c084fc','#fb923c','#22d3ee','#e879f9','#a3e635','#f472b6','#38bdf8','#facc15','#4ade80','#f97316','#818cf8'];
     var VIEWS=[{id:'tree',label:'Tree'},{id:'byType',label:'IFC Type'},{id:'byStorey',label:'Storey'},{id:'byDiscipline',label:'Discipline'},{id:'byMaterial',label:'Material'}];
+    // Explorer keyboard navigation
+    var _ef = useState(null), explorerFocus=_ef[0], setExplorerFocus=_ef[1];
+    var explorerScrollRef = useRef(null);
+    useEffect(function(){
+      function onKey(e){
+        if(s.tab!=='explorer') return;
+        if(e.target.tagName==='INPUT'||e.target.tagName==='TEXTAREA') return;
+        if(viewMode!=='tree') return;
+        if(e.key!=='ArrowDown'&&e.key!=='ArrowUp'&&e.key!=='ArrowLeft'&&e.key!=='ArrowRight'&&e.key!=='Enter') return;
+        e.preventDefault();
+        // Build flat list of visible tree nodes
+        var nodes = [];
+        var q = treeSearch.toLowerCase();
+        s.models.filter(function(m){return m.visible!==false}).forEach(function(model){
+          var mKey='m_'+model.id;
+          nodes.push({key:mKey,type:'model',model:model});
+          if(!expanded[mKey]) return;
+          var storeyGroups={};var noStorey=[];
+          (model.elements||[]).forEach(function(el){
+            var st=(el.props&&el.props.storey)||'';
+            if(!st){noStorey.push(el);return;}
+            if(!storeyGroups[st])storeyGroups[st]=[];
+            storeyGroups[st].push(el);
+          });
+          Object.keys(storeyGroups).sort().forEach(function(st){
+            var sKey='s_'+model.id+'_'+st;
+            var els=storeyGroups[st];
+            var filtered=q?els.filter(function(el){var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1||String(el.expressId).indexOf(q)!==-1;}):els;
+            if(q&&filtered.length===0) return;
+            nodes.push({key:sKey,type:'storey',model:model,storey:st});
+            if(!expanded[sKey]) return;
+            filtered.slice(0,200).forEach(function(el){
+              nodes.push({key:'e_'+el.expressId,type:'element',model:model,element:el});
+            });
+          });
+          if(noStorey.length>0){
+            var nsKey='s_'+model.id+'_none';
+            nodes.push({key:nsKey,type:'storey',model:model,storey:'(No storey)'});
+            if(expanded[nsKey]){
+              noStorey.filter(function(el){if(!q)return true;var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1;}).slice(0,100).forEach(function(el){
+                nodes.push({key:'e_'+el.expressId,type:'element',model:model,element:el});
+              });
+            }
+          }
+        });
+        if(!nodes.length) return;
+        var curIdx=-1;
+        if(explorerFocus!=null){for(var i=0;i<nodes.length;i++){if(nodes[i].key===explorerFocus){curIdx=i;break;}}}
+        var nextIdx=curIdx;
+        if(e.key==='ArrowDown') nextIdx=curIdx===-1?0:Math.min(nodes.length-1,curIdx+1);
+        else if(e.key==='ArrowUp') nextIdx=curIdx<=0?0:curIdx-1;
+        else if(e.key==='ArrowRight'&&curIdx>=0&&(nodes[curIdx].type==='model'||nodes[curIdx].type==='storey')){
+          if(!expanded[nodes[curIdx].key]) toggle(nodes[curIdx].key);
+          return;
+        } else if(e.key==='ArrowLeft'&&curIdx>=0){
+          if((nodes[curIdx].type==='model'||nodes[curIdx].type==='storey')&&expanded[nodes[curIdx].key]){
+            toggle(nodes[curIdx].key); return;
+          } else if(nodes[curIdx].type==='element'){
+            for(var pi=curIdx-1;pi>=0;pi--){if(nodes[pi].type!=='element'){nextIdx=pi;break;}}
+          }
+        } else if(e.key==='Enter'&&curIdx>=0){
+          var n=nodes[curIdx];
+          if(n.type==='model'||n.type==='storey') toggle(n.key);
+          else if(n.type==='element'){
+            if(_fitToElement){var p2=n.element.props||{};var isFloor=(p2.ifcType||'').match(/slab|floor/i);_fitToElement(n.element.expressId,isFloor?{normal:[0,1,0]}:null);}
+            if(_highlightById) _highlightById(n.element.expressId);
+          }
+          return;
+        }
+        if(nextIdx!==curIdx||curIdx===-1){
+          var nk=nodes[nextIdx].key;
+          setExplorerFocus(nk);
+          if(nodes[nextIdx].type==='element'&&_highlightById) _highlightById(nodes[nextIdx].element.expressId,false);
+          requestAnimationFrame(function(){
+            if(!explorerScrollRef.current) return;
+            var el=explorerScrollRef.current.querySelector('[data-tree-key="'+nk+'"]');
+            if(el) el.scrollIntoView({block:'nearest'});
+          });
+        }
+      }
+      document.addEventListener('keydown', onKey);
+      return function(){document.removeEventListener('keydown', onKey);};
+    },[s.tab, viewMode, s.models, expanded, treeSearch, explorerFocus]);
 
     return html`<div style=${{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
       <div style=${{padding:'.4rem',borderBottom:'1px solid var(--border-subtle)',flexShrink:0}}>
@@ -4918,7 +5002,7 @@ function startApp() {
         </div>`}
         ${classView && hiddenCount>0 && html`<div style=${{fontSize:'.5rem',color:'#f59e0b',marginTop:'.15rem'}}>${hiddenCount} group${hiddenCount>1?'s':''} hidden</div>`}
       </div>
-      <div style=${{flex:1,overflowY:'auto',fontSize:'.6rem'}}>
+      <div ref=${explorerScrollRef} style=${{flex:1,overflowY:'auto',fontSize:'.6rem'}}>
         ${s.models.length===0 && html`<div style=${{textAlign:'center',color:'var(--text-faint)',fontSize:'.7rem',padding:'2rem 1rem'}}>Load models to explore</div>`}
         ${viewMode==='tree' && s.models.filter(function(m){return m.visible!==false}).map(function(model){
           var mKey = 'm_'+model.id;
@@ -4935,7 +5019,7 @@ function startApp() {
           var storeyKeys = Object.keys(storeyGroups).sort();
           var q = treeSearch.toLowerCase();
           return html`<div key=${model.id}>
-            <div onClick=${function(){toggle(mKey);}} style=${{padding:'.3rem .5rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.3rem',background:mOpen?'var(--bg-secondary)':'transparent',borderBottom:'1px solid var(--border-subtle)'}}>
+            <div data-tree-key=${mKey} class=${explorerFocus===mKey?'cc-tree-focus':''} onClick=${function(){toggle(mKey);setExplorerFocus(mKey);}} style=${{padding:'.3rem .5rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.3rem',background:explorerFocus===mKey?'rgba(37,99,235,.15)':mOpen?'var(--bg-secondary)':'transparent',borderBottom:'1px solid var(--border-subtle)',outline:explorerFocus===mKey?'1px solid rgba(59,130,246,.5)':'none'}}>
               <span style=${{color:'var(--text-faint)',fontSize:'.5rem'}}>${mOpen?'▼':'▶'}</span>
               <span style=${{width:8,height:8,borderRadius:'50%',background:disc?disc.c:'var(--text-muted)',flexShrink:0}}></span>
               <span style=${{color:'var(--text-primary)',fontWeight:500,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${model.name}</span>
@@ -4949,7 +5033,7 @@ function startApp() {
                 var filtered = q ? els.filter(function(el){var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1||String(el.expressId).indexOf(q)!==-1;}) : els;
                 if(q && filtered.length===0) return null;
                 return html`<div key=${st}>
-                  <div onClick=${function(){toggle(sKey);}} style=${{padding:'.2rem .4rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',borderBottom:'1px solid var(--border-subtle)'}}>
+                  <div data-tree-key=${sKey} class=${explorerFocus===sKey?'cc-tree-focus':''} onClick=${function(){toggle(sKey);setExplorerFocus(sKey);}} style=${{padding:'.2rem .4rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===sKey?'rgba(37,99,235,.15)':'transparent',outline:explorerFocus===sKey?'1px solid rgba(59,130,246,.5)':'none'}}>
                     <span style=${{color:'var(--text-faint)',fontSize:'.45rem'}}>${sOpen?'▼':'▶'}</span>
                     <span style=${{color:'#34d399',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title=${st}>${st}</span>
                     <span style=${{color:'var(--text-faint)'}}>${filtered.length}</span>
@@ -4957,10 +5041,11 @@ function startApp() {
                   ${sOpen && html`<div style=${{paddingLeft:'.4rem'}}>
                     ${filtered.slice(0,200).map(function(el){
                       var p=el.props||{};
-                      return html`<div key=${el.expressId}
-                        onClick=${function(){if(_highlightById)_highlightById(el.expressId,false);}}
+                      var eKey='e_'+el.expressId;
+                      return html`<div key=${el.expressId} data-tree-key=${eKey} class=${explorerFocus===eKey?'cc-tree-focus':''}
+                        onClick=${function(){if(_highlightById)_highlightById(el.expressId,false);setExplorerFocus(eKey);}}
                         onDblClick=${function(e){e.stopPropagation();if(_fitToElement){var isFloor=(p.ifcType||'').match(/slab|floor/i);_fitToElement(el.expressId,isFloor?{normal:[0,1,0]}:null);}if(_highlightById)_highlightById(el.expressId);}}
-                        style=${{padding:'.15rem .3rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.2rem',borderBottom:'1px solid var(--border-subtle)'}}>
+                        style=${{padding:'.15rem .3rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.2rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===eKey?'rgba(37,99,235,.15)':'transparent',outline:explorerFocus===eKey?'1px solid rgba(59,130,246,.5)':'none'}}>
                         <span style=${{color:'#c084fc',flexShrink:0}}>${p.ifcType||'Element'}</span>
                         <span style=${{color:'var(--text-secondary)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${p.name||'#'+el.expressId}</span>
                       </div>`;
@@ -4970,7 +5055,7 @@ function startApp() {
                 </div>`;
               })}
               ${noStorey.length>0 && html`<div>
-                <div onClick=${function(){toggle('s_'+model.id+'_none');}} style=${{padding:'.2rem .4rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',borderBottom:'1px solid var(--border-subtle)',fontStyle:'italic'}}>
+                <div data-tree-key=${'s_'+model.id+'_none'} class=${explorerFocus==='s_'+model.id+'_none'?'cc-tree-focus':''} onClick=${function(){toggle('s_'+model.id+'_none');setExplorerFocus('s_'+model.id+'_none');}} style=${{padding:'.2rem .4rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',borderBottom:'1px solid var(--border-subtle)',fontStyle:'italic',background:explorerFocus==='s_'+model.id+'_none'?'rgba(37,99,235,.15)':'transparent',outline:explorerFocus==='s_'+model.id+'_none'?'1px solid rgba(59,130,246,.5)':'none'}}>
                   <span style=${{color:'var(--text-faint)',fontSize:'.45rem'}}>${expanded['s_'+model.id+'_none']?'▼':'▶'}</span>
                   <span style=${{color:'var(--text-muted)',flex:1}}>(No storey)</span>
                   <span style=${{color:'var(--text-faint)'}}>${noStorey.length}</span>
@@ -4978,10 +5063,11 @@ function startApp() {
                 ${expanded['s_'+model.id+'_none'] && html`<div style=${{paddingLeft:'.4rem'}}>
                   ${noStorey.filter(function(el){if(!q)return true;var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1;}).slice(0,100).map(function(el){
                     var p=el.props||{};
-                    return html`<div key=${el.expressId}
-                      onClick=${function(){if(_highlightById)_highlightById(el.expressId,false);}}
+                    var eKey2='e_'+el.expressId;
+                    return html`<div key=${el.expressId} data-tree-key=${eKey2} class=${explorerFocus===eKey2?'cc-tree-focus':''}
+                      onClick=${function(){if(_highlightById)_highlightById(el.expressId,false);setExplorerFocus(eKey2);}}
                       onDblClick=${function(e){e.stopPropagation();if(_fitToElement){var isFloor=(p.ifcType||'').match(/slab|floor/i);_fitToElement(el.expressId,isFloor?{normal:[0,1,0]}:null);}if(_highlightById)_highlightById(el.expressId);}}
-                      style=${{padding:'.15rem .3rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.2rem',borderBottom:'1px solid var(--border-subtle)'}}>
+                      style=${{padding:'.15rem .3rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.2rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===eKey2?'rgba(37,99,235,.15)':'transparent',outline:explorerFocus===eKey2?'1px solid rgba(59,130,246,.5)':'none'}}>
                       <span style=${{color:'#c084fc',flexShrink:0}}>${p.ifcType||'Element'}</span>
                       <span style=${{color:'var(--text-secondary)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${p.name||'#'+el.expressId}</span>
                     </div>`;
@@ -8457,6 +8543,11 @@ function startApp() {
         setShow(false);
       }, 200);
     }
+    useEffect(function(){
+      function onKey(e){if(e.key==='Escape') dismiss();}
+      window.addEventListener('keydown', onKey);
+      return function(){window.removeEventListener('keydown', onKey);};
+    },[]);
     function openBridge() { dismiss(); setTimeout(function(){ d({t:'REVIT_BRIDGE',v:true}); },250); }
 
     var cardBg = 'var(--card-bg)';
@@ -8611,6 +8702,65 @@ function startApp() {
         _cc2DOutlines = null;
       }
     }, [s.underlayMode, s.floorPlan, s.models]);
+
+    // ── Global Keyboard Shortcuts ──
+    useEffect(function(){
+      function gk(e){
+        var tag=e.target.tagName;
+        var inInput = tag==='INPUT'||tag==='TEXTAREA'||tag==='SELECT'||e.target.contentEditable==='true';
+        var ctrl = e.ctrlKey||e.metaKey;
+
+        // Ctrl+O — Open IFC file
+        if(ctrl && e.key==='o'){ e.preventDefault(); if(window._ccOpenIFC)window._ccOpenIFC(); return; }
+        // Ctrl+, — Open settings
+        if(ctrl && e.key===','){ e.preventDefault(); d({t:'SETTINGS',v:!s.showSettings}); return; }
+        // Ctrl+/ — AI assistant (handled by NLCommandPanel, but ensure it works)
+        // Escape — Close modals/popups in priority order
+        if(e.key==='Escape'){
+          if(s.showSettings){ d({t:'SETTINGS',v:false}); return; }
+          if(s.showModal){ d({t:'MODAL',v:false}); return; }
+          if(s.showRevitBridge){ d({t:'REVIT_BRIDGE',v:false}); return; }
+          // Let other Escape handlers (VirtualList, NLCommandPanel) handle the rest
+        }
+
+        // Skip remaining shortcuts if typing in an input
+        if(inInput) return;
+
+        // Tab switching: 1/2/3 for Clashes/Issues/Explorer (no modifier)
+        if(!ctrl && !e.altKey && !e.shiftKey){
+          if(e.key==='1'){ d({t:'TAB',v:'clashes'}); return; }
+          if(e.key==='2'){ d({t:'TAB',v:'issues'}); return; }
+          if(e.key==='3'){ d({t:'TAB',v:'explorer'}); return; }
+        }
+
+        // H — Home / reset view
+        if(e.key==='h'&&!ctrl){ if(_resetView)_resetView(); if(s.floorPlan)d({t:'FLOOR_PLAN',v:null}); return; }
+        // M — Toggle measure mode
+        if(e.key==='m'&&!ctrl){ d({t:'MEASURE_MODE',v:s.measureMode?null:'length'}); return; }
+        // L/A/R — Measure length/angle/area (only when measure mode is active)
+        if(s.measureMode){
+          if(e.key==='l'){d({t:'MEASURE_MODE',v:'length'});return;}
+          if(e.key==='a'){d({t:'MEASURE_MODE',v:'angle'});return;}
+          if(e.key==='r'){d({t:'MEASURE_MODE',v:'area'});return;}
+        }
+        // F — Toggle finder search
+        if(e.key==='f'&&!ctrl){ if(window._ccToggleFinder) window._ccToggleFinder(); return; }
+        // V — Save viewpoint
+        if(e.key==='v'&&!ctrl){ if(_captureViewpoint){var vp=_captureViewpoint('Viewpoint '+(s.viewpoints.length+1));d({t:'ADD_VIEWPOINT',v:vp});} return; }
+        // X/Y/Z — Section planes
+        if(e.key==='x'&&!ctrl){ d({t:'SECTION',axis:s.sectionAxis==='x'?null:'x'}); return; }
+        if(e.key==='y'&&!ctrl){ d({t:'SECTION',axis:s.sectionAxis==='y'?null:'y'}); return; }
+        if(e.key==='z'&&!ctrl){ d({t:'SECTION',axis:s.sectionAxis==='z'?null:'z'}); return; }
+        // G — Toggle grid
+        if(e.key==='g'&&!ctrl){ d({t:'PREF',k:'showGrid',v:!(s.prefs.showGrid!==false)}); return; }
+        // Delete — Delete active measurement or viewpoint (when none selected in clash list)
+        if(e.key==='Delete'&&!s.activeId){
+          if(s.measurements.length>0){d({t:'DEL_MEASUREMENT',id:s.measurements[s.measurements.length-1].id});return;}
+        }
+      }
+      window.addEventListener('keydown', gk);
+      return function(){window.removeEventListener('keydown', gk);};
+    },[s.showSettings, s.showModal, s.showRevitBridge, s.measureMode, s.sectionAxis, s.prefs.showGrid, s.viewpoints.length, s.measurements, s.activeId, s.floorPlan]);
 
     var is2D = s.underlayMode === 'view2d' || s.underlayMode === 'compare';
     return html`<div style=${{height:'100vh',display:'flex',flexDirection:'row',overflow:'hidden'}}>
