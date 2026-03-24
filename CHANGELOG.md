@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.2.66 (2026-03-24)
+- Fix clash marker positioning: use actual triangle intersection point
+
+## v1.2.65 (2026-03-24)
+- Add IFC type exclusion to clash detection setup card
+
+## v1.2.64 (2026-03-24)
+- Bring camera closer to model on initial load and reset view
+
+## v1.2.63 (2026-03-24)
+- Keep project panel open on delete/cancel, reset view on project switch
+
+## v1.2.62 (2026-03-24)
+- Add green 3D markers for issues in the viewer
+
 ## v1.2.61 (2026-03-24)
 - Add clash detection setup card and fix marker positioning
 

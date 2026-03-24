@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.61',hash:'3505082',date:'2026-03-24T07:11:59Z'};
+  var CC_VERSION = {v:'1.2.66',hash:'05d5ab0',date:'2026-03-24T07:43:54Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -251,7 +251,7 @@ function startApp() {
   };
   var INIT = {
     models:[], clashes:[], issues:[], activeId:null, showModal:false, showSettings:false, modalElement:null, tab:null,
-    rules:{ modelA:'all', modelB:'all', hard:true, soft:false, clearance:50, hardTolerance:0, duplicates:false, changeAware:false, excludeSelf:false },
+    rules:{ modelA:'all', modelB:'all', hard:true, soft:false, clearance:50, hardTolerance:0, duplicates:false, changeAware:false, excludeSelf:false, excludeTypes:[] },
     clashGroupBy:'none', // 'none','storey','discipline','status','type'
     detecting:false, switchingProject:false, sectionAxis:null, sectionPos:0.5, sectionCustom:null,
     sectionBox:null, // {enabled, min:[x,y,z], max:[x,y,z]} – 6-plane box clipping
@@ -1145,30 +1145,38 @@ function startApp() {
     // L2: AABB overlap check — prune entire subtree if boxes miss
     if (nA.mnx>nB.mxx||nA.mxx<nB.mnx||
         nA.mny>nB.mxy||nA.mxy<nB.mny||
-        nA.mnz>nB.mxz||nA.mxz<nB.mnz) return false;
+        nA.mnz>nB.mxz||nA.mxz<nB.mnz) return null;
     var aLeaf = nA.lo !== undefined;
     var bLeaf = nB.lo !== undefined;
     if (aLeaf && bLeaf) {
       // L3: Möller tri-tri on every pair in these two leaves
       for (var i=nA.lo; i<nA.hi; i++)
         for (var j=nB.lo; j<nB.hi; j++)
-          if (_triTriTest(trisA, nA.idx[i]*9, trisB, nB.idx[j]*9)) return true;
-      return false;
+          if (_triTriTest(trisA, nA.idx[i]*9, trisB, nB.idx[j]*9)) {
+            // Return midpoint of the two intersecting triangles' centroids
+            var oi=nA.idx[i]*9, oj=nB.idx[j]*9;
+            return [(trisA[oi]+trisA[oi+3]+trisA[oi+6]+trisB[oj]+trisB[oj+3]+trisB[oj+6])/6,
+                    (trisA[oi+1]+trisA[oi+4]+trisA[oi+7]+trisB[oj+1]+trisB[oj+4]+trisB[oj+7])/6,
+                    (trisA[oi+2]+trisA[oi+5]+trisA[oi+8]+trisB[oj+2]+trisB[oj+5]+trisB[oj+8])/6];
+          }
+      return null;
     }
     // Descend into the node with more triangles (maximises early rejection)
+    var r;
     if (bLeaf || (!aLeaf && (nA.cnt||1) >= (nB.cnt||1))) {
-      return _bvhTraverse(nA.left, trisA, nB, trisB) ||
-             _bvhTraverse(nA.right, trisA, nB, trisB);
+      r = _bvhTraverse(nA.left, trisA, nB, trisB);
+      return r || _bvhTraverse(nA.right, trisA, nB, trisB);
     }
-    return _bvhTraverse(nA, trisA, nB.left, trisB) ||
-           _bvhTraverse(nA, trisA, nB.right, trisB);
+    r = _bvhTraverse(nA, trisA, nB.left, trisB);
+    return r || _bvhTraverse(nA, trisA, nB.right, trisB);
   }
 
   // Check if two elements' triangles physically intersect (hard clash)
+  // Returns [x,y,z] contact point or false
   function _meshesIntersect(elA, elB) {
     var bA = _getBVH(elA), bB = _getBVH(elB);
     if (!bA || !bB) return false;
-    return _bvhTraverse(bA.root, bA.tris, bB.root, bB.tris);
+    return _bvhTraverse(bA.root, bA.tris, bB.root, bB.tris) || false;
   }
 
   // ── Spatial hash for vertex distance (used for soft/clearance clashes) ──
@@ -1244,11 +1252,14 @@ function startApp() {
     grpB.forEach(function(m){ inB[m.id]=true; });
 
     // Collect unique elements across all relevant models (no duplicates)
+    var exTypes = rules.excludeTypes&&rules.excludeTypes.length ? rules.excludeTypes : null;
     var seenModels = {}, items = [];
     grpA.concat(grpB).forEach(function(m) {
       if (seenModels[m.id]) return; seenModels[m.id]=true;
       (m.elements||[]).forEach(function(el) {
-        if (el.box) items.push({el:el, m:m});
+        if (!el.box) return;
+        if (exTypes && el.props && exTypes.indexOf(el.props.ifcType)!==-1) return;
+        items.push({el:el, m:m});
       });
     });
     if (items.length < 2) return [];
@@ -1384,33 +1395,29 @@ function startApp() {
 
       // ── L1+L2: BVH dual-tree + Möller tri-tri ──────────────────
       // (SAP already guarantees AABB overlap — no redundant box check needed)
-      var isHard=false, isSoft=false, geoDist=Infinity;
-      if (rules.hard) isHard = _meshesIntersect(eA, eB);
-      if (!isHard && rules.soft && clearanceM>0) {
+      var hardPt=false, isSoft=false, geoDist=Infinity;
+      if (rules.hard) hardPt = _meshesIntersect(eA, eB);
+      if (!hardPt && rules.soft && clearanceM>0) {
         geoDist = _meshMinDist(eA, eB, clearanceM);
         isSoft = geoDist<=clearanceM;
       }
 
-      if (isHard || isSoft) {
-        // Clash point = center of AABB intersection region (where elements meet)
-        var ix0 = Math.max(bA.min.x,bB.min.x), iy0 = Math.max(bA.min.y,bB.min.y), iz0 = Math.max(bA.min.z,bB.min.z);
-        var ix1 = Math.min(bA.max.x,bB.max.x), iy1 = Math.min(bA.max.y,bB.max.y), iz1 = Math.min(bA.max.z,bB.max.z);
-        var hasOverlap = ix0<=ix1 && iy0<=iy1 && iz0<=iz1;
+      if (hardPt || isSoft) {
         var cpx, cpy, cpz;
-        if (hasOverlap) {
-          // Center of the overlap region — this is where the clash actually occurs
-          cpx=(ix0+ix1)/2; cpy=(iy0+iy1)/2; cpz=(iz0+iz1)/2;
+        if (hardPt) {
+          // Use actual triangle intersection point from BVH traversal
+          cpx=hardPt[0]; cpy=hardPt[1]; cpz=hardPt[2];
         } else {
-          // Soft clash with gap — midpoint between the two closest faces
+          // Soft clash — midpoint between the two elements' bbox centers
           var cA = bA.getCenter(_tmpCtrA), cB = bB.getCenter(_tmpCtrB);
           cpx=(cA.x+cB.x)/2; cpy=(cA.y+cB.y)/2; cpz=(cA.z+cB.z)/2;
         }
-        var dist = isHard ? 0 : Math.round(geoDist*1000);
+        var dist = hardPt ? 0 : Math.round(geoDist*1000);
         var pA=eA.props||{}, pB=eB.props||{};
         var tA=pA.ifcType||'Element', tB=pB.ifcType||'Element';
         var nA=pA.name||('#'+eA.expressId), nB=pB.name||('#'+eB.expressId);
         clashes.push({
-          id:uid(), source:'auto', type:isHard?'hard':'soft', status:'open',
+          id:uid(), source:'auto', type:hardPt?'hard':'soft', status:'open',
           title:sameModel?mA.name+' (self)':mA.discipline.toUpperCase()+' \u2194 '+mB.discipline.toUpperCase(),
           description:tA+': '+nA+' ('+mA.name+') vs '+tB+': '+nB+' ('+mB.name+')',
           modelAId:mA.id, modelBId:mB.id, elemA:eA.expressId, elemB:eB.expressId,
@@ -1964,7 +1971,7 @@ function startApp() {
         }
         var box=new THREE.Box3().setFromObject(S.mg);
         var sz=box.getSize(new THREE.Vector3()), ctr=box.getCenter(new THREE.Vector3());
-        var d=Math.max(sz.x,sz.y,sz.z)*1.5;
+        var d=Math.max(sz.x,sz.y,sz.z)*1.0;
         var endTarget = ctr;
         var endPos = new THREE.Vector3(ctr.x+d, ctr.y+d*0.6, ctr.z+d);
         _animateFly(endTarget, endPos);
@@ -3999,8 +4006,12 @@ function startApp() {
     d({t:'SWITCHING_PROJECT', v:true});
     // Save current project in background — don't block the switch on it
     _saveCurrentProjectData(s);
-    // Clear current scene immediately
+    // Clear current scene and markers immediately
     if(window._ccClearScene) window._ccClearScene();
+    if(window._ccRemoveActiveClashMarker) window._ccRemoveActiveClashMarker();
+    if(_clearClashMarkers) _clearClashMarkers();
+    if(_clearIssueMarkers) _clearIssueMarkers();
+    if(_resetView) _resetView();
     // Reset state to fresh (keep switchingProject:true while files load)
     d({t:'LOAD_PROJECT_STATE', data:{
       models:[], clashes:[], issues:[], activeId:null, detecting:false,
@@ -4055,7 +4066,6 @@ function startApp() {
       d({t:'SET_PROJECT_LIST', v:list});
       if(s.activeProject===id) _switchProject(list[0].id, s, d);
       setConfirmDelete(null);
-      setProjOpen(false);
     }
     function startRename(p) {
       setRenaming(p.id);
@@ -7354,9 +7364,17 @@ function startApp() {
   function ClashSetupCard(props) {
     var setup = props.setup, s = props.s, d = props.d, onRun = props.onRun, setMsgs = props.setMsgs, idx = props.idx;
     var init = setup.rules;
-    var st = useState(Object.assign({hard:true,soft:false,clearance:s.rules.clearance||50,hardTolerance:s.rules.hardTolerance||0,duplicates:false,excludeSelf:false},init));
+    var st = useState(Object.assign({hard:true,soft:false,clearance:s.rules.clearance||50,hardTolerance:s.rules.hardTolerance||0,duplicates:false,excludeSelf:false,excludeTypes:[]},init));
     var rules = st[0], setRules = st[1];
     var stRan = useState(false), ran = stRan[0], setRan = stRan[1];
+    var stExOpen = useState(false), exOpen = stExOpen[0], setExOpen = stExOpen[1];
+
+    // Collect all IFC types from loaded models
+    var allIfcTypes = useMemo(function(){
+      var types = {};
+      s.models.forEach(function(m){(m.elements||[]).forEach(function(el){if(el.props&&el.props.ifcType)types[el.props.ifcType]=true;});});
+      return Object.keys(types).sort();
+    },[s.models]);
 
     // Build model/discipline options for dropdowns
     var opts = [{id:'all',label:'All models'}];
@@ -7376,7 +7394,8 @@ function startApp() {
         var next=prev.slice();
         next[idx]={role:'assistant',text:'Running: '+nameA.label+' vs '+nameB.label
           +(rules.hard?' | hard':'')+(rules.soft?' | soft '+rules.clearance+'mm':'')
-          +(rules.duplicates?' | duplicates':'')+(rules.excludeSelf?' | cross-model only':'')+'…',ran:true};
+          +(rules.duplicates?' | duplicates':'')+(rules.excludeSelf?' | cross-model only':'')
+          +(rules.excludeTypes&&rules.excludeTypes.length?' | excl: '+rules.excludeTypes.join(', '):'')+'…',ran:true};
         return next;
       });
       onRun(rules);
@@ -7442,6 +7461,25 @@ function startApp() {
           onChange=${function(e){upd('hardTolerance',Math.max(0,parseInt(e.target.value)||0))}}
           style=${numSt} />
         <span style=${{fontSize:'.62rem',color:'var(--text-faint)'}}>mm</span>
+      </div>`}
+
+      ${allIfcTypes.length>0 && html`<div style=${{marginTop:'.45rem'}}>
+        <div onClick=${function(){setExOpen(!exOpen)}} style=${{fontSize:'.65rem',color:'var(--text-muted)',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',userSelect:'none'}}>
+          <span style=${{fontSize:'.5rem',transition:'transform .15s',transform:exOpen?'rotate(90deg)':'rotate(0)'}}>▶</span>
+          Exclude IFC types${rules.excludeTypes&&rules.excludeTypes.length?' ('+rules.excludeTypes.length+')':''}
+        </div>
+        ${exOpen && html`<div style=${{marginTop:'.3rem',maxHeight:120,overflowY:'auto',border:'1px solid var(--border)',borderRadius:5,background:'var(--input-bg)',padding:'.25rem'}}>
+          ${allIfcTypes.map(function(t){
+            var excluded = (rules.excludeTypes||[]).indexOf(t)!==-1;
+            return html`<label key=${t} style=${{display:'flex',alignItems:'center',gap:'.3rem',fontSize:'.62rem',color:excluded?'var(--text-faint)':'var(--text-secondary)',padding:'.1rem .2rem',cursor:'pointer'}}>
+              <input type="checkbox" checked=${!excluded} onChange=${function(){
+                var ex=rules.excludeTypes||[];
+                upd('excludeTypes',excluded?ex.filter(function(x){return x!==t}):ex.concat(t));
+              }} />
+              ${t}
+            </label>`;
+          })}
+        </div>`}
       </div>`}
 
       <div style=${{display:'flex',gap:'.4rem',marginTop:'.55rem',justifyContent:'flex-end'}}>
@@ -7585,6 +7623,24 @@ function startApp() {
       if (e.key === 'Escape') setOpen(false);
     }
 
+    // Resizable panel
+    var stW = useState(500), panelW = stW[0], setPanelW = stW[1];
+    var stH = useState(300), panelH = stH[0], setPanelH = stH[1];
+    var dragRef = useRef(null);
+    function onResizeStart(e, dir) {
+      e.preventDefault();
+      var startX = e.clientX, startY = e.clientY, startW = panelW, startH = panelH;
+      function onMove(ev) {
+        if (dir === 'w' || dir === 'nw' || dir === 'n') {
+          if (dir !== 'n') setPanelW(Math.max(320, Math.min(800, startW - 2*(ev.clientX - startX))));
+          if (dir !== 'w') setPanelH(Math.max(150, Math.min(600, startH - (ev.clientY - startY))));
+        }
+      }
+      function onUp() { document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    }
+
     var isDark = (s.prefs && s.prefs.theme) !== 'light';
     var panelBg  = 'var(--bg-secondary)';
     var borderCol = 'var(--border)';
@@ -7626,14 +7682,17 @@ function startApp() {
     var backendColor = backend === 'ollama' ? '#22c55e' : backend === 'browser' ? '#f59e0b' : mutedCol;
     return html`<div style=${{
       position:'fixed', bottom:'1rem', left:'50%', transform:'translateX(-50%)',
-      zIndex:1200, width:'min(500px, calc(100vw - 2rem))',
+      zIndex:1200, width:'min('+panelW+'px, calc(100vw - 2rem))',
       background:panelBg, border:'1px solid '+panelBorderCol,
       borderRadius:12, boxShadow:'var(--shadow-lg)',
       display:'flex', flexDirection:'column', overflow:'hidden',
       animation:panelAnimation
     }}>
+      <div onMouseDown=${function(e){onResizeStart(e,'n')}} style=${{
+        height:4, cursor:'ns-resize', flexShrink:0
+      }}></div>
       <div style=${{
-        display:'flex', alignItems:'center', padding:'.55rem .8rem',
+        display:'flex', alignItems:'center', padding:'0 .8rem .55rem',
         borderBottom:'1px solid '+borderCol, gap:'.5rem'
       }}>
         <svg width="13" height="13" viewBox="0 0 16 16" fill="none" style=${{flexShrink:0}}>
@@ -7677,7 +7736,7 @@ function startApp() {
       <div style=${{
         overflowY:'auto', padding:'.7rem .8rem',
         display:'flex', flexDirection:'column', gap:'.55rem',
-        maxHeight:300, minHeight:80
+        maxHeight:panelH, minHeight:80
       }}>
         ${msgs.map(function(m, i) {
           var isUser = m.role === 'user';
@@ -7750,7 +7809,7 @@ function startApp() {
       if(!list.length) list=[{id:'default',name:'Default Project',createdAt:Date.now()}];
       saveProjects(list); d({t:'SET_PROJECT_LIST',v:list});
       if(s.activeProject===id) _switchProject(list[0].id,s,d);
-      setConfirmDel(null); setProjOpen(false);
+      setConfirmDel(null);
     }
 
     function iconBtn(onClick, content, title) {
