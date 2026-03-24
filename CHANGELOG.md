@@ -1,5 +1,20 @@
 # Changelog
 
+## v2.0.11 (2026-03-24)
+- Add collapse button to clash/issue detail panel
+
+## v2.0.10 (2026-03-24)
+- Add spatial sort for clashes: floor-by-floor, element-by-element walkthrough
+
+## v2.0.9 (2026-03-24)
+- Per-group self-clash control, remove duplicate detecting bubble
+
+## v2.0.8 (2026-03-24)
+- Section box on selected element, filter IFC types by visible models, model delete confirmation, bump file size warning to 500MB
+
+## v2.0.7 (2026-03-24)
+- Improve IFC loading: fix WASM leak, material dedup, early model close, file size warning, cache GC, progress
+
 ## v2.0.6 (2026-03-24)
 - Add clash detection improvements: overlap volume gate, accurate depth, type-pair tolerances, saved presets
 
