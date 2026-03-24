@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.68',hash:'8a27fcf',date:'2026-03-24T08:11:22Z'};
+  var CC_VERSION = {v:'1.2.69',hash:'2b0170d',date:'2026-03-24T08:14:08Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -1074,6 +1074,7 @@ function startApp() {
     else proj=function(x,y,z){return z;};
 
     // Compute intervals on intersection line for each triangle
+    // Returns [projMin, projMax, 3D point at projMin, 3D point at projMax]
     function interval(v0x,v0y,v0z,v1x,v1y,v1z,v2x,v2y,v2z,dd0,dd1,dd2) {
       // Sort so dd0 is the lone vertex on its side
       var i0x,i0y,i0z,i1x,i1y,i1z,i2x,i2y,i2z,di0,di1,di2;
@@ -1081,13 +1082,27 @@ function startApp() {
       else if(dd0*dd2>0){i0x=v1x;i0y=v1y;i0z=v1z;i1x=v0x;i1y=v0y;i1z=v0z;i2x=v2x;i2y=v2y;i2z=v2z;di0=dd1;di1=dd0;di2=dd2;}
       else{i0x=v0x;i0y=v0y;i0z=v0z;i1x=v1x;i1y=v1y;i1z=v1z;i2x=v2x;i2y=v2y;i2z=v2z;di0=dd0;di1=dd1;di2=dd2;}
       var p0=proj(i0x,i0y,i0z), p1=proj(i1x,i1y,i1z), p2=proj(i2x,i2y,i2z);
-      var t1=p0+(p1-p0)*di0/(di0-di1);
-      var t2=p0+(p2-p0)*di0/(di0-di2);
-      return t1<t2?[t1,t2]:[t2,t1];
+      var r1=di0/(di0-di1), r2=di0/(di0-di2);
+      var t1=p0+(p1-p0)*r1;
+      var t2=p0+(p2-p0)*r2;
+      // 3D points where edges cross the other triangle's plane
+      var q1x=i0x+(i1x-i0x)*r1, q1y=i0y+(i1y-i0y)*r1, q1z=i0z+(i1z-i0z)*r1;
+      var q2x=i0x+(i2x-i0x)*r2, q2y=i0y+(i2y-i0y)*r2, q2z=i0z+(i2z-i0z)*r2;
+      return t1<t2?[t1,t2,q1x,q1y,q1z,q2x,q2y,q2z]:[t2,t1,q2x,q2y,q2z,q1x,q1y,q1z];
     }
     var iA=interval(a0x,a0y,a0z,a1x,a1y,a1z,a2x,a2y,a2z,da0,da1,da2);
     var iB=interval(b0x,b0y,b0z,b1x,b1y,b1z,b2x,b2y,b2z,db0,db1,db2);
-    return iA[0]<iB[1]&&iB[0]<iA[1]; // strict < to exclude edge-only touches
+    if(iA[0]>=iB[1]||iB[0]>=iA[1]) return null; // strict < to exclude edge-only touches
+    // Compute 3D midpoint of the overlap segment on the intersection line
+    var oMin=Math.max(iA[0],iB[0]), oMax=Math.min(iA[1],iB[1]);
+    // Lerp along the longer interval to get 3D points at oMin and oMax
+    var src=iA[1]-iA[0]>=iB[1]-iB[0]?iA:iB;
+    var len=src[1]-src[0];
+    if(len<1e-12) return [src[2],src[3],src[4]];
+    var rMin=(oMin-src[0])/len, rMax=(oMax-src[0])/len;
+    return [(src[2]+(src[5]-src[2])*rMin + src[2]+(src[5]-src[2])*rMax)/2,
+            (src[3]+(src[6]-src[3])*rMin + src[3]+(src[6]-src[3])*rMax)/2,
+            (src[4]+(src[7]-src[4])*rMin + src[4]+(src[7]-src[4])*rMax)/2];
   }
 
   // ── BVH (Bounding Volume Hierarchy) for triangles ───────────────
@@ -1153,18 +1168,10 @@ function startApp() {
     if (aLeaf && bLeaf) {
       // L3: Möller tri-tri on every pair in these two leaves
       for (var i=nA.lo; i<nA.hi && pts.length<maxPts; i++)
-        for (var j=nB.lo; j<nB.hi && pts.length<maxPts; j++)
-          if (_triTriTest(trisA, nA.idx[i]*9, trisB, nB.idx[j]*9)) {
-            // Compute AABB overlap center of the two intersecting triangles
-            var oi=nA.idx[i]*9, oj=nB.idx[j]*9;
-            var mnx=Math.max(Math.min(trisA[oi],trisA[oi+3],trisA[oi+6]), Math.min(trisB[oj],trisB[oj+3],trisB[oj+6]));
-            var mxx=Math.min(Math.max(trisA[oi],trisA[oi+3],trisA[oi+6]), Math.max(trisB[oj],trisB[oj+3],trisB[oj+6]));
-            var mny=Math.max(Math.min(trisA[oi+1],trisA[oi+4],trisA[oi+7]), Math.min(trisB[oj+1],trisB[oj+4],trisB[oj+7]));
-            var mxy=Math.min(Math.max(trisA[oi+1],trisA[oi+4],trisA[oi+7]), Math.max(trisB[oj+1],trisB[oj+4],trisB[oj+7]));
-            var mnz=Math.max(Math.min(trisA[oi+2],trisA[oi+5],trisA[oi+8]), Math.min(trisB[oj+2],trisB[oj+5],trisB[oj+8]));
-            var mxz=Math.min(Math.max(trisA[oi+2],trisA[oi+5],trisA[oi+8]), Math.max(trisB[oj+2],trisB[oj+5],trisB[oj+8]));
-            pts.push((mnx+mxx)/2, (mny+mxy)/2, (mnz+mxz)/2);
-          }
+        for (var j=nB.lo; j<nB.hi && pts.length<maxPts; j++) {
+          var cp = _triTriTest(trisA, nA.idx[i]*9, trisB, nB.idx[j]*9);
+          if (cp) { pts.push(cp[0], cp[1], cp[2]); }
+        }
       return;
     }
     // Descend into the node with more triangles (maximises early rejection)

@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.69 (2026-03-24)
+- Move info button from header to bottom of left sidebar
+
 ## v1.2.68 (2026-03-24)
 - Bump version for distance slider and clash detection fixes
 
