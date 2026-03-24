@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.16 (2026-03-24)
+- Split markers button into separate clash/issue toggles, remove from issues tab
+
 ## v2.0.15 (2026-03-24)
 - Persist model visibility on refresh, clear issue description box
 

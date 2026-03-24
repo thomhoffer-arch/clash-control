@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.15',hash:'f58c254',date:'2026-03-24T12:12:58Z'};
+  var CC_VERSION = {v:'2.0.16',hash:'4bd06d8',date:'2026-03-24T12:14:53Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -6111,9 +6111,52 @@ function startApp() {
 
     // Auto-scroll to active item when it changes (e.g. clicking a 3D marker)
     useEffect(function(){
-      if(!activeId||!scrollRef.current) return;
-      var row = scrollRef.current.querySelector('[data-item-id="'+activeId+'"]');
-      if(row) row.scrollIntoView({block:'nearest',behavior:'smooth'});
+      if(!activeId) return;
+      // If grouped, ensure the group containing the active item is expanded and visible
+      if(groups) {
+        var needUpdate = false;
+        for(var gi=0;gi<groups.length;gi++){
+          var g = groups[gi];
+          var posInGroup = -1;
+          for(var ii=0;ii<g.items.length;ii++){if(g.items[ii].id===activeId){posInGroup=ii;break;}}
+          if(posInGroup>=0){
+            if(collapsed[g.label]){
+              setCollapsed(function(prev){var n=Object.assign({},prev);delete n[g.label];return n;});
+              needUpdate = true;
+            }
+            var curLimit = groupLimits[g.label] || GROUP_PAGE_SIZE;
+            if(posInGroup >= curLimit){
+              var newLimit = Math.ceil((posInGroup+1)/GROUP_PAGE_SIZE)*GROUP_PAGE_SIZE;
+              setGroupLimits(function(prev){var n=Object.assign({},prev);n[g.label]=newLimit;return n;});
+              needUpdate = true;
+            }
+            break;
+          }
+        }
+        if(needUpdate){
+          // State will re-render, schedule scroll for after that render
+          setTimeout(function(){
+            if(!scrollRef.current) return;
+            var row = scrollRef.current.querySelector('[data-item-id="'+activeId+'"]');
+            if(row) row.scrollIntoView({block:'nearest',behavior:'smooth'});
+          }, 50);
+          return;
+        }
+      }
+      if(!scrollRef.current) return;
+      // For virtualized lists, the row may not be in DOM — scroll by index first
+      var idx = -1;
+      for(var i=0;i<items.length;i++){if(items[i].id===activeId){idx=i;break;}}
+      if(idx>=0 && items.length>50 && !groups) {
+        scrollRef.current.scrollTop = Math.max(0, idx * ROW_HEIGHT - scrollRef.current.clientHeight / 2);
+        setScrollTop(scrollRef.current.scrollTop);
+      }
+      // For grouped/small lists or after virtualized scroll, find the DOM row
+      requestAnimationFrame(function(){
+        if(!scrollRef.current) return;
+        var row = scrollRef.current.querySelector('[data-item-id="'+activeId+'"]');
+        if(row) row.scrollIntoView({block:'nearest',behavior:'smooth'});
+      });
     }, [activeId]);
 
     if(items.length===0) return html`<div style=${{flex:1,overflowY:'auto'}}>
@@ -6138,7 +6181,7 @@ function startApp() {
           return n;
         });
       }
-      return html`<div style=${{flex:1,overflowY:'auto'}}>
+      return html`<div ref=${scrollRef} style=${{flex:1,overflowY:'auto'}}>
         ${groups.map(function(g) {
           var isOpen = !collapsed[g.label];
           var statusColors = {open:'#ef4444',in_progress:'#f59e0b',resolved:'#22c55e',closed:'#64748b',hard:'#ef4444',soft:'#f59e0b',duplicate:'#8b5cf6'};
@@ -6164,7 +6207,7 @@ function startApp() {
       </div>`;
     }
     // For small lists, render all (no virtualization overhead)
-    if(items.length <= 50) return html`<div style=${{flex:1,overflowY:'auto'}}>
+    if(items.length <= 50) return html`<div ref=${scrollRef} style=${{flex:1,overflowY:'auto'}}>
       ${items.map(function(it){return html`<${IssueRow} key=${it.id} item=${it} active=${activeId===it.id} d=${d} isClash=${isClash} prefs=${prefs} models=${models} selectMode=${selectMode} isSelected=${!!selected[it.id]} />`})}
     </div>`;
     // Virtualized rendering for large lists
