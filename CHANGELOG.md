@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.36 (2026-03-24)
+- Add 'training mode' as a chat command in NL parser
+
 ## v2.0.35 (2026-03-24)
 - Solid nav cube faces, better contrast, fix mobile panel covering tabs
 
