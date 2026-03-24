@@ -240,7 +240,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.31',hash:'dca7ffd',date:'2026-03-24T20:32:29Z'};
+  var CC_VERSION = {v:'2.0.32',hash:'7c1663d',date:'2026-03-24T20:51:23Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -9470,7 +9470,7 @@ function startApp() {
     var d = props.d;
     var isDark = (props.theme||'dark')==='dark';
     var stShow = useState(function(){
-      try { return !localStorage.getItem('cc_welcomed'); } catch(e){ return true; }
+      try { return !sessionStorage.getItem('cc_session_seen'); } catch(e){ return true; }
     });
     var show = stShow[0], setShow = stShow[1];
     // Animate in
@@ -9479,7 +9479,7 @@ function startApp() {
     function dismiss() {
       setVis(false);
       setTimeout(function(){
-        try { localStorage.setItem('cc_welcomed','1'); } catch(e){}
+        try { sessionStorage.setItem('cc_session_seen','1'); } catch(e){}
         setShow(false);
       }, 200);
     }
@@ -9489,97 +9489,98 @@ function startApp() {
       window.addEventListener('keydown', onKey);
       return function(){window.removeEventListener('keydown', onKey);};
     },[show]);
-    function openBridge() { dismiss(); setTimeout(function(){ d({t:'REVIT_BRIDGE',v:true}); },250); }
     if (!show) return null;
 
     var cardBg = 'var(--card-bg)';
     var cardBorder = 'var(--card-border)';
-    var codeBg = 'var(--tag-bg)';
-    var CARD = {background:cardBg,border:'1px solid '+cardBorder,borderRadius:10,padding:'.65rem .75rem',display:'flex',gap:'.6rem',alignItems:'flex-start',cursor:'default',transition:'border-color .15s'};
-    var ICON_WRAP = {width:32,height:32,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0};
+    var CARD = {background:cardBg,border:'1px solid '+cardBorder,borderRadius:10,padding:'.65rem .75rem',display:'flex',gap:'.6rem',alignItems:'flex-start',cursor:'default'};
 
     return html`<div style=${{position:'fixed',inset:0,background:vis?'var(--modal-bg)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',zIndex:60,transition:'background .2s'}}
       onClick=${function(e){if(e.target===e.currentTarget)dismiss();}}>
-      <div style=${{background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:16,width:440,maxWidth:'92vw',boxShadow:'var(--shadow-lg)',overflow:'hidden',transform:vis?'translateY(0) scale(1)':'translateY(12px) scale(.97)',opacity:vis?1:0,transition:'transform .25s cubic-bezier(.16,1,.3,1), opacity .2s'}}>
+      <div style=${{background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:16,width:480,maxWidth:'92vw',boxShadow:'var(--shadow-lg)',overflow:'hidden',transform:vis?'translateY(0) scale(1)':'translateY(12px) scale(.97)',opacity:vis?1:0,transition:'transform .25s cubic-bezier(.16,1,.3,1), opacity .2s'}}>
 
         <!-- Header -->
-        <div style=${{background:'linear-gradient(135deg,#0f2744 0%,#1e3a5f 40%,#2563eb 100%)',padding:'1.4rem 1.4rem 1.2rem',position:'relative',overflow:'hidden'}}>
-          <div style=${{position:'absolute',top:'-30%',right:'-10%',width:180,height:180,borderRadius:'50%',background:'rgba(37,99,235,.2)',filter:'blur(40px)'}}></div>
+        <div style=${{background:'linear-gradient(135deg,#1a0533 0%,#3b1764 40%,#7c3aed 100%)',padding:'1.4rem 1.4rem 1.2rem',position:'relative',overflow:'hidden'}}>
+          <div style=${{position:'absolute',top:'-30%',right:'-10%',width:180,height:180,borderRadius:'50%',background:'rgba(124,58,237,.25)',filter:'blur(40px)'}}></div>
           <div style=${{display:'flex',alignItems:'center',gap:'.75rem',position:'relative'}}>
             <div style=${{width:42,height:42,background:'rgba(255,255,255,.12)',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,backdropFilter:'blur(8px)',border:'1px solid rgba(255,255,255,.1)'}}>
-              <span style=${{color:'#fff',fontWeight:900,fontSize:16}}>CC</span>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#e9d5ff" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93V12h3.5a2.25 2.25 0 0 1 0 4.5h-3.5v1.25A3.25 3.25 0 0 1 9.5 21 3.25 3.25 0 0 1 6.25 17.75V14.5h-1A2.25 2.25 0 0 1 3 12.25 2.25 2.25 0 0 1 5.25 10h3.5V9.93A4 4 0 0 1 12 2z"/>
+              </svg>
             </div>
             <div>
-              <div style=${{color:'#fff',fontWeight:700,fontSize:'1.05rem',letterSpacing:'-.01em'}}>Welcome to ClashControl</div>
-              <div style=${{color:'rgba(255,255,255,.6)',fontSize:'.65rem',marginTop:'.15rem'}}>Free, open-source BIM clash detection</div>
+              <div style=${{color:'#fff',fontWeight:700,fontSize:'1.05rem',letterSpacing:'-.01em'}}>Help Build the First Open-Source Clash AI</div>
+              <div style=${{color:'rgba(255,255,255,.6)',fontSize:'.65rem',marginTop:'.15rem'}}>ClashControl Training Mode</div>
             </div>
           </div>
         </div>
 
         <!-- Body -->
         <div style=${{padding:'1rem 1.3rem 1.2rem'}}>
-          <div style=${{fontSize:'.74rem',color:'var(--text-secondary)',lineHeight:1.6,marginBottom:'.85rem'}}>
-            Connect your own LLM to run clash checks with plain English and sync with Revit:
+          <div style=${{fontSize:'.76rem',color:'var(--text-secondary)',lineHeight:1.7,marginBottom:'.85rem'}}>
+            We're training an <strong style=${{color:'var(--text-primary)'}}>open-source AI model</strong> to automatically classify BIM clashes \u2014 making ClashControl the world's first AI-powered clash detection engine. Your expertise makes it possible.
           </div>
 
           <div style=${{display:'flex',flexDirection:'column',gap:'.5rem',marginBottom:'1rem'}}>
 
-            <!-- Option 1: Local -->
+            <!-- What is Training Mode -->
             <div style=${CARD}>
-              <div style=${{...ICON_WRAP,background:'var(--pill-green-bg)'}}>
+              <div style=${{width:32,height:32,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,background:'rgba(124,58,237,.15)'}}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M9 18l6-6-6-6"/>
+                </svg>
+              </div>
+              <div style=${{flex:1,minWidth:0}}>
+                <div style=${{fontSize:'.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.15rem'}}>How it works</div>
+                <div style=${{fontSize:'.63rem',color:'var(--text-secondary)',lineHeight:1.6}}>
+                  Enable <strong style=${{color:'#a78bfa'}}>Training Mode</strong> from the chat bar at the bottom or the button above the 3D view. Review clashes, confirm their type (hard/soft), select reasons, and add notes. This teaches the AI to think like you do.
+                </div>
+              </div>
+            </div>
+
+            <!-- What data is shared -->
+            <div style=${CARD}>
+              <div style=${{width:32,height:32,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,background:'rgba(34,197,94,.12)'}}>
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--pill-green)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/><rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
-                  <line x1="6" y1="6" x2="6.01" y2="6"/><line x1="6" y1="18" x2="6.01" y2="18"/>
-                </svg>
-              </div>
-              <div style=${{flex:1,minWidth:0}}>
-                <div style=${{fontSize:'.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.15rem'}}>Local AI <span style=${{fontSize:'.55rem',fontWeight:600,color:'var(--pill-green)',background:'var(--pill-green-bg)',padding:'1px 5px',borderRadius:99,marginLeft:'.3rem'}}>Free</span></div>
-                <div style=${{fontSize:'.63rem',color:'var(--text-secondary)',lineHeight:1.5}}>
-                  Install <a href="https://ollama.com" target="_blank" rel="noopener" style=${{color:'#60a5fa',textDecoration:'none',fontWeight:500}}>Ollama</a> and run:
-                  <code style=${{display:'inline-block',background:codeBg,padding:'1px 5px',borderRadius:4,fontSize:'.58rem',marginLeft:'.2rem',fontFamily:'monospace'}}>ollama pull qwen2.5:7b</code>
-                  <br/>Auto-detected when running. No data leaves your machine.
-                </div>
-              </div>
-            </div>
-
-            <!-- Option 2: Cloud -->
-            <div style=${CARD}>
-              <div style=${{...ICON_WRAP,background:'var(--pill-blue-bg)'}}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--pill-blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"/>
-                </svg>
-              </div>
-              <div style=${{flex:1,minWidth:0}}>
-                <div style=${{fontSize:'.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.15rem'}}>Cloud API <span style=${{fontSize:'.55rem',fontWeight:500,color:'var(--text-muted)'}}>Bring your own key</span></div>
-                <div style=${{fontSize:'.63rem',color:'var(--text-secondary)',lineHeight:1.5}}>
-                  Connect <strong style=${{color:'var(--text-primary)',fontWeight:500}}>Claude</strong>, <strong style=${{color:'var(--text-primary)',fontWeight:500}}>GPT-4o</strong>, or <strong style=${{color:'var(--text-primary)',fontWeight:500}}>Gemini</strong> via the
-                  <button onClick=${openBridge} style=${{background:'none',border:'none',color:'#60a5fa',cursor:'pointer',fontFamily:'inherit',fontSize:'.63rem',padding:0,fontWeight:600,textDecoration:'underline',textUnderlineOffset:2}}>Revit Bridge</button>
-                  panel. Enables AI-powered push/pull to Revit via MCP.
-                </div>
-              </div>
-            </div>
-
-            <!-- Option 3: No AI -->
-            <div style=${CARD}>
-              <div style=${{...ICON_WRAP,background:'var(--pill-amber-bg)'}}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--pill-amber)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                 </svg>
               </div>
               <div style=${{flex:1,minWidth:0}}>
-                <div style=${{fontSize:'.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.15rem'}}>No AI needed</div>
-                <div style=${{fontSize:'.63rem',color:'var(--text-secondary)',lineHeight:1.5}}>
-                  Everything works without AI — load IFC models, detect clashes, manage issues, and export BCF. All processing runs in your browser.
+                <div style=${{fontSize:'.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.15rem'}}>What data is shared <span style=${{fontSize:'.55rem',fontWeight:500,color:'var(--pill-green)'}}>Privacy-safe</span></div>
+                <div style=${{fontSize:'.63rem',color:'var(--text-secondary)',lineHeight:1.6}}>
+                  Only anonymous metadata: IFC element types (e.g. IfcWall, IfcBeam), disciplines, bounding box dimensions, penetration depth, overlap volume, and your verdicts/reasons. <strong style=${{color:'var(--text-primary)'}}>No</strong> element names, coordinates, project names, file names, GUIDs, or personal information. Ever.
+                </div>
+              </div>
+            </div>
+
+            <!-- How to share -->
+            <div style=${CARD}>
+              <div style=${{width:32,height:32,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,background:'rgba(37,99,235,.12)'}}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--pill-blue)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>
+                </svg>
+              </div>
+              <div style=${{flex:1,minWidth:0}}>
+                <div style=${{fontSize:'.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.15rem'}}>Sharing is manual & optional</div>
+                <div style=${{fontSize:'.63rem',color:'var(--text-secondary)',lineHeight:1.6}}>
+                  Nothing is sent automatically. When you're ready, open the <strong style=${{color:'var(--text-primary)'}}>Training</strong> tab in the side panel and click <em>Export</em> to download a JSON file or <em>Share</em> to submit anonymously. You decide when and if.
                 </div>
               </div>
             </div>
           </div>
 
+          <!-- GDPR notice -->
+          <div style=${{fontSize:'.54rem',color:'var(--text-faint)',lineHeight:1.6,marginBottom:'.9rem',padding:'.5rem .6rem',background:'var(--tag-bg)',borderRadius:6}}>
+            <strong style=${{color:'var(--text-muted)'}}>Data protection notice:</strong> Training data contains no personal data as defined under GDPR Art.\u00a04(1). Exported records consist exclusively of IFC schema type identifiers, anonymous geometric metrics, and user-provided classification labels. No IP addresses, device identifiers, cookies, or project-identifying information are collected or transmitted. Sharing is initiated solely by user action. You may review the full exported payload before submitting. ClashControl is open source \u2014 the export logic can be audited in the source code at any time.
+          </div>
+
           <!-- Footer actions -->
           <div style=${{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-            <span style=${{fontSize:'.58rem',color:'var(--text-muted)'}}>You can configure this anytime in Settings</span>
-            <button onClick=${dismiss} style=${{border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:8,padding:'.5rem 1.4rem',background:'var(--accent)',color:'#fff',fontWeight:600,boxShadow:'0 2px 8px rgba(37,99,235,.25)',transition:'background .15s'}}>
-              Get Started
+            <button onClick=${dismiss} style=${{border:'1px solid var(--border)',cursor:'pointer',fontFamily:'inherit',fontSize:'.7rem',borderRadius:8,padding:'.5rem 1rem',background:'none',color:'var(--text-secondary)',transition:'background .15s'}}>
+              Skip for now
+            </button>
+            <button onClick=${function(){dismiss();setTimeout(function(){d({t:'TRAINING_MODE'});},250);}} style=${{border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:8,padding:'.5rem 1.4rem',background:'#7c3aed',color:'#fff',fontWeight:600,boxShadow:'0 2px 8px rgba(124,58,237,.3)',transition:'background .15s'}}>
+              Enable Training Mode
             </button>
           </div>
         </div>

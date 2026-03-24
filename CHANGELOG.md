@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.32 (2026-03-24)
+- Remove compass labels, add training toggle to chatbox, add mobile responsive UI
+
 ## v2.0.31 (2026-03-24)
 - Move AI training annotations to a dedicated Training Mode tab
 
