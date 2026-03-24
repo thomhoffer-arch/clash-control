@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.75 (2026-03-24)
+- Color element outlines by model discipline (structural=blue, MEP=red, etc.)
+
 ## v1.2.74 (2026-03-24)
 - Fix soft clash marker position and remove penetration depth display
 

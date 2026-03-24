@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.74',hash:'4dabbc3',date:'2026-03-24T08:58:43Z'};
+  var CC_VERSION = {v:'1.2.75',hash:'09c13a2',date:'2026-03-24T08:59:33Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -1230,7 +1230,8 @@ function startApp() {
   };
 
   // Minimum vertex-to-vertex distance (for soft/clearance clashes)
-  // Returns distance, or if outPair is provided, also fills [qx,qy,qz,gx,gy,gz] with closest pair
+  // If outPair provided, fills [qx,qy,qz, gx,gy,gz] with the closest vertex pair
+  var _distPairTmp = [0,0,0,0,0,0]; // reusable scratch — zero alloc per call
   function _meshMinDist(elA, elB, thresholdM, outPair) {
     var vA = _getWorldVerts(elA), vB = _getWorldVerts(elB);
     if (!vA.length || !vB.length) return Infinity;
@@ -1242,10 +1243,10 @@ function startApp() {
     grid.insert(gridVerts);
     var tSq = thresholdM * thresholdM, minSq = Infinity;
     var step = queryVerts.length > 30000 ? 3 * Math.ceil(queryVerts.length / 30000) : 3;
-    var bestPair = outPair ? [0,0,0,0,0,0] : null;
+    var tmp = outPair ? _distPairTmp : null;
     for (var i = 0; i < queryVerts.length; i += step) {
-      var d2 = grid.minDistSq(queryVerts[i], queryVerts[i + 1], queryVerts[i + 2], gridVerts, bestPair);
-      if (d2 < minSq) { minSq = d2; if (outPair) { outPair[0]=bestPair[0]; outPair[1]=bestPair[1]; outPair[2]=bestPair[2]; outPair[3]=bestPair[3]; outPair[4]=bestPair[4]; outPair[5]=bestPair[5]; } if (minSq <= tSq && !outPair) return Math.sqrt(minSq); }
+      var d2 = grid.minDistSq(queryVerts[i], queryVerts[i + 1], queryVerts[i + 2], gridVerts, tmp);
+      if (d2 < minSq) { minSq = d2; if (tmp) { outPair[0]=tmp[0]; outPair[1]=tmp[1]; outPair[2]=tmp[2]; outPair[3]=tmp[3]; outPair[4]=tmp[4]; outPair[5]=tmp[5]; } if (minSq <= tSq && !outPair) return Math.sqrt(minSq); }
     }
     return Math.sqrt(minSq);
   }
@@ -1433,11 +1434,11 @@ function startApp() {
           // Use actual triangle intersection point from BVH traversal
           cpx=hardPt[0]; cpy=hardPt[1]; cpz=hardPt[2];
         } else {
-          // Soft clash — weighted point between closest vertices, biased toward smaller element
-          var sA = bA.getSize(_tmpCtrA), sB = bB.getSize(_tmpCtrB);
-          var volA = sA.x * sA.y * sA.z, volB = sB.x * sB.y * sB.z;
-          // Weight: smaller bbox pulls the marker closer (higher weight = closer to that side)
-          var wB = volA / (volA + volB + 1e-10); // wB→1 when A is big, so marker near B (the small one)
+          // Soft clash — place marker at closest vertex pair, biased toward smaller element
+          // Use AABB diagonal² as size proxy (avoids getSize allocation, single scalar per element)
+          var dA = bA.min.distanceToSquared(bA.max), dB = bB.min.distanceToSquared(bB.max);
+          // wB→1 when A is big → marker sits near B (the small one)
+          var wB = dA / (dA + dB + 1e-10);
           cpx=softPair[0]*(1-wB)+softPair[3]*wB; cpy=softPair[1]*(1-wB)+softPair[4]*wB; cpz=softPair[2]*(1-wB)+softPair[5]*wB;
         }
         // Penetration depth for hard clashes: min overlap of the two AABBs (stored as negative mm)
