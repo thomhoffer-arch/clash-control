@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.4',hash:'64b1733',date:'2026-03-24T10:36:04Z'};
+  var CC_VERSION = {v:'2.0.6',hash:'b58bb1d',date:'2026-03-24T11:09:44Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -251,7 +251,7 @@ function startApp() {
   };
   var INIT = {
     models:[], clashes:[], issues:[], activeId:null, showModal:false, showSettings:false, modalElement:null, tab:null,
-    rules:{ modelA:'all', modelB:'all', hard:true, maxGap:50, duplicates:false, changeAware:false, excludeSelf:true, excludeTypes:[] },
+    rules:{ modelA:'all', modelB:'all', hard:true, maxGap:50, duplicates:false, changeAware:false, excludeSelf:true, excludeTypes:[], minOverlapVolM3:1e-5, toleranceByTypePair:{} },
     clashGroupBy:'none', clashSortBy:'none',
     issueGroupBy:'none', issueSortBy:'none',
     detecting:false, switchingProject:false, sectionAxis:null, sectionPos:0.5, sectionCustom:null,
@@ -499,6 +499,36 @@ function startApp() {
         tx.onerror = function(e) { reject(e.target.error); };
       });
     }).catch(function(e) { console.warn('Failed to delete geo cache:', e); });
+  }
+
+  // Background cleanup: delete geo cache entries that don't belong to any project file
+  function _idbCleanOrphanedGeoCache() {
+    _openIDB().then(function(db) {
+      // Get all file IDs across all projects
+      return new Promise(function(resolve, reject) {
+        var tx = db.transaction(IDB_STORE, 'readonly');
+        var req = tx.objectStore(IDB_STORE).getAll();
+        req.onsuccess = function() { resolve((req.result||[]).map(function(f){ return f.id; })); };
+        req.onerror = function() { resolve([]); };
+      }).then(function(validIds) {
+        var validSet = {};
+        validIds.forEach(function(id){ validSet[id] = true; });
+        // Get all geo cache keys
+        return new Promise(function(resolve, reject) {
+          var tx2 = db.transaction(IDB_GEOCACHE, 'readonly');
+          var req2 = tx2.objectStore(IDB_GEOCACHE).getAllKeys();
+          req2.onsuccess = function() { resolve(req2.result||[]); };
+          req2.onerror = function() { resolve([]); };
+        }).then(function(cacheKeys) {
+          var orphans = cacheKeys.filter(function(k){ return !validSet[k]; });
+          if (!orphans.length) return;
+          var tx3 = db.transaction(IDB_GEOCACHE, 'readwrite');
+          var store = tx3.objectStore(IDB_GEOCACHE);
+          orphans.forEach(function(k){ store.delete(k); });
+          console.log('Cleaned ' + orphans.length + ' orphaned geo cache entries');
+        });
+      });
+    }).catch(function(e) { /* silent — cleanup is best-effort */ });
   }
 
   // Serialise a loadIFC result to plain objects/ArrayBuffers for IDB storage.
@@ -830,11 +860,13 @@ function startApp() {
   }
 
   // Pre-build property/quantity map: expressID -> {quantities, psets} (scans relations once)
-  function buildPropertyMap(api, modelID) {
+  function buildPropertyMap(api, modelID, onProgress) {
     var propMap = {}; // expressID -> {quantities:{}, psets:{}}
     try {
       var relIds = api.GetLineIDsWithType(modelID, IFC.IFCRELDEFINESBYPROPERTIES);
-      for (var i = 0; i < relIds.size(); i++) {
+      var total = relIds.size();
+      for (var i = 0; i < total; i++) {
+        if (onProgress && i % 500 === 0) onProgress('Reading properties (' + i + ' / ' + total + ')…');
         try {
           var rel = api.GetLine(modelID, relIds.get(i));
           var defId = rel.RelatingPropertyDefinition ? (rel.RelatingPropertyDefinition.value||rel.RelatingPropertyDefinition) : null;
@@ -910,7 +942,7 @@ function startApp() {
       var storeyMap = storeyResult.map;
       var storeyData = storeyResult.data;
       var matMap = buildMaterialMap(api, modelID);
-      var propMap = buildPropertyMap(api, modelID);
+      var propMap = buildPropertyMap(api, modelID, onProgress);
       var allStoreys = {};
       Object.keys(storeyMap).forEach(function(k){ allStoreys[storeyMap[k]] = true; });
 
@@ -919,13 +951,15 @@ function startApp() {
       // Collect raw mesh data first (StreamAllMeshes is synchronous, can't chunk it)
       var rawElements = [];
       var meshes = [];
+      var matCache = {}; // material dedup: "r,g,b,a" → MeshPhongMaterial
       api.StreamAllMeshes(modelID, function(ifcMesh) {
         var expressID = ifcMesh.expressID;
         var elMeshes = [], elBox = new THREE.Box3();
         for (var i = 0; i < ifcMesh.geometries.size(); i++) {
           var placed = ifcMesh.geometries.get(i);
+          var gd = null;
           try {
-            var gd = api.GetGeometry(modelID, placed.geometryExpressID);
+            gd = api.GetGeometry(modelID, placed.geometryExpressID);
             var verts = api.GetVertexArray(gd.GetVertexData(), gd.GetVertexDataSize());
             var indices = api.GetIndexArray(gd.GetIndexData(), gd.GetIndexDataSize());
             var pos = new Float32Array(verts.length/2), nrm = new Float32Array(verts.length/2);
@@ -940,24 +974,35 @@ function startApp() {
             geo.setIndex(new THREE.BufferAttribute(indices, 1));
             var c = placed.color;
             var col = c ? new THREE.Color(c.x, c.y, c.z) : new THREE.Color(fallbackColor);
-            var mat = new THREE.MeshPhongMaterial({ color:col, opacity:c?c.w:1, transparent:c?c.w<0.99:false, side:THREE.DoubleSide });
+            var matKey = (col.r).toFixed(3)+','+(col.g).toFixed(3)+','+(col.b).toFixed(3)+','+(c?c.w:1).toFixed(3);
+            var mat = matCache[matKey];
+            if (!mat) { mat = new THREE.MeshPhongMaterial({ color:col, opacity:c?c.w:1, transparent:c?c.w<0.99:false, side:THREE.DoubleSide }); matCache[matKey] = mat; }
             var mesh = new THREE.Mesh(geo, mat);
             mesh.applyMatrix4(new THREE.Matrix4().fromArray(placed.flatTransformation));
             mesh.userData.expressID = expressID;
             elBox.expandByObject(mesh);
             elMeshes.push(mesh); meshes.push(mesh);
-            gd.delete();
           } catch(e) { console.warn('Skipped element geometry #'+expressID+': '+(e.message||e)); }
+          finally { if (gd) try { gd.delete(); } catch(e2) {} }
         }
         if (elMeshes.length > 0) {
-          rawElements.push({expressId:expressID, meshes:elMeshes, box:elBox.clone()});
+          // Pre-extract properties while model is still open (avoids keeping WASM model alive during chunked processing)
+          var elProps = extractProperties(api, modelID, expressID);
+          elProps.storey = storeyMap[expressID] || '';
+          elProps.material = matMap[expressID] || '';
+          if (elProps.typeId && IFC_TYPE_NAMES[elProps.typeId]) elProps.ifcType = IFC_TYPE_NAMES[elProps.typeId];
+          var pm = propMap[expressID];
+          if (pm) { elProps.quantities = pm.quantities; elProps.psets = pm.psets; }
+          rawElements.push({expressId:expressID, meshes:elMeshes, box:elBox.clone(), props:elProps});
         }
       });
 
-      // Now enrich with properties using pre-built maps (fast lookups, no re-scanning)
-      if(onProgress) onProgress('Enriching ' + rawElements.length + ' elements…');
+      // Close WASM model immediately — all data is now in JavaScript memory
+      api.CloseModel(modelID);
 
-      // Process properties in chunks to keep the UI responsive
+      if(onProgress) onProgress('Processing ' + rawElements.length + ' elements…');
+
+      // Build final elements array in chunks to keep the UI responsive
       var elements = [];
       var CHUNK = 200;
       return new Promise(function(resolve) {
@@ -965,23 +1010,12 @@ function startApp() {
           var end = Math.min(startIdx + CHUNK, rawElements.length);
           for (var idx = startIdx; idx < end; idx++) {
             var raw = rawElements[idx];
-            var props = extractProperties(api, modelID, raw.expressId);
-            props.storey = storeyMap[raw.expressId] || '';
-            props.material = matMap[raw.expressId] || '';
-            if (props.typeId && IFC_TYPE_NAMES[props.typeId]) props.ifcType = IFC_TYPE_NAMES[props.typeId];
-            // Use pre-built property map instead of scanning all relations
-            var pm = propMap[raw.expressId];
-            if (pm) {
-              props.quantities = pm.quantities;
-              props.psets = pm.psets;
-            }
-            elements.push({expressId:raw.expressId, meshes:raw.meshes, box:raw.box, props:props});
+            elements.push({expressId:raw.expressId, meshes:raw.meshes, box:raw.box, props:raw.props});
           }
           if (end < rawElements.length) {
             if(onProgress) onProgress('Processing elements ' + end + '/' + rawElements.length + '…');
             setTimeout(function(){ processChunk(end); }, 0);
           } else {
-            api.CloseModel(modelID);
             var loadTime = Math.round(performance.now() - loadStart);
             resolve({ meshes:meshes, elements:elements, storeys:Object.keys(allStoreys).sort(), storeyData:storeyData, stats:{loadTime:loadTime, fileSize:buffer.byteLength, elementCount:elements.length, meshCount:meshes.length} });
           }
@@ -1142,11 +1176,15 @@ function startApp() {
     // Lerp along the longer interval to get 3D points at oMin and oMax
     var src=iA[1]-iA[0]>=iB[1]-iB[0]?iA:iB;
     var len=src[1]-src[0];
-    if(len<1e-12) return [src[2],src[3],src[4]];
+    if(len<1e-12) return [src[2],src[3],src[4],0];
     var rMin=(oMin-src[0])/len, rMax=(oMax-src[0])/len;
-    return [(src[2]+(src[5]-src[2])*rMin + src[2]+(src[5]-src[2])*rMax)/2,
-            (src[3]+(src[6]-src[3])*rMin + src[3]+(src[6]-src[3])*rMax)/2,
-            (src[4]+(src[7]-src[4])*rMin + src[4]+(src[7]-src[4])*rMax)/2];
+    // 3D endpoints of the overlap segment
+    var pMinX=src[2]+(src[5]-src[2])*rMin, pMinY=src[3]+(src[6]-src[3])*rMin, pMinZ=src[4]+(src[7]-src[4])*rMin;
+    var pMaxX=src[2]+(src[5]-src[2])*rMax, pMaxY=src[3]+(src[6]-src[3])*rMax, pMaxZ=src[4]+(src[7]-src[4])*rMax;
+    var sdx=pMaxX-pMinX, sdy=pMaxY-pMinY, sdz=pMaxZ-pMinZ;
+    // Return [midX, midY, midZ, segmentLength]
+    return [(pMinX+pMaxX)/2, (pMinY+pMaxY)/2, (pMinZ+pMaxZ)/2,
+            Math.sqrt(sdx*sdx+sdy*sdy+sdz*sdz)];
   }
 
   // ── BVH (Bounding Volume Hierarchy) for triangles ───────────────
@@ -1201,7 +1239,8 @@ function startApp() {
 
   // Dual-BVH traversal: L2 AABB check at every node, L3 Möller at leaves
   // Collects up to maxPts intersection points for accurate centroid placement
-  function _bvhTraverseAll(nA, trisA, nB, trisB, pts, maxPts) {
+  // maxDepth is a single-element array [0] that tracks the max intersection segment length
+  function _bvhTraverseAll(nA, trisA, nB, trisB, pts, maxPts, maxDepth) {
     if (pts.length >= maxPts) return;
     // L2: AABB overlap check — prune entire subtree if boxes miss
     if (nA.mnx>nB.mxx||nA.mxx<nB.mnx||
@@ -1214,27 +1253,27 @@ function startApp() {
       for (var i=nA.lo; i<nA.hi && pts.length<maxPts; i++)
         for (var j=nB.lo; j<nB.hi && pts.length<maxPts; j++) {
           var cp = _triTriTest(trisA, nA.idx[i]*9, trisB, nB.idx[j]*9);
-          if (cp) { pts.push(cp[0], cp[1], cp[2]); }
+          if (cp) { pts.push(cp[0], cp[1], cp[2]); if (cp[3] > maxDepth[0]) maxDepth[0] = cp[3]; }
         }
       return;
     }
     // Descend into the node with more triangles (maximises early rejection)
     if (bLeaf || (!aLeaf && (nA.cnt||1) >= (nB.cnt||1))) {
-      _bvhTraverseAll(nA.left, trisA, nB, trisB, pts, maxPts);
-      _bvhTraverseAll(nA.right, trisA, nB, trisB, pts, maxPts);
+      _bvhTraverseAll(nA.left, trisA, nB, trisB, pts, maxPts, maxDepth);
+      _bvhTraverseAll(nA.right, trisA, nB, trisB, pts, maxPts, maxDepth);
     } else {
-      _bvhTraverseAll(nA, trisA, nB.left, trisB, pts, maxPts);
-      _bvhTraverseAll(nA, trisA, nB.right, trisB, pts, maxPts);
+      _bvhTraverseAll(nA, trisA, nB.left, trisB, pts, maxPts, maxDepth);
+      _bvhTraverseAll(nA, trisA, nB.right, trisB, pts, maxPts, maxDepth);
     }
   }
 
   // Check if two elements' triangles physically intersect (hard clash)
-  // Returns [x,y,z] contact point or false
+  // Returns [x, y, z, depthM] contact point + mesh-accurate penetration depth, or false
   function _meshesIntersect(elA, elB) {
     var bA = _getBVH(elA), bB = _getBVH(elB);
     if (!bA || !bB) return false;
-    var pts = [];
-    _bvhTraverseAll(bA.root, bA.tris, bB.root, bB.tris, pts, 24);
+    var pts = [], maxDepth = [0];
+    _bvhTraverseAll(bA.root, bA.tris, bB.root, bB.tris, pts, 24, maxDepth);
     if (!pts.length) return false;
     // Validate: reject intersection points outside both elements' AABBs
     // (catches false positives from near-coplanar/degenerate triangles)
@@ -1256,7 +1295,7 @@ function startApp() {
     // Average validated intersection points for accurate centroid
     var sx=0, sy=0, sz=0, n=valid.length/3;
     for (var i=0; i<valid.length; i+=3) { sx+=valid[i]; sy+=valid[i+1]; sz+=valid[i+2]; }
-    return [sx/n, sy/n, sz/n];
+    return [sx/n, sy/n, sz/n, maxDepth[0]];
   }
 
   // ── Spatial hash for vertex distance (used for soft/clearance clashes) ──
@@ -1525,11 +1564,27 @@ function startApp() {
       }
 
       // ── L1+L2: BVH dual-tree + Möller tri-tri ──────────────────
+      // Per-type-pair tolerance: resolve effective gap for this pair
+      var pairGapM = maxGapM;
+      if (rules.toleranceByTypePair) {
+        var _pA2 = eA.props, _pB2 = eB.props;
+        if (_pA2 && _pB2 && _pA2.ifcType && _pB2.ifcType) {
+          var tpKey = _pA2.ifcType < _pB2.ifcType ? _pA2.ifcType+':'+_pB2.ifcType : _pB2.ifcType+':'+_pA2.ifcType;
+          if (rules.toleranceByTypePair[tpKey] !== undefined) pairGapM = rules.toleranceByTypePair[tpKey] / 1000;
+        }
+      }
       var hardPt=false, isSoft=false, geoDist=Infinity;
       if (rules.hard) hardPt = _meshesIntersect(eA, eB);
-      if (!hardPt && maxGapM>0) {
-        geoDist = _meshMinDist(eA, eB, maxGapM, _softPairBuf);
-        isSoft = geoDist<=maxGapM;
+      // Overlap volume gate: reject hard clashes with trivial AABB overlap (surface contact noise)
+      if (hardPt && rules.minOverlapVolM3 > 0) {
+        var ovx = Math.max(0, Math.min(bA.max.x,bB.max.x) - Math.max(bA.min.x,bB.min.x));
+        var ovy = Math.max(0, Math.min(bA.max.y,bB.max.y) - Math.max(bA.min.y,bB.min.y));
+        var ovz = Math.max(0, Math.min(bA.max.z,bB.max.z) - Math.max(bA.min.z,bB.min.z));
+        if (ovx * ovy * ovz < rules.minOverlapVolM3) hardPt = false;
+      }
+      if (!hardPt && pairGapM>0) {
+        geoDist = _meshMinDist(eA, eB, pairGapM, _softPairBuf);
+        isSoft = geoDist<=pairGapM;
       }
 
       if (hardPt || isSoft) {
@@ -1548,13 +1603,19 @@ function startApp() {
           cpy=_softPairBuf[1]*wA+_softPairBuf[4]*wB;
           cpz=_softPairBuf[2]*wA+_softPairBuf[5]*wB;
         }
-        // Penetration depth for hard clashes: min overlap of the two AABBs (stored as negative mm)
+        // Penetration depth for hard clashes: mesh-accurate from intersection segment length
+        // Falls back to AABB min-axis overlap if segment depth is zero (degenerate)
         var dist;
         if (hardPt) {
-          var ox = Math.min(bA.max.x, bB.max.x) - Math.max(bA.min.x, bB.min.x);
-          var oy = Math.min(bA.max.y, bB.max.y) - Math.max(bA.min.y, bB.min.y);
-          var oz = Math.min(bA.max.z, bB.max.z) - Math.max(bA.min.z, bB.min.z);
-          dist = -Math.max(1, Math.round(Math.min(ox, oy, oz) * 1000));
+          var meshDepthMm = Math.round(hardPt[3] * 1000);
+          if (meshDepthMm > 0) {
+            dist = -meshDepthMm;
+          } else {
+            var ox = Math.min(bA.max.x, bB.max.x) - Math.max(bA.min.x, bB.min.x);
+            var oy = Math.min(bA.max.y, bB.max.y) - Math.max(bA.min.y, bB.min.y);
+            var oz = Math.min(bA.max.z, bB.max.z) - Math.max(bA.min.z, bB.min.z);
+            dist = -Math.max(1, Math.round(Math.min(ox, oy, oz) * 1000));
+          }
         } else {
           dist = Math.round(geoDist*1000);
         }
@@ -4609,6 +4670,14 @@ function startApp() {
           return;
         }
         if (ext !== 'ifc') return;
+        // File size warning: >200 MB IFC files can exhaust browser memory
+        if (f.size > 200 * 1024 * 1024) {
+          var sizeMB = Math.round(f.size / (1024 * 1024));
+          if (!confirm(f.name + ' is ' + sizeMB + ' MB. Large IFC files may freeze or crash the tab. Continue?')) {
+            errors.push(f.name + ': Skipped (file too large)');
+            return;
+          }
+        }
         chain = chain.then(function() {
           setLoading(true);
           setLoadMsg(totalIfc > 1 ? f.name + ' (' + (doneIfc + 1) + '/' + totalIfc + ')…' : 'Loading ' + f.name + '…');
@@ -5258,11 +5327,22 @@ function startApp() {
     </div>`;
   }
 
+  // ── Clash Presets (localStorage) ────────────────────────────────
+  function _getClashPresets() {
+    try { return JSON.parse(localStorage.getItem('cc_clash_presets')||'[]'); } catch(e) { return []; }
+  }
+  function _saveClashPresets(list) {
+    try { localStorage.setItem('cc_clash_presets', JSON.stringify(list)); } catch(e) {}
+  }
+
   // ── Clash Rules Panel (Classical UI) ────────────────────────────
   function ClashRulesPanel(props) {
     var s = props.s, d = props.d;
     var rules = s.rules;
     var stExpanded = useState(false), expanded = stExpanded[0], setExpanded = stExpanded[1];
+    var stSavedPresets = useState(_getClashPresets), savedPresets = stSavedPresets[0], setSavedPresets = stSavedPresets[1];
+    var stSaveName = useState(''), saveName = stSaveName[0], setSaveName = stSaveName[1];
+    var stShowSave = useState(false), showSave = stShowSave[0], setShowSave = stShowSave[1];
     var models = s.models;
     var canRun = models.length > 0 && !s.detecting;
 
@@ -5319,6 +5399,50 @@ function startApp() {
             </button>`;
           })}
         </div>
+        ${(savedPresets.length>0||showSave) && html`<div style=${{marginTop:'.3rem',borderTop:'1px solid var(--border-subtle)',paddingTop:'.25rem'}}>
+          <div style=${{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'.2rem'}}>
+            <span style=${{fontSize:'.6rem',fontWeight:600,color:'var(--text-faint)',textTransform:'uppercase',letterSpacing:'.04em'}}>Saved</span>
+            <button onClick=${function(){setShowSave(!showSave);setSaveName('')}} style=${{...S_BTN,fontSize:'.5rem',padding:'0 4px',background:'none',color:'var(--text-faint)'}}>
+              ${showSave?'Cancel':'+ Save current'}
+            </button>
+          </div>
+          ${showSave && html`<div style=${{display:'flex',gap:'.2rem',marginBottom:'.2rem'}}>
+            <input type="text" value=${saveName} onInput=${function(e){setSaveName(e.target.value)}} placeholder="Preset name…"
+              style=${{...S_INPUT,fontSize:'.6rem',padding:'.15rem .3rem',flex:1}} onKeyDown=${function(e){
+                if(e.key==='Enter'&&saveName.trim()){
+                  var np={id:Date.now().toString(36),name:saveName.trim(),rules:Object.assign({},rules)};
+                  var list=savedPresets.concat([np]);_saveClashPresets(list);setSavedPresets(list);setShowSave(false);setSaveName('');
+                }
+              }} />
+            <button onClick=${function(){
+              if(!saveName.trim())return;
+              var np={id:Date.now().toString(36),name:saveName.trim(),rules:Object.assign({},rules)};
+              var list=savedPresets.concat([np]);_saveClashPresets(list);setSavedPresets(list);setShowSave(false);setSaveName('');
+            }} disabled=${!saveName.trim()} style=${{...S_BTN,fontSize:'.55rem',padding:'1px 6px',background:'var(--accent-bg)',color:'var(--accent-subtle)'}}>Save</button>
+          </div>`}
+          <div style=${{display:'flex',gap:'.2rem',flexWrap:'wrap'}}>
+            ${savedPresets.map(function(sp){
+              return html`<div key=${sp.id} style=${{display:'inline-flex',alignItems:'center',gap:'2px'}}>
+                <button onClick=${function(){d({t:'UPD_RULES',u:sp.rules})}} title=${'Load: '+sp.name}
+                  style=${{...S_BTN,fontSize:'.55rem',padding:'.15rem .35rem',background:'var(--bg-tertiary)',color:'var(--text-secondary)',borderRadius:'8px 0 0 8px'}}>
+                  ${sp.name}
+                </button>
+                <button onClick=${function(){
+                  if(!canRun)return;
+                  var merged=Object.assign({},s.rules,sp.rules);
+                  d({t:'UPD_RULES',u:sp.rules});d({t:'DETECTING'});d({t:'TAB',v:'clashes'});
+                  setTimeout(function(){d({t:'SET_CLASHES',v:detectClashes(s.models,merged)});},20);
+                }} disabled=${!canRun} title="Load & Run"
+                  style=${{...S_BTN,fontSize:'.55rem',padding:'.15rem .25rem',background:'var(--accent-bg)',color:'var(--accent-subtle)',borderRadius:'0',borderLeft:'1px solid var(--border-subtle)'}}>▶</button>
+                <button onClick=${function(){
+                  var list=savedPresets.filter(function(p){return p.id!==sp.id});
+                  _saveClashPresets(list);setSavedPresets(list);
+                }} title="Delete preset"
+                  style=${{...S_BTN,fontSize:'.5rem',padding:'.15rem .2rem',background:'none',color:'var(--text-faint)',borderRadius:'0 8px 8px 0',borderLeft:'1px solid var(--border-subtle)'}}>✕</button>
+              </div>`;
+            })}
+          </div>
+        </div>`}
       </div>
 
       <!-- Advanced Rules (expandable) -->
@@ -5352,6 +5476,52 @@ function startApp() {
             <span style=${{fontSize:'.65rem',color:'var(--accent-subtle)',fontWeight:600,minWidth:30,textAlign:'right'}}>${rules.maxGap||0}</span>
           </div>
         </div>
+        <div style=${{marginBottom:'.25rem'}}>
+          <span class="cc-tip cc-tip-delay" data-tip=${'Minimum AABB overlap volume to count as a hard clash. Filters flush-surface false positives. 0 = detect everything. Current: '+(rules.minOverlapVolM3*1e6).toFixed(0)+' cm³'} style=${{...FL,cursor:'help'}}>Min overlap volume (cm³)</span>
+          <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
+            <input type="range" min="0" max="200" step="1" value=${Math.round((rules.minOverlapVolM3||0)*1e6)}
+              onInput=${function(e){d({t:'UPD_RULES',u:{minOverlapVolM3:+e.target.value/1e6}})}}
+              style=${{flex:1,height:4}} />
+            <span style=${{fontSize:'.65rem',color:'var(--accent-subtle)',fontWeight:600,minWidth:30,textAlign:'right'}}>${Math.round((rules.minOverlapVolM3||0)*1e6)}</span>
+          </div>
+        </div>
+        ${function(){
+          var tpPairs = rules.toleranceByTypePair||{};
+          var tpKeys = Object.keys(tpPairs);
+          // Collect IFC types from loaded models for dropdowns
+          var ifcTypes = {};
+          models.forEach(function(m){ (m.elements||[]).forEach(function(el){ if(el.props&&el.props.ifcType) ifcTypes[el.props.ifcType]=true; }); });
+          var typeList = Object.keys(ifcTypes).sort();
+          return html`<div style=${{marginBottom:'.25rem'}}>
+            <span style=${{...FL,cursor:'help'}} class="cc-tip cc-tip-delay" data-tip="Override max gap per IFC type pair. Set 0 for hard-clash-only on that pair.">Type-pair tolerances</span>
+            ${tpKeys.length>0 && tpKeys.map(function(k){
+              return html`<div key=${k} style=${{display:'flex',alignItems:'center',gap:'.2rem',marginBottom:'.15rem'}}>
+                <span style=${{fontSize:'.58rem',color:'var(--text-secondary)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${k.replace(':',' ↔ ').replace(/Ifc/g,'')}</span>
+                <span style=${{fontSize:'.58rem',color:'var(--accent-subtle)',fontWeight:600}}>${tpPairs[k]}mm</span>
+                <button onClick=${function(){var u=Object.assign({},tpPairs);delete u[k];d({t:'UPD_RULES',u:{toleranceByTypePair:u}})}}
+                  style=${{...S_BTN,fontSize:'.5rem',padding:'0 3px',background:'none',color:'var(--text-faint)'}}>✕</button>
+              </div>`;
+            })}
+            ${typeList.length>=2 && function(){
+              var stTP=useState({a:typeList[0]||'',b:typeList[1]||'',mm:'50'});
+              var tp=stTP[0],setTP=stTP[1];
+              return html`<div style=${{display:'flex',gap:'.15rem',alignItems:'center',flexWrap:'wrap'}}>
+                <select value=${tp.a} onChange=${function(e){setTP(Object.assign({},tp,{a:e.target.value}))}}
+                  style=${{...S_INPUT,fontSize:'.55rem',padding:'1px 2px',flex:1,minWidth:60}}>${typeList.map(function(t){return html`<option key=${t} value=${t}>${t.replace('Ifc','')}</option>`})}</select>
+                <select value=${tp.b} onChange=${function(e){setTP(Object.assign({},tp,{b:e.target.value}))}}
+                  style=${{...S_INPUT,fontSize:'.55rem',padding:'1px 2px',flex:1,minWidth:60}}>${typeList.map(function(t){return html`<option key=${t} value=${t}>${t.replace('Ifc','')}</option>`})}</select>
+                <input type="number" value=${tp.mm} onInput=${function(e){setTP(Object.assign({},tp,{mm:e.target.value}))}}
+                  style=${{...S_INPUT,fontSize:'.55rem',padding:'1px 2px',width:35}} placeholder="mm" />
+                <button onClick=${function(){
+                  if(!tp.a||!tp.b||tp.a===tp.b) return;
+                  var key=tp.a<tp.b?tp.a+':'+tp.b:tp.b+':'+tp.a;
+                  var u=Object.assign({},tpPairs);u[key]=+tp.mm||0;
+                  d({t:'UPD_RULES',u:{toleranceByTypePair:u}});
+                }} style=${{...S_BTN,fontSize:'.55rem',padding:'1px 5px',background:'var(--accent-bg)',color:'var(--accent-subtle)'}}>Add</button>
+              </div>`;
+            }()}
+          </div>`;
+        }()}
         <div style=${TOGROW}>
           <span style=${{fontSize:'.68rem',color:'var(--text-primary)'}}>Duplicates</span>
           <${MiniToggle} on=${rules.duplicates} onToggle=${function(){d({t:'UPD_RULES',u:{duplicates:!rules.duplicates}})}} />
@@ -7697,6 +7867,61 @@ function startApp() {
     if (/cross[\s-]*(?:model\s+)?only|no\s+self[\s-]*clash|exclude\s+self|not?\s+with\s+itself/.test(text)) { d({t:'UPD_RULES',u:{excludeSelf:true}}); return 'Cross-model only — self-clashes excluded.'; }
     if (/(?:include|enable|allow)\s+self[\s-]*clash|self[\s-]*clash.*on/.test(text)) { d({t:'UPD_RULES',u:{excludeSelf:false}}); return 'Self-clashes included.'; }
 
+    // ── Overlap volume threshold ──────────────────────────────────
+    var ovMatch = text.match(/(?:min(?:imum)?\s+)?overlap\s+(?:volume?\s+)?(\d+(?:\.\d+)?)\s*(?:cm3|cm³)?/i);
+    if (!ovMatch) ovMatch = text.match(/overlap\s+(?:volume?\s+)?(?:to\s+|=\s*)?(\d+(?:\.\d+)?)\s*(?:cm3|cm³)?/i);
+    if (ovMatch) {
+      var cm3 = parseFloat(ovMatch[1]);
+      d({t:'UPD_RULES', u:{minOverlapVolM3:cm3/1e6}});
+      return 'Minimum overlap volume set to ' + cm3 + ' cm³. Re-run detection to apply.';
+    }
+
+    // ── Per-type-pair tolerance ───────────────────────────────────
+    var tpMatch = text.match(/(?:set\s+)?(\w+)\s+(\w+)\s+(?:clearance|tolerance|gap|distance)\s+(\d+)\s*mm/i);
+    if (tpMatch) {
+      // Fuzzy-match IFC types from loaded models
+      var _findType = function(hint) {
+        hint = hint.toLowerCase();
+        var all = [];
+        s.models.forEach(function(m){ (m.elements||[]).forEach(function(el){ if(el.props&&el.props.ifcType&&all.indexOf(el.props.ifcType)===-1) all.push(el.props.ifcType); }); });
+        return all.find(function(t){ return t.toLowerCase().indexOf(hint)!==-1; });
+      };
+      var ta = _findType(tpMatch[1]), tb = _findType(tpMatch[2]);
+      if (ta && tb && ta !== tb) {
+        var key = ta < tb ? ta+':'+tb : tb+':'+ta;
+        var tpObj = Object.assign({}, s.rules.toleranceByTypePair||{});
+        tpObj[key] = +tpMatch[3];
+        d({t:'UPD_RULES', u:{toleranceByTypePair:tpObj}});
+        return 'Set ' + ta.replace('Ifc','') + ' ↔ ' + tb.replace('Ifc','') + ' clearance to ' + tpMatch[3] + 'mm.';
+      }
+    }
+
+    // ── Presets (save/load) ───────────────────────────────────────
+    var savePresetMatch = text.match(/save\s+(?:preset|rules?|config)\s+(?:as\s+)?["""]?(.+?)["""]?\s*$/i);
+    if (savePresetMatch) {
+      var pName = savePresetMatch[1].trim();
+      var presets = _getClashPresets();
+      presets.push({id:Date.now().toString(36), name:pName, rules:Object.assign({},s.rules)});
+      _saveClashPresets(presets);
+      return 'Saved current rules as "' + pName + '".';
+    }
+    var runPresetMatch = text.match(/(?:run|load|use|apply)\s+(?:preset\s+)?["""]?(.+?)["""]?\s*$/i);
+    if (runPresetMatch && !/(?:run|start|do)\s+(?:it|the|detection|clash)/i.test(text)) {
+      var pHint = runPresetMatch[1].trim().toLowerCase();
+      var presets2 = _getClashPresets();
+      var found = presets2.find(function(p){ return p.name.toLowerCase() === pHint || p.name.toLowerCase().indexOf(pHint) !== -1; });
+      if (found) {
+        d({t:'UPD_RULES', u:found.rules});
+        if (/run/.test(text) && s.models.length && !s.detecting) {
+          var merged = Object.assign({}, s.rules, found.rules);
+          d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
+          setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, merged)}); }, 20);
+          return 'Running "' + found.name + '" preset…';
+        }
+        return 'Loaded preset "' + found.name + '". Say "run" to detect.';
+      }
+    }
+
     // ── Plain run ──────────────────────────────────────────────────
     if (/^(?:run|go|start|detect|execute|scan|proceed|re-?run|again)$/.test(text) ||
         /^(?:run|start|do|execute|re-?run)\s+(?:it|the\s+)?(?:detection|clashes?|check|scan|again)?$/.test(text) ||
@@ -8695,6 +8920,7 @@ function startApp() {
       if(window[key]) return;
       window[key] = true;
       _restoreProjectFilesGlobal(s.activeProject, d);
+      _idbCleanOrphanedGeoCache(); // background cleanup of orphaned cache entries
     },[]);
     // ── Listen for project-switch events (from project selector) ──
     useEffect(function(){
