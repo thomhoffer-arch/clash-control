@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.2 (2026-03-24)
+- Add comprehensive keyboard navigation throughout the app (v2.0.0)
+
 ## v2.0.1 (2026-03-24)
 - Fix clash merging, add keyboard nav, marker clicks, and title re-zoom
 

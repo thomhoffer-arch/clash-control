@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.1',hash:'6d8a37d',date:'2026-03-24T10:11:52Z'};
+  var CC_VERSION = {v:'2.0.2',hash:'c08a984',date:'2026-03-24T10:22:37Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -8703,7 +8703,8 @@ function startApp() {
       }
     }, [s.underlayMode, s.floorPlan, s.models]);
 
-    // ── Global Keyboard Shortcuts ──
+    // ── Global Keyboard Shortcuts (single keys + Revit-style two-key chords) ──
+    var _chordRef = useRef({key:null,timer:null});
     useEffect(function(){
       function gk(e){
         var tag=e.target.tagName;
@@ -8726,7 +8727,78 @@ function startApp() {
         // Skip remaining shortcuts if typing in an input
         if(inInput) return;
 
-        // Tab switching: 1/2/3 for Clashes/Issues/Explorer (no modifier)
+        // ── Two-key chord system (Revit-style) ──
+        var ch = _chordRef.current;
+        if(ch.key){
+          // Second key of chord
+          var chord = ch.key + e.key.toLowerCase();
+          clearTimeout(ch.timer);
+          ch.key=null; ch.timer=null;
+
+          // Helper: get expressIds from active clash/issue
+          function getActiveEids(){
+            var all=s.clashes.concat(s.issues);
+            var item=all.find(function(c){return c.id===s.activeId;});
+            if(!item) return null;
+            var ids=[];
+            if(item.elemA) ids.push(item.elemA);
+            if(item.elemB) ids.push(item.elemB);
+            return ids.length?ids:null;
+          }
+
+          // BX — Section box around selected/active elements
+          if(chord==='bx'){
+            var eids=getActiveEids();
+            if(eids&&_sboxAroundElements) _sboxAroundElements(eids);
+            else if(_getSectionBoxFromScene){var box=_getSectionBoxFromScene();if(box&&window._ccDispatch)window._ccDispatch({t:'SECTION_BOX',v:{enabled:true,min:[box.min.x,box.min.y,box.min.z],max:[box.max.x,box.max.y,box.max.z]}});}
+            return;
+          }
+          // SC — Cycle section plane (off → X → Y → Z → off)
+          if(chord==='sc'){
+            var next=s.sectionAxis===null?'x':s.sectionAxis==='x'?'y':s.sectionAxis==='y'?'z':null;
+            d({t:'SECTION',axis:next}); return;
+          }
+          // ZF — Zoom to fit (reset view)
+          if(chord==='zf'){ if(_resetView)_resetView(); if(s.floorPlan)d({t:'FLOOR_PLAN',v:null}); return; }
+          // ZA — Zoom to fit all (same as ZF, Revit alias)
+          if(chord==='za'){ if(_resetView)_resetView(); if(s.floorPlan)d({t:'FLOOR_PLAN',v:null}); return; }
+          // VV — Restore last viewpoint
+          if(chord==='vv'){
+            if(s.viewpoints.length>0&&_restoreViewpoint) _restoreViewpoint(s.viewpoints[s.viewpoints.length-1]);
+            return;
+          }
+          // VP — Save viewpoint (alias)
+          if(chord==='vp'){
+            if(_captureViewpoint){var vp=_captureViewpoint('Viewpoint '+(s.viewpoints.length+1));d({t:'ADD_VIEWPOINT',v:vp});}
+            return;
+          }
+          // DL — Toggle measure/distance length
+          if(chord==='dl'){ d({t:'MEASURE_MODE',v:s.measureMode==='length'?null:'length'}); return; }
+          // DA — Measure angle
+          if(chord==='da'){ d({t:'MEASURE_MODE',v:s.measureMode==='angle'?null:'angle'}); return; }
+          // CS — Clear section planes + section box
+          if(chord==='cs'){ d({t:'SECTION',axis:null}); d({t:'SECTION_BOX',v:null}); return; }
+          // WT — Toggle wireframe (render style)
+          if(chord==='wt'){ d({t:'PREF',k:'renderStyle',v:s.prefs.renderStyle==='wireframe'?'standard':'wireframe'}); return; }
+
+          // Chord not recognized — fall through (don't consume)
+          return;
+        }
+
+        // ── Start a chord if this is a chord-starter key ──
+        var k=e.key.toLowerCase();
+        var chordStarters = {b:1,s:1,z:1,v:1,d:1,c:1,w:1};
+        if(!ctrl && !e.altKey && !e.shiftKey && chordStarters[k]){
+          ch.key=k;
+          ch.timer=setTimeout(function(){
+            // Chord timed out — execute single-key fallback
+            var sk=ch.key; ch.key=null; ch.timer=null;
+            if(sk==='v'){ if(_captureViewpoint){var vp2=_captureViewpoint('Viewpoint '+(s.viewpoints.length+1));d({t:'ADD_VIEWPOINT',v:vp2});} }
+          }, 500);
+          return;
+        }
+
+        // ── Single-key shortcuts (non-chord keys) ──
         if(!ctrl && !e.altKey && !e.shiftKey){
           if(e.key==='1'){ d({t:'TAB',v:'clashes'}); return; }
           if(e.key==='2'){ d({t:'TAB',v:'issues'}); return; }
@@ -8745,12 +8817,9 @@ function startApp() {
         }
         // F — Toggle finder search
         if(e.key==='f'&&!ctrl){ if(window._ccToggleFinder) window._ccToggleFinder(); return; }
-        // V — Save viewpoint
-        if(e.key==='v'&&!ctrl){ if(_captureViewpoint){var vp=_captureViewpoint('Viewpoint '+(s.viewpoints.length+1));d({t:'ADD_VIEWPOINT',v:vp});} return; }
-        // X/Y/Z — Section planes
+        // X/Y/Z — Section planes (direct toggle)
         if(e.key==='x'&&!ctrl){ d({t:'SECTION',axis:s.sectionAxis==='x'?null:'x'}); return; }
         if(e.key==='y'&&!ctrl){ d({t:'SECTION',axis:s.sectionAxis==='y'?null:'y'}); return; }
-        if(e.key==='z'&&!ctrl){ d({t:'SECTION',axis:s.sectionAxis==='z'?null:'z'}); return; }
         // G — Toggle grid
         if(e.key==='g'&&!ctrl){ d({t:'PREF',k:'showGrid',v:!(s.prefs.showGrid!==false)}); return; }
         // Delete — Delete active measurement or viewpoint (when none selected in clash list)
@@ -8760,7 +8829,7 @@ function startApp() {
       }
       window.addEventListener('keydown', gk);
       return function(){window.removeEventListener('keydown', gk);};
-    },[s.showSettings, s.showModal, s.showRevitBridge, s.measureMode, s.sectionAxis, s.prefs.showGrid, s.viewpoints.length, s.measurements, s.activeId, s.floorPlan]);
+    },[s.showSettings, s.showModal, s.showRevitBridge, s.measureMode, s.sectionAxis, s.prefs.showGrid, s.prefs.renderStyle, s.viewpoints, s.measurements, s.activeId, s.floorPlan, s.clashes, s.issues]);
 
     var is2D = s.underlayMode === 'view2d' || s.underlayMode === 'compare';
     return html`<div style=${{height:'100vh',display:'flex',flexDirection:'row',overflow:'hidden'}}>
