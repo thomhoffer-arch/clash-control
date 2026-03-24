@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.81',hash:'a19647b',date:'2026-03-24T09:28:20Z'};
+  var CC_VERSION = {v:'1.2.89',hash:'ff76eac',date:'2026-03-24T09:48:08Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -251,8 +251,9 @@ function startApp() {
   };
   var INIT = {
     models:[], clashes:[], issues:[], activeId:null, showModal:false, showSettings:false, modalElement:null, tab:null,
-    rules:{ modelA:'all', modelB:'all', hard:true, maxGap:50, duplicates:false, changeAware:false, excludeSelf:false, excludeTypes:[] },
-    clashGroupBy:'none', // 'none','storey','discipline','status','type'
+    rules:{ modelA:'all', modelB:'all', hard:true, maxGap:50, duplicates:false, changeAware:false, excludeSelf:true, excludeTypes:[] },
+    clashGroupBy:'none', clashSortBy:'none',
+    issueGroupBy:'none', issueSortBy:'none',
     detecting:false, switchingProject:false, sectionAxis:null, sectionPos:0.5, sectionCustom:null,
     sectionBox:null, // {enabled, min:[x,y,z], max:[x,y,z]} – 6-plane box clipping
     filters:Object.assign({},INIT_FILTERS), floors:[],
@@ -338,6 +339,9 @@ function startApp() {
       case 'SET_PROJECT_LIST': return Object.assign({},s,{projectList:a.v});
       case 'LOAD_PROJECT_STATE': return Object.assign({},s,a.data);
       case 'CLASH_GROUP_BY': return Object.assign({},s,{clashGroupBy:a.v});
+      case 'CLASH_SORT_BY': return Object.assign({},s,{clashSortBy:a.v});
+      case 'ISSUE_GROUP_BY': return Object.assign({},s,{issueGroupBy:a.v});
+      case 'ISSUE_SORT_BY': return Object.assign({},s,{issueSortBy:a.v});
       // 2D Underlays
       case 'ADD_UNDERLAY':    return Object.assign({},s,{underlays:s.underlays.concat([a.v]),activeUnderlay:a.v.id});
       case 'DEL_UNDERLAY':    return Object.assign({},s,{underlays:s.underlays.filter(function(u){return u.id!==a.id}),activeUnderlay:s.activeUnderlay===a.id?null:s.activeUnderlay});
@@ -1387,8 +1391,9 @@ function startApp() {
 
         // Apply model rules
         if (sameModel) {
-          // Self-clash only valid if model is in both groups and not excluded
-          if (rules.excludeSelf || !inA[cur.m.id] || !inB[cur.m.id]) continue;
+          // Self-clash: skip if excluded, or if model isn't in any selected group
+          if (rules.excludeSelf) continue;
+          if (!inA[cur.m.id] && !inB[cur.m.id]) continue;
         } else {
           // Cross-model: one must be from A, the other from B
           if (!(inA[cur.m.id]&&inB[oth.m.id]) && !(inB[cur.m.id]&&inA[oth.m.id])) continue;
@@ -1402,7 +1407,7 @@ function startApp() {
             bC.min[axis3]-margin > bO.max[axis3]+margin) continue;
 
         // Emit with canonical A/B model ordering
-        if (inA[cur.m.id] && inB[oth.m.id]) {
+        if (sameModel || (inA[cur.m.id] && inB[oth.m.id])) {
           pairs.push({eA:cur.el, mA:cur.m, eB:oth.el, mB:oth.m, sameModel:sameModel});
         } else {
           pairs.push({eA:oth.el, mA:oth.m, eB:cur.el, mB:cur.m, sameModel:sameModel});
@@ -1575,7 +1580,68 @@ function startApp() {
     // Update element hashes for next change-aware run
     if (rules.changeAware) _prevElementHashes = newHashes;
 
-    return clashes;
+    // ── Merge related clashes (IFC segment grouping) ─────────────
+    // Multiple pipe/duct segments clashing with the same element get merged
+    // into a single clash. Only merges when clash points are nearby (<0.5m),
+    // ensuring segments from different pipe runs aren't incorrectly combined.
+    // This is purely additive — no detected clashes are removed, only grouped.
+    var merged = [];
+    var mergeMap = {}; // key → array of {idx, point}
+    clashes.forEach(function(c) {
+      // Try merging on side A (same elemA, group B-side segments)
+      var keyA = c.modelAId+':'+c.elemA+':'+c.modelBId+':'+c.elemBType;
+      // Try merging on side B (same elemB, group A-side segments)
+      var keyB = c.modelBId+':'+c.elemB+':'+c.modelAId+':'+c.elemAType;
+
+      // Find a nearby existing clash to merge with
+      var mergedIdx = null;
+      var mergedSide = null; // 'A' or 'B'
+      var MERGE_DIST_SQ = 0.05*0.05; // 50mm — only merge when clash points nearly overlap
+      [['A',keyA],['B',keyB]].forEach(function(pair) {
+        if (mergedIdx != null) return;
+        var candidates = mergeMap[pair[1]];
+        if (!candidates) return;
+        for (var k=0; k<candidates.length; k++) {
+          var ep = candidates[k].point;
+          var dx=c.point[0]-ep[0], dy=c.point[1]-ep[1], dz=c.point[2]-ep[2];
+          if (dx*dx+dy*dy+dz*dz < MERGE_DIST_SQ) {
+            mergedIdx = candidates[k].idx;
+            mergedSide = pair[0];
+            break;
+          }
+        }
+      });
+
+      if (mergedIdx != null) {
+        var exist = merged[mergedIdx];
+        if (!exist._groupedElems) exist._groupedElems = [];
+        if (mergedSide === 'A') {
+          if (exist._groupedElems.indexOf(c.elemB) === -1) exist._groupedElems.push(c.elemB);
+        } else {
+          if (exist._groupedElems.indexOf(c.elemA) === -1) exist._groupedElems.push(c.elemA);
+        }
+        exist.mergedCount = (exist.mergedCount||1) + 1;
+        if (c.distance < exist.distance) {
+          exist.distance = c.distance;
+          exist.point = c.point;
+        }
+      } else {
+        var newIdx = merged.length;
+        if (!mergeMap[keyA]) mergeMap[keyA] = [];
+        if (!mergeMap[keyB]) mergeMap[keyB] = [];
+        mergeMap[keyA].push({idx:newIdx, point:c.point});
+        mergeMap[keyB].push({idx:newIdx, point:c.point});
+        c.mergedCount = 1;
+        merged.push(c);
+      }
+    });
+    merged.forEach(function(c) {
+      if (c.mergedCount > 1) {
+        c.description += ' (+' + (c.mergedCount-1) + ' segments)';
+      }
+    });
+
+    return merged;
   }
 
   function deriveFloors(clashes) {
@@ -4201,16 +4267,19 @@ function startApp() {
     var rnv = useState(''), renameVal=rnv[0], setRenameVal=rnv[1];
     var cf = useState(null), confirmDelete=cf[0], setConfirmDelete=cf[1];
     var tut = useState(false), showTutorial=tut[0], setShowTutorial=tut[1];
+    var cr = useState(false), creating=cr[0], setCreating=cr[1];
+    var cnv = useState(''), createName=cnv[0], setCreateName=cnv[1];
     window._ccToggleTutorial = function(){ setShowTutorial(function(v){return !v;}); };
 
-    function createProject() {
-      var name = prompt('New project name:');
-      if(!name||!name.trim()) return;
+    function startCreate() { setCreating(true); setCreateName(''); }
+    function finishCreate() {
+      if(!createName.trim()) { setCreating(false); return; }
       var id = uid();
-      var list = getProjects().concat([{id:id, name:name.trim(), createdAt:Date.now()}]);
+      var list = getProjects().concat([{id:id, name:createName.trim(), createdAt:Date.now()}]);
       saveProjects(list);
       d({t:'SET_PROJECT_LIST', v:list});
       _switchProject(id, s, d);
+      setCreating(false);
       setProjOpen(false);
     }
     function switchTo(id) {
@@ -4225,8 +4294,9 @@ function startApp() {
       if(!list.length) { list = [{id:'default', name:'Default Project', createdAt:Date.now()}]; }
       saveProjects(list);
       d({t:'SET_PROJECT_LIST', v:list});
-      if(s.activeProject===id) _switchProject(list[0].id, s, d);
+      _switchProject(list[0].id, s, d);
       setConfirmDelete(null);
+      setProjOpen(false);
     }
     function startRename(p) {
       setRenaming(p.id);
@@ -4281,7 +4351,16 @@ function startApp() {
                 </div>`}
               </div>`;
             })}
-            <button onClick=${createProject} style=${{...S_BTN,width:'100%',textAlign:'left',padding:'.4rem .6rem',background:'none',color:'var(--accent)',fontSize:'.7rem',borderRadius:0}}>+ New Project</button>
+            ${creating ? html`<div style=${{padding:'.35rem .5rem',display:'flex',gap:'.3rem',alignItems:'center'}}>
+              <input type="text" value=${createName} autofocus placeholder="Project name…"
+                onInput=${function(e){setCreateName(e.target.value)}}
+                onKeyDown=${function(e){if(e.key==='Enter')finishCreate();if(e.key==='Escape')setCreating(false);}}
+                style=${{...S_INPUT,fontSize:'.68rem',padding:'.25rem .4rem',flex:1}} />
+              <button onClick=${finishCreate} disabled=${!createName.trim()}
+                style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .45rem',background:'var(--accent)',color:'#fff',opacity:createName.trim()?1:0.4}}>Create</button>
+              <button onClick=${function(){setCreating(false)}}
+                style=${{...S_BTN,fontSize:'.7rem',padding:'.1rem .3rem',background:'none',color:'var(--text-faint)',lineHeight:1}}>✕</button>
+            </div>` : html`<button onClick=${startCreate} style=${{...S_BTN,width:'100%',textAlign:'left',padding:'.4rem .6rem',background:'none',color:'var(--accent)',fontSize:'.7rem',borderRadius:0}}>+ New Project</button>`}
           </div>`}
         </div>
       </div>
@@ -5095,8 +5174,8 @@ function startApp() {
           <${MiniToggle} on=${rules.duplicates} onToggle=${function(){d({t:'UPD_RULES',u:{duplicates:!rules.duplicates}})}} />
         </div>
         <div style=${TOGROW}>
-          <span style=${{fontSize:'.68rem',color:'var(--text-primary)'}}>Exclude self-clashes</span>
-          <${MiniToggle} on=${rules.excludeSelf} onToggle=${function(){d({t:'UPD_RULES',u:{excludeSelf:!rules.excludeSelf}})}} />
+          <span style=${{fontSize:'.68rem',color:'var(--text-primary)'}}>Include self-clashes</span>
+          <${MiniToggle} on=${!rules.excludeSelf} onToggle=${function(){d({t:'UPD_RULES',u:{excludeSelf:!rules.excludeSelf}})}} />
         </div>
         <div style=${TOGROW}>
           <span style=${{fontSize:'.68rem',color:'var(--text-primary)'}}>Change-aware</span>
@@ -5403,13 +5482,33 @@ function startApp() {
           ${s.prefs.showIssueMarkers!==false?'Markers On':'Markers Off'}
         </button>
       </div>`}
-      ${!isExplorerTab && isClashTab && items.length>0 && html`<div style=${{padding:'.25rem .5rem',borderBottom:'1px solid var(--border-subtle)',display:'flex',alignItems:'center',gap:'.3rem',flexShrink:0}}>
-        <span style=${{fontSize:'.6rem',color:'var(--text-faint)'}}>Group:</span>
-        ${['none','storey','discipline','status','type'].map(function(g){return html`<button key=${g} onClick=${function(){d({t:'CLASH_GROUP_BY',v:g})}}
-          style=${{...S_BTN,fontSize:'.55rem',padding:'.1rem .3rem',background:s.clashGroupBy===g?'var(--accent)':'var(--bg-secondary)',color:s.clashGroupBy===g?'#fff':'var(--text-faint)'}}>${g==='none'?'None':g.charAt(0).toUpperCase()+g.slice(1)}</button>`})}
-      </div>`}
+      ${!isExplorerTab && items.length>0 && function(){
+        var grpAction = isClashTab ? 'CLASH_GROUP_BY' : 'ISSUE_GROUP_BY';
+        var sortAction = isClashTab ? 'CLASH_SORT_BY' : 'ISSUE_SORT_BY';
+        var curGrp = isClashTab ? s.clashGroupBy : s.issueGroupBy;
+        var curSort = isClashTab ? s.clashSortBy : s.issueSortBy;
+        var grpOpts = isClashTab
+          ? ['none','storey','discipline','status','type']
+          : ['none','status','priority','category','assignee'];
+        var sortOpts = isClashTab
+          ? [['none','None'],['distance_asc','Gap ↑'],['distance_desc','Gap ↓'],['date_asc','Date ↑'],['date_desc','Date ↓']]
+          : [['none','None'],['priority_asc','Priority ↑'],['priority_desc','Priority ↓'],['date_asc','Date ↑'],['date_desc','Date ↓']];
+        function pill(active){return {...S_BTN,fontSize:'.55rem',padding:'.1rem .3rem',background:active?'var(--accent)':'var(--bg-secondary)',color:active?'#fff':'var(--text-faint)'};}
+        return html`<div style=${{padding:'.25rem .5rem',borderBottom:'1px solid var(--border-subtle)',display:'flex',flexDirection:'column',gap:'.25rem',flexShrink:0}}>
+          <div style=${{display:'flex',alignItems:'center',gap:'.3rem',flexWrap:'wrap'}}>
+            <span style=${{fontSize:'.6rem',color:'var(--text-faint)'}}>Group:</span>
+            ${grpOpts.map(function(g){return html`<button key=${g} onClick=${function(){d({t:grpAction,v:g})}}
+              style=${pill(curGrp===g)}>${g==='none'?'None':g.charAt(0).toUpperCase()+g.slice(1)}</button>`})}
+          </div>
+          <div style=${{display:'flex',alignItems:'center',gap:'.3rem',flexWrap:'wrap'}}>
+            <span style=${{fontSize:'.6rem',color:'var(--text-faint)'}}>Sort:</span>
+            ${sortOpts.map(function(sv){return html`<button key=${sv[0]} onClick=${function(){d({t:sortAction,v:sv[0]})}}
+              style=${pill(curSort===sv[0])}>${sv[1]}</button>`})}
+          </div>
+        </div>`;
+      }()}
       ${!isExplorerTab && items.length>0 && html`<${BulkActionBar} s=${s} d=${d} items=${items} isClash=${isClashTab} />`}
-      ${!isExplorerTab && html`<${VirtualList} items=${items} activeId=${s.activeId} d=${d} isClash=${isClashTab} prefs=${s.prefs} models=${s.models} groupBy=${isClashTab?s.clashGroupBy:'none'} selectMode=${s.selectMode} selected=${s.selected} />`}
+      ${!isExplorerTab && html`<${VirtualList} items=${items} activeId=${s.activeId} d=${d} isClash=${isClashTab} prefs=${s.prefs} models=${s.models} groupBy=${isClashTab?s.clashGroupBy:s.issueGroupBy} sortBy=${isClashTab?s.clashSortBy:s.issueSortBy} selectMode=${s.selectMode} selected=${s.selected} />`}
     </div>`;
   }
 
@@ -5479,23 +5578,39 @@ function startApp() {
   }
 
   // Group clashes by a field
-  function groupClashes(items, groupBy) {
-    if (!groupBy || groupBy === 'none') return null;
+  var SORT_FNS = {
+    distance_asc: function(a,b){ return (a.distance||0)-(b.distance||0); },
+    distance_desc: function(a,b){ return (b.distance||0)-(a.distance||0); },
+    date_asc: function(a,b){ return (a.createdAt||'').localeCompare(b.createdAt||''); },
+    date_desc: function(a,b){ return (b.createdAt||'').localeCompare(a.createdAt||''); },
+    priority_asc: function(a,b){ var o={critical:0,high:1,normal:2,low:3}; return (o[a.priority]||2)-(o[b.priority]||2); },
+    priority_desc: function(a,b){ var o={critical:0,high:1,normal:2,low:3}; return (o[b.priority]||2)-(o[a.priority]||2); }
+  };
+
+  function groupAndSort(items, groupBy, sortBy) {
+    var sortFn = SORT_FNS[sortBy] || null;
+    if (!groupBy || groupBy === 'none') {
+      if (sortFn) return [{ label: 'All', items: items.slice().sort(sortFn) }];
+      return null;
+    }
     var groups = {};
     items.forEach(function(it) {
       var key;
       switch(groupBy) {
-        case 'storey': key = it.elemAStorey || it.elemBStorey || 'Unknown'; break;
-        case 'discipline': key = (it.disciplines||[]).sort().join(' ↔ ') || 'Unknown'; break;
+        case 'storey': key = it.elemAStorey || it.elemBStorey || it.storey || 'Unknown'; break;
+        case 'discipline': key = (it.disciplines||[]).sort().join(' \u2194 ') || 'Unknown'; break;
         case 'status': key = it.status || 'open'; break;
         case 'type': key = it.type || 'hard'; break;
+        case 'priority': key = it.priority || 'normal'; break;
+        case 'category': key = it.category || 'other'; break;
+        case 'assignee': key = it.assignee || 'Unassigned'; break;
         default: key = 'All';
       }
       if (!groups[key]) groups[key] = [];
       groups[key].push(it);
     });
     return Object.keys(groups).sort().map(function(k) {
-      return { label: k, items: groups[k] };
+      return { label: k, items: sortFn ? groups[k].sort(sortFn) : groups[k] };
     });
   }
 
@@ -5505,6 +5620,7 @@ function startApp() {
   function VirtualList(props) {
     var items=props.items, activeId=props.activeId, d=props.d, isClash=props.isClash, prefs=props.prefs, models=props.models||[];
     var groupBy = props.groupBy || 'none';
+    var sortBy = props.sortBy || 'none';
     var selectMode=props.selectMode, selected=props.selected||{};
     var scrollRef = useRef(null);
     var _st = useState(0), scrollTop=_st[0], setScrollTop=_st[1];
@@ -5517,7 +5633,7 @@ function startApp() {
       </div>
     </div>`;
     // Grouped rendering
-    var groups = groupClashes(items, groupBy);
+    var groups = groupAndSort(items, groupBy, sortBy);
     if (groups) {
       function toggleGroup(label) {
         setCollapsed(function(prev) {
@@ -5612,6 +5728,7 @@ function startApp() {
           if(it.elemA) ids.push(it.elemA);
           if(it.elemB) ids.push(it.elemB);
           if(it.elementId) ids.push(it.elementId);
+          if(it._groupedElems) it._groupedElems.forEach(function(eid){ids.push(eid);});
           if(ids.length&&_ghostOthers) _ghostOthers(ids);
           if(it.elemA&&_highlightById) _highlightById(it.elemA,false);
           if(it.elementId&&_highlightById) _highlightById(it.elementId,false);
@@ -5623,6 +5740,7 @@ function startApp() {
           if(it.elemA) flyIds.push(it.elemA);
           if(it.elemB) flyIds.push(it.elemB);
           if(it.elementId) flyIds.push(it.elementId);
+          if(it._groupedElems) it._groupedElems.forEach(function(eid){flyIds.push(eid);});
           if(_flyToElements && flyIds.length) _flyToElements(flyIds, it.point);
           else if(it.point && _flyTo) _flyTo(it.point);
         }
@@ -7559,8 +7677,8 @@ function startApp() {
           Duplicates
         </label>
         <label style=${chkRow}>
-          <input type="checkbox" checked=${rules.excludeSelf} onChange=${function(e){upd('excludeSelf',e.target.checked)}} />
-          Cross-model only
+          <input type="checkbox" checked=${!rules.excludeSelf} onChange=${function(e){upd('excludeSelf',!e.target.checked)}} />
+          Include self-clashes
         </label>
       </div>
 
@@ -7875,7 +7993,7 @@ function startApp() {
         <div ref=${bottomRef}></div>
       </div>
 
-      ${isDetecting ? html`<div style=${{
+      ${(isDetecting || modelLoading) ? html`<div style=${{
         padding:'.55rem .7rem', borderTop:'1px solid '+borderCol,
         display:'flex', alignItems:'center', gap:'.45rem'
       }}>
@@ -7886,7 +8004,7 @@ function startApp() {
           animation:'nlBorderPulse 2s ease-in-out infinite'
         }}>
           <span class="spin" style=${{display:'inline-block',width:'.7rem',height:'.7rem',borderRadius:'50%',border:'1.5px solid rgba(96,165,250,.3)',borderTopColor:'#60a5fa',flexShrink:0}}></span>
-          <span style=${{fontSize:'.74rem',color:'#60a5fa',fontWeight:500}}>Running clash detection…</span>
+          <span style=${{fontSize:'.74rem',color:'#60a5fa',fontWeight:500}}>${isDetecting ? 'Running clash detection…' : 'Model loading…'}</span>
         </div>
       </div>` : html`<div style=${{
         padding:'.55rem .7rem', borderTop:'1px solid '+borderCol,
@@ -7924,6 +8042,8 @@ function startApp() {
     var all=s.clashes.concat(s.issues);
     var po=useState(false), projOpen=po[0], setProjOpen=po[1];
     var cd=useState(null), confirmDel=cd[0], setConfirmDel=cd[1];
+    var _lrc=useState(false), _lrCreating=_lrc[0], _setLrCreating=_lrc[1];
+    var _lrn=useState(''), _lrName=_lrn[0], _setLrName=_lrn[1];
     var projects=s.projectList||[];
     var activeProj=projects.find(function(p){return p.id===s.activeProject;})||projects[0]||{name:'Default'};
     function delProject(id){
@@ -7931,7 +8051,7 @@ function startApp() {
       var list=getProjects().filter(function(p){return p.id!==id;});
       if(!list.length) list=[{id:'default',name:'Default Project',createdAt:Date.now()}];
       saveProjects(list); d({t:'SET_PROJECT_LIST',v:list});
-      if(s.activeProject===id) _switchProject(list[0].id,s,d);
+      _switchProject(list[0].id,s,d);
       setConfirmDel(null);
     }
 
@@ -7982,17 +8102,31 @@ function startApp() {
           boxShadow:'0 8px 24px rgba(0,0,0,.4)',minWidth:200,zIndex:200,overflow:'hidden'}}>
           <div style=${{padding:'.4rem .6rem',borderBottom:'1px solid var(--border-subtle)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
             <span style=${{fontSize:'.65rem',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'.05em'}}>Projects</span>
-            <button onClick=${function(){
-              var name=prompt('New project name:');
-              if(!name||!name.trim()) return;
-              var id=uid();
-              var list=getProjects().concat([{id:id,name:name.trim(),createdAt:Date.now()}]);
-              saveProjects(list);
-              d({t:'SET_PROJECT_LIST',v:list});
-              _switchProject(id,s,d);
-              setProjOpen(false);
-            }} style=${{...S_BTN,fontSize:'.6rem',padding:'.1rem .35rem',background:'#1e3a5f',color:'#93c5fd'}}>+ New</button>
+            ${!_lrCreating && html`<button onClick=${function(){_setLrCreating(true);_setLrName('');}}
+              style=${{...S_BTN,fontSize:'.6rem',padding:'.1rem .35rem',background:'#1e3a5f',color:'#93c5fd'}}>+ New</button>`}
           </div>
+          ${_lrCreating && html`<div style=${{padding:'.35rem .5rem',borderBottom:'1px solid var(--border-subtle)',display:'flex',gap:'.3rem',alignItems:'center'}}>
+            <input type="text" value=${_lrName} autofocus placeholder="Project name…"
+              onInput=${function(e){_setLrName(e.target.value)}}
+              onKeyDown=${function(e){
+                if(e.key==='Enter'&&_lrName.trim()){
+                  var id=uid();var list=getProjects().concat([{id:id,name:_lrName.trim(),createdAt:Date.now()}]);
+                  saveProjects(list);d({t:'SET_PROJECT_LIST',v:list});_switchProject(id,s,d);
+                  _setLrCreating(false);setProjOpen(false);
+                }
+                if(e.key==='Escape')_setLrCreating(false);
+              }}
+              style=${{flex:1,fontSize:'.62rem',padding:'.2rem .35rem',background:'var(--input-bg)',color:'var(--text-primary)',border:'1px solid var(--border)',borderRadius:4,outline:'none'}} />
+            <button onClick=${function(){
+              if(!_lrName.trim()){_setLrCreating(false);return;}
+              var id=uid();var list=getProjects().concat([{id:id,name:_lrName.trim(),createdAt:Date.now()}]);
+              saveProjects(list);d({t:'SET_PROJECT_LIST',v:list});_switchProject(id,s,d);
+              _setLrCreating(false);setProjOpen(false);
+            }} disabled=${!_lrName.trim()}
+              style=${{...S_BTN,fontSize:'.55rem',padding:'.15rem .35rem',background:'var(--accent)',color:'#fff',opacity:_lrName.trim()?1:0.4}}>Create</button>
+            <button onClick=${function(){_setLrCreating(false)}}
+              style=${{background:'none',border:'none',cursor:'pointer',color:'var(--text-faint)',fontSize:'.7rem',padding:0,lineHeight:1}}>✕</button>
+          </div>`}
           ${projects.map(function(p){
             var isActive=p.id===s.activeProject;
             var isConfirming=confirmDel===p.id;

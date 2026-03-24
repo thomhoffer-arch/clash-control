@@ -1,5 +1,26 @@
 # Changelog
 
+## v1.2.88 (2026-03-24)
+- Allow self-clashes within models during multi-model detection
+
+## v1.2.87 (2026-03-24)
+- Add group and sort to both clashes and issues tabs
+
+## v1.2.86 (2026-03-24)
+- Add sort-within-group for clash list (group by storey, sort by gap)
+
+## v1.2.85 (2026-03-24)
+- Show model loading status in open chat panel input area
+
+## v1.2.84 (2026-03-24)
+- Replace prompt() with inline text input for new project creation
+
+## v1.2.83 (2026-03-24)
+- Allow deleting default project — resets to clean startup state
+
+## v1.2.82 (2026-03-24)
+- Add IFC axis-based parallel element rejection for clash detection
+
 ## v1.2.81 (2026-03-24)
 - Remove parallel element heuristic to prevent false negatives
 
