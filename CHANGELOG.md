@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.88 (2026-03-24)
+- Allow self-clashes within models during multi-model detection
+
 ## v1.2.87 (2026-03-24)
 - Add group and sort to both clashes and issues tabs
 

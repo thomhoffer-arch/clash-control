@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.87',hash:'a2be1ac',date:'2026-03-24T09:41:54Z'};
+  var CC_VERSION = {v:'1.2.88',hash:'91817c0',date:'2026-03-24T09:46:23Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -251,7 +251,7 @@ function startApp() {
   };
   var INIT = {
     models:[], clashes:[], issues:[], activeId:null, showModal:false, showSettings:false, modalElement:null, tab:null,
-    rules:{ modelA:'all', modelB:'all', hard:true, maxGap:50, duplicates:false, changeAware:false, excludeSelf:false, excludeTypes:[] },
+    rules:{ modelA:'all', modelB:'all', hard:true, maxGap:50, duplicates:false, changeAware:false, excludeSelf:true, excludeTypes:[] },
     clashGroupBy:'none', clashSortBy:'none',
     issueGroupBy:'none', issueSortBy:'none',
     detecting:false, switchingProject:false, sectionAxis:null, sectionPos:0.5, sectionCustom:null,
@@ -1580,7 +1580,68 @@ function startApp() {
     // Update element hashes for next change-aware run
     if (rules.changeAware) _prevElementHashes = newHashes;
 
-    return clashes;
+    // ── Merge related clashes (IFC segment grouping) ─────────────
+    // Multiple pipe/duct segments clashing with the same element get merged
+    // into a single clash. Only merges when clash points are nearby (<0.5m),
+    // ensuring segments from different pipe runs aren't incorrectly combined.
+    // This is purely additive — no detected clashes are removed, only grouped.
+    var merged = [];
+    var mergeMap = {}; // key → array of {idx, point}
+    clashes.forEach(function(c) {
+      // Try merging on side A (same elemA, group B-side segments)
+      var keyA = c.modelAId+':'+c.elemA+':'+c.modelBId+':'+c.elemBType;
+      // Try merging on side B (same elemB, group A-side segments)
+      var keyB = c.modelBId+':'+c.elemB+':'+c.modelAId+':'+c.elemAType;
+
+      // Find a nearby existing clash to merge with
+      var mergedIdx = null;
+      var mergedSide = null; // 'A' or 'B'
+      var MERGE_DIST_SQ = 0.5*0.5; // 500mm max merge radius
+      [['A',keyA],['B',keyB]].forEach(function(pair) {
+        if (mergedIdx != null) return;
+        var candidates = mergeMap[pair[1]];
+        if (!candidates) return;
+        for (var k=0; k<candidates.length; k++) {
+          var ep = candidates[k].point;
+          var dx=c.point[0]-ep[0], dy=c.point[1]-ep[1], dz=c.point[2]-ep[2];
+          if (dx*dx+dy*dy+dz*dz < MERGE_DIST_SQ) {
+            mergedIdx = candidates[k].idx;
+            mergedSide = pair[0];
+            break;
+          }
+        }
+      });
+
+      if (mergedIdx != null) {
+        var exist = merged[mergedIdx];
+        if (!exist._groupedElems) exist._groupedElems = [];
+        if (mergedSide === 'A') {
+          if (exist._groupedElems.indexOf(c.elemB) === -1) exist._groupedElems.push(c.elemB);
+        } else {
+          if (exist._groupedElems.indexOf(c.elemA) === -1) exist._groupedElems.push(c.elemA);
+        }
+        exist.mergedCount = (exist.mergedCount||1) + 1;
+        if (c.distance < exist.distance) {
+          exist.distance = c.distance;
+          exist.point = c.point;
+        }
+      } else {
+        var newIdx = merged.length;
+        if (!mergeMap[keyA]) mergeMap[keyA] = [];
+        if (!mergeMap[keyB]) mergeMap[keyB] = [];
+        mergeMap[keyA].push({idx:newIdx, point:c.point});
+        mergeMap[keyB].push({idx:newIdx, point:c.point});
+        c.mergedCount = 1;
+        merged.push(c);
+      }
+    });
+    merged.forEach(function(c) {
+      if (c.mergedCount > 1) {
+        c.description += ' (+' + (c.mergedCount-1) + ' segments)';
+      }
+    });
+
+    return merged;
   }
 
   function deriveFloors(clashes) {
@@ -5113,8 +5174,8 @@ function startApp() {
           <${MiniToggle} on=${rules.duplicates} onToggle=${function(){d({t:'UPD_RULES',u:{duplicates:!rules.duplicates}})}} />
         </div>
         <div style=${TOGROW}>
-          <span style=${{fontSize:'.68rem',color:'var(--text-primary)'}}>Exclude self-clashes</span>
-          <${MiniToggle} on=${rules.excludeSelf} onToggle=${function(){d({t:'UPD_RULES',u:{excludeSelf:!rules.excludeSelf}})}} />
+          <span style=${{fontSize:'.68rem',color:'var(--text-primary)'}}>Include self-clashes</span>
+          <${MiniToggle} on=${!rules.excludeSelf} onToggle=${function(){d({t:'UPD_RULES',u:{excludeSelf:!rules.excludeSelf}})}} />
         </div>
         <div style=${TOGROW}>
           <span style=${{fontSize:'.68rem',color:'var(--text-primary)'}}>Change-aware</span>
@@ -5667,6 +5728,7 @@ function startApp() {
           if(it.elemA) ids.push(it.elemA);
           if(it.elemB) ids.push(it.elemB);
           if(it.elementId) ids.push(it.elementId);
+          if(it._groupedElems) it._groupedElems.forEach(function(eid){ids.push(eid);});
           if(ids.length&&_ghostOthers) _ghostOthers(ids);
           if(it.elemA&&_highlightById) _highlightById(it.elemA,false);
           if(it.elementId&&_highlightById) _highlightById(it.elementId,false);
@@ -5678,6 +5740,7 @@ function startApp() {
           if(it.elemA) flyIds.push(it.elemA);
           if(it.elemB) flyIds.push(it.elemB);
           if(it.elementId) flyIds.push(it.elementId);
+          if(it._groupedElems) it._groupedElems.forEach(function(eid){flyIds.push(eid);});
           if(_flyToElements && flyIds.length) _flyToElements(flyIds, it.point);
           else if(it.point && _flyTo) _flyTo(it.point);
         }
@@ -7614,8 +7677,8 @@ function startApp() {
           Duplicates
         </label>
         <label style=${chkRow}>
-          <input type="checkbox" checked=${rules.excludeSelf} onChange=${function(e){upd('excludeSelf',e.target.checked)}} />
-          Cross-model only
+          <input type="checkbox" checked=${!rules.excludeSelf} onChange=${function(e){upd('excludeSelf',!e.target.checked)}} />
+          Include self-clashes
         </label>
       </div>
 
