@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.20',hash:'54b7275',date:'2026-03-24T12:38:12Z'};
+  var CC_VERSION = {v:'2.0.22',hash:'972d291',date:'2026-03-24T15:35:07Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -251,7 +251,7 @@ function startApp() {
   };
   var INIT = {
     models:[], clashes:[], issues:[], activeId:null, showModal:false, showSettings:false, modalElement:null, tab:null,
-    rules:{ modelA:'all', modelB:'all', hard:true, maxGap:50, duplicates:false, changeAware:false, excludeSelf:true, excludeTypes:[], minOverlapVolM3:1e-5, toleranceByTypePair:{} },
+    rules:{ modelA:'all', modelB:'all', hard:true, maxGap:50, duplicates:false, changeAware:false, excludeSelf:true, excludeTypes:[], minOverlapVolM3:1e-5, toleranceByTypePair:{}, useSemanticFilter:true },
     clashGroupBy:'none', clashSortBy:'none',
     issueGroupBy:'none', issueSortBy:'none',
     detecting:false, switchingProject:false, sectionAxis:null, sectionPos:0.5, sectionCustom:null,
@@ -316,7 +316,7 @@ function startApp() {
       case 'RESET_FILTERS': return Object.assign({},s,{filters:Object.assign({},INIT_FILTERS)});
       case 'SECTION':     return Object.assign({},s,{sectionAxis:a.axis, sectionPos:a.pos!=null?a.pos:s.sectionPos, sectionCustom:null});
       case 'SECTION_CUSTOM': return Object.assign({},s,{sectionAxis:null, sectionCustom:a.v, sectionPos:a.pos!=null?a.pos:0.5});
-      case 'TAB':         return Object.assign({},s,{tab:a.v});
+      case 'TAB':         var tabUpd={tab:a.v}; if(a.v!==s.tab&&(a.v==='clashes'||a.v==='issues'||s.tab==='clashes'||s.tab==='issues'))tabUpd.activeId=null; return Object.assign({},s,tabUpd);
       case 'SETTINGS':    return Object.assign({},s,{showSettings:a.v});
       case 'UPD_PREFS':   return Object.assign({},s,{prefs:Object.assign({},s.prefs,a.u)});
       case 'MEASURE_MODE': return Object.assign({},s,{measureMode:a.v});
@@ -553,7 +553,7 @@ function startApp() {
         props: el.props
       };
     });
-    return {v:1, meshData:meshData, elData:elData, storeys:result.storeys, storeyData:result.storeyData, stats:result.stats};
+    return {v:2, meshData:meshData, elData:elData, storeys:result.storeys, storeyData:result.storeyData, relatedPairs:result.relatedPairs||{}, stats:result.stats};
   }
 
   // Reconstruct Three.js objects from a serialised geo cache entry.
@@ -582,7 +582,7 @@ function startApp() {
         props:  ed.props
       };
     });
-    return {meshes:meshes, elements:elements, storeys:cached.storeys, storeyData:cached.storeyData, stats:cached.stats};
+    return {meshes:meshes, elements:elements, storeys:cached.storeys, storeyData:cached.storeyData, relatedPairs:cached.relatedPairs||{}, stats:cached.stats};
   }
 
   function idbDeleteProjectData(projectId) {
@@ -649,7 +649,35 @@ function startApp() {
     IFCQUANTITYVOLUME:3252649465, IFCQUANTITYWEIGHT:825690147,
     IFCRELASSOCIATESMATERIAL:2655215786, IFCMATERIALLAYERSETUSAGE:1303795690,
     IFCMATERIALLAYERSET:3303938423, IFCMATERIALLAYER:248100487,
-    IFCMATERIAL:1838606355
+    IFCMATERIAL:1838606355,
+    // Additional MEP types
+    IFCFLOWCONTROLLER:2058353004, IFCPIPEFITTING:4278956645,
+    IFCENERGYCONVERSIONDEVICE:1658829314, IFCFLOWMOVINGDEVICE:3132237377,
+    IFCFLOWSTORAGEDEVICE:3508470533, IFCFLOWTREATMENTDEVICE:3310460725,
+    IFCCABLESEGMENT:4217484030, IFCCABLECARRIERSEGMENT:3758799889,
+    IFCDUCTFITTING:342316401, IFCPIPESEGMENTTYPE:4231323485,
+    IFCAIRTERMINAL:1634111441, IFCFIRESUPPRESSIONTERMINAL:1426591983,
+    IFCSANITARYTERMINAL:3290496277, IFCWASTETERMINAL:4237592921,
+    IFCLAMP:76236018, IFCLIGHTFIXTURE:629592764, IFCOUTLET:3694346114,
+    IFCVALVE:4207607924, IFCPUMP:2250791053, IFCFAN:3415622556,
+    IFCSENSOR:4086658281, IFCACTUATOR:2087101272,
+    IFCAIRTERMINALBOX:177149247, IFCCOIL:639361253, IFCCOMPRESSOR:3571504051,
+    IFCCONDENSER:2272882330, IFCCOOLINGTOWER:3640358203,
+    IFCUNITARYEQUIPMENT:4292641817, IFCELECTRICMOTOR:402227799,
+    IFCELECTRICGENERATOR:264262732, IFCTRANSFORMER:3825984169,
+    IFCSWITCHINGDEVICE:1162798199, IFCPROTECTIVEDEVICE:738039164,
+    // Additional structural/envelope types
+    IFCCURTAINWALL:3495092785, IFCSTAIRFLIGHT:4252922144,
+    IFCRAMPFLIGHT:3283111854, IFCRAMP:3024970846,
+    IFCBUILDINGELEMENTPROXY:1095909175, IFCREINFORCINGBAR:979691226,
+    IFCREINFORCINGMESH:2320036040, IFCTENDON:3101698114,
+    IFCSHADINGDEVICE:1329646415, IFCCHIMNEY:3296154744,
+    // Relation types for semantic filter
+    IFCRELVOIDSELEMENT:1401173127, IFCRELFILLSVOID:3940055652,
+    IFCRELAGGREGATES:160246688, IFCRELCONNECTSELEMENTS:1204542856,
+    // Spatial containers (for aggregate filtering)
+    IFCBUILDING:4031249490, IFCSITE:4097777520,
+    IFCOPENINGELEMENT:3588315303
   };
 
   function safeStr(v) {
@@ -690,15 +718,19 @@ function startApp() {
     try {
       var line = api.GetLine(modelID, expressID);
       if (line) {
-        props.ifcType = String(line.__proto__.constructor.name || line.type || '');
-        // Try to get a readable type name from the IFC type number
-        if (line.constructor && line.constructor.name) props.ifcType = line.constructor.name;
+        // Store the raw type ID for lookups
+        if (line.type != null) props.typeId = line.type;
+        // Type resolution order: 1) explicit IFC_TYPE_NAMES lookup, 2) constructor name (if non-generic), 3) 'Element'
+        if (line.type != null && IFC_TYPE_NAMES[line.type]) {
+          props.ifcType = IFC_TYPE_NAMES[line.type];
+        } else {
+          var ctorName = (line.constructor && line.constructor.name) || '';
+          props.ifcType = (ctorName && ctorName !== 'Object' && ctorName !== 'IfcProduct') ? ctorName : 'Element';
+        }
         props.globalId = safeStr(line.GlobalId);
         props.name = safeStr(line.Name);
         props.description = safeStr(line.Description);
         props.objectType = safeStr(line.ObjectType);
-        // Store the raw type ID for lookups
-        if (line.type != null) props.typeId = line.type;
         // Extract axis direction for linear elements (beams, columns, pipes, ducts)
         // Only for types where axis data is useful for clash optimization
         var tid = line.type;
@@ -929,6 +961,141 @@ function startApp() {
   IFC_TYPE_NAMES[1073191201] = 'IfcMember'; IFC_TYPE_NAMES[3171933400] = 'IfcPlate';
   IFC_TYPE_NAMES[900683007] = 'IfcFooting'; IFC_TYPE_NAMES[1687234759] = 'IfcPile';
   IFC_TYPE_NAMES[1973544240] = 'IfcCovering'; IFC_TYPE_NAMES[3856911033] = 'IfcSpace';
+  // MEP: energy conversion, flow moving/storage/treatment, controllers
+  IFC_TYPE_NAMES[1658829314] = 'IfcEnergyConversionDevice'; IFC_TYPE_NAMES[3132237377] = 'IfcFlowMovingDevice';
+  IFC_TYPE_NAMES[3508470533] = 'IfcFlowStorageDevice'; IFC_TYPE_NAMES[3310460725] = 'IfcFlowTreatmentDevice';
+  // MEP: cable/duct segments and fittings
+  IFC_TYPE_NAMES[4217484030] = 'IfcCableSegment'; IFC_TYPE_NAMES[3758799889] = 'IfcCableCarrierSegment';
+  IFC_TYPE_NAMES[342316401] = 'IfcDuctFitting';
+  // MEP: terminals
+  IFC_TYPE_NAMES[1634111441] = 'IfcAirTerminal'; IFC_TYPE_NAMES[1426591983] = 'IfcFireSuppressionTerminal';
+  IFC_TYPE_NAMES[3290496277] = 'IfcSanitaryTerminal'; IFC_TYPE_NAMES[4237592921] = 'IfcWasteTerminal';
+  IFC_TYPE_NAMES[76236018] = 'IfcLamp'; IFC_TYPE_NAMES[629592764] = 'IfcLightFixture';
+  IFC_TYPE_NAMES[3694346114] = 'IfcOutlet';
+  // MEP: valves, pumps, fans, sensors, actuators
+  IFC_TYPE_NAMES[4207607924] = 'IfcValve'; IFC_TYPE_NAMES[2250791053] = 'IfcPump';
+  IFC_TYPE_NAMES[3415622556] = 'IfcFan'; IFC_TYPE_NAMES[4086658281] = 'IfcSensor';
+  IFC_TYPE_NAMES[2087101272] = 'IfcActuator';
+  // MEP: boxes, coils, compressors, condensers, cooling towers, unitary
+  IFC_TYPE_NAMES[177149247] = 'IfcAirTerminalBox'; IFC_TYPE_NAMES[639361253] = 'IfcCoil';
+  IFC_TYPE_NAMES[3571504051] = 'IfcCompressor'; IFC_TYPE_NAMES[2272882330] = 'IfcCondenser';
+  IFC_TYPE_NAMES[3640358203] = 'IfcCoolingTower'; IFC_TYPE_NAMES[4292641817] = 'IfcUnitaryEquipment';
+  // MEP: electrical
+  IFC_TYPE_NAMES[402227799] = 'IfcElectricMotor'; IFC_TYPE_NAMES[264262732] = 'IfcElectricGenerator';
+  IFC_TYPE_NAMES[3825984169] = 'IfcTransformer'; IFC_TYPE_NAMES[1162798199] = 'IfcSwitchingDevice';
+  IFC_TYPE_NAMES[738039164] = 'IfcProtectiveDevice';
+  // Structural/envelope
+  IFC_TYPE_NAMES[3495092785] = 'IfcCurtainWall'; IFC_TYPE_NAMES[4252922144] = 'IfcStairFlight';
+  IFC_TYPE_NAMES[3283111854] = 'IfcRampFlight'; IFC_TYPE_NAMES[3024970846] = 'IfcRamp';
+  IFC_TYPE_NAMES[1095909175] = 'IfcBuildingElementProxy'; IFC_TYPE_NAMES[979691226] = 'IfcReinforcingBar';
+  IFC_TYPE_NAMES[2320036040] = 'IfcReinforcingMesh'; IFC_TYPE_NAMES[3101698114] = 'IfcTendon';
+  IFC_TYPE_NAMES[1329646415] = 'IfcShadingDevice'; IFC_TYPE_NAMES[3296154744] = 'IfcChimney';
+
+  // Spatial container types — aggregates from these are not meaningful for clash suppression
+  var _SPATIAL_CONTAINERS = {};
+  _SPATIAL_CONTAINERS[IFC.IFCBUILDINGSTOREY] = true;
+  _SPATIAL_CONTAINERS[IFC.IFCBUILDING] = true;
+  _SPATIAL_CONTAINERS[IFC.IFCSITE] = true;
+
+  // Build a set of element-pair keys representing intentionally related elements.
+  // Used by the semantic filter to suppress false-positive hard clashes.
+  // Reads: IfcRelVoidsElement, IfcRelFillsVoid, IfcRelAggregates
+  function buildRelationsMap(api, modelID) {
+    var pairs = {}; // canonical "smallerId:largerId" → true
+    var MAX_SIBLINGS = 50; // cap to avoid O(n²) blowup on huge assemblies
+    function addPair(a, b) {
+      if (a == null || b == null || a === b) return;
+      var key = a < b ? a + ':' + b : b + ':' + a;
+      pairs[key] = true;
+    }
+    try {
+      // ── IfcRelVoidsElement: host element → opening ──
+      // ── IfcRelFillsVoid: opening → fill element (door/window) ──
+      // We need transitive closure: host → opening → fill  ⇒  host ↔ fill
+      var openingToHost = {}; // openingExpressID → hostExpressID
+      var openingToFill = {}; // openingExpressID → fillExpressID
+
+      try {
+        var voidIds = api.GetLineIDsWithType(modelID, IFC.IFCRELVOIDSELEMENT);
+        for (var vi = 0; vi < voidIds.size(); vi++) {
+          try {
+            var voidRel = api.GetLine(modelID, voidIds.get(vi));
+            var hostId = voidRel.RelatingBuildingElement ? (voidRel.RelatingBuildingElement.value || voidRel.RelatingBuildingElement) : null;
+            var openId = voidRel.RelatedOpeningElement ? (voidRel.RelatedOpeningElement.value || voidRel.RelatedOpeningElement) : null;
+            if (hostId && openId) {
+              addPair(hostId, openId);
+              openingToHost[openId] = hostId;
+            }
+          } catch(e) {}
+        }
+      } catch(e) {}
+
+      try {
+        var fillIds = api.GetLineIDsWithType(modelID, IFC.IFCRELFILLSVOID);
+        for (var fi = 0; fi < fillIds.size(); fi++) {
+          try {
+            var fillRel = api.GetLine(modelID, fillIds.get(fi));
+            var openId2 = fillRel.RelatingOpeningElement ? (fillRel.RelatingOpeningElement.value || fillRel.RelatingOpeningElement) : null;
+            var fillElem = fillRel.RelatedBuildingElement ? (fillRel.RelatedBuildingElement.value || fillRel.RelatedBuildingElement) : null;
+            if (openId2 && fillElem) {
+              addPair(openId2, fillElem);
+              openingToFill[openId2] = fillElem;
+              // Transitive: host ↔ fill (wall ↔ door)
+              if (openingToHost[openId2]) {
+                addPair(openingToHost[openId2], fillElem);
+              }
+            }
+          } catch(e) {}
+        }
+      } catch(e) {}
+
+      // Also handle the reverse-order case: fills parsed before voids
+      Object.keys(openingToFill).forEach(function(openId3) {
+        if (openingToHost[openId3]) {
+          addPair(openingToHost[openId3], openingToFill[openId3]);
+        }
+      });
+
+      // ── IfcRelAggregates: parent → children (sibling pairs) ──
+      try {
+        var aggIds = api.GetLineIDsWithType(modelID, IFC.IFCRELAGGREGATES);
+        for (var ai = 0; ai < aggIds.size(); ai++) {
+          try {
+            var aggRel = api.GetLine(modelID, aggIds.get(ai));
+            var parentRef = aggRel.RelatingObject ? (aggRel.RelatingObject.value || aggRel.RelatingObject) : null;
+            // Skip spatial containers — they aggregate entire floors
+            if (parentRef) {
+              try {
+                var parentLine = api.GetLine(modelID, parentRef);
+                if (parentLine && parentLine.type && _SPATIAL_CONTAINERS[parentLine.type]) continue;
+              } catch(e) {}
+            }
+            var children = aggRel.RelatedObjects;
+            if (!children) continue;
+            var childIds = [];
+            for (var ci = 0; ci < children.length; ci++) {
+              var cid = children[ci].value || children[ci];
+              if (cid != null) childIds.push(cid);
+            }
+            // Cap sibling pairing to avoid O(n²) on large assemblies
+            if (childIds.length <= MAX_SIBLINGS) {
+              for (var si = 0; si < childIds.length; si++) {
+                for (var sj = si + 1; sj < childIds.length; sj++) {
+                  addPair(childIds[si], childIds[sj]);
+                }
+              }
+            }
+            // Always add parent ↔ child pairs (O(n))
+            for (var pi = 0; pi < childIds.length; pi++) {
+              addPair(parentRef, childIds[pi]);
+            }
+          } catch(e) {}
+        }
+      } catch(e) {}
+
+    } catch(e) { console.warn('Relations map build failed:', e.message||e); }
+    return pairs;
+  }
 
   function loadIFC(buffer, fallbackColor, onProgress) {
     var loadStart = performance.now();
@@ -943,6 +1110,7 @@ function startApp() {
       var storeyData = storeyResult.data;
       var matMap = buildMaterialMap(api, modelID);
       var propMap = buildPropertyMap(api, modelID, onProgress);
+      var relatedPairs = buildRelationsMap(api, modelID);
       var allStoreys = {};
       Object.keys(storeyMap).forEach(function(k){ allStoreys[storeyMap[k]] = true; });
 
@@ -990,7 +1158,6 @@ function startApp() {
           var elProps = extractProperties(api, modelID, expressID);
           elProps.storey = storeyMap[expressID] || '';
           elProps.material = matMap[expressID] || '';
-          if (elProps.typeId && IFC_TYPE_NAMES[elProps.typeId]) elProps.ifcType = IFC_TYPE_NAMES[elProps.typeId];
           var pm = propMap[expressID];
           if (pm) { elProps.quantities = pm.quantities; elProps.psets = pm.psets; }
           rawElements.push({expressId:expressID, meshes:elMeshes, box:elBox.clone(), props:elProps});
@@ -1017,7 +1184,7 @@ function startApp() {
             setTimeout(function(){ processChunk(end); }, 0);
           } else {
             var loadTime = Math.round(performance.now() - loadStart);
-            resolve({ meshes:meshes, elements:elements, storeys:Object.keys(allStoreys).sort(), storeyData:storeyData, stats:{loadTime:loadTime, fileSize:buffer.byteLength, elementCount:elements.length, meshCount:meshes.length} });
+            resolve({ meshes:meshes, elements:elements, storeys:Object.keys(allStoreys).sort(), storeyData:storeyData, relatedPairs:relatedPairs, stats:{loadTime:loadTime, fileSize:buffer.byteLength, elementCount:elements.length, meshCount:meshes.length} });
           }
         }
         processChunk(0);
@@ -1476,6 +1643,14 @@ function startApp() {
     var _tmpCtrA  = new THREE.Vector3(), _tmpCtrB  = new THREE.Vector3();
     var _softPairBuf = [0,0,0,0,0,0]; // reusable buffer for soft clash closest-pair output
 
+    // Semantic filter: build per-model relatedPairs lookup for same-model suppression
+    var _modelRelPairs = {};
+    if (rules.useSemanticFilter !== false) {
+      models.forEach(function(m) {
+        if (m.relatedPairs) _modelRelPairs[m.id] = m.relatedPairs;
+      });
+    }
+
     // Change-aware: track which elements changed since last run
     var newHashes = {}, changedElements = {};
     if (rules.changeAware) {
@@ -1576,8 +1751,14 @@ function startApp() {
           if (rules.toleranceByTypePair[tpKey] !== undefined) pairGapM = rules.toleranceByTypePair[tpKey] / 1000;
         }
       }
+      // Semantic filter: suppress hard clashes between intentionally related elements (same model only)
+      var _semanticSkipHard = false;
+      if (sameModel && _modelRelPairs[mA.id]) {
+        var _rpKey = eA.expressId < eB.expressId ? eA.expressId + ':' + eB.expressId : eB.expressId + ':' + eA.expressId;
+        if (_modelRelPairs[mA.id][_rpKey]) _semanticSkipHard = true;
+      }
       var hardPt=false, isSoft=false, geoDist=Infinity;
-      if (rules.hard) hardPt = _meshesIntersect(eA, eB);
+      if (rules.hard && !_semanticSkipHard) hardPt = _meshesIntersect(eA, eB);
       // Overlap volume gate: reject hard clashes with trivial AABB overlap (surface contact noise)
       if (hardPt && rules.minOverlapVolM3 > 0) {
         var ovx = Math.max(0, Math.min(bA.max.x,bB.max.x) - Math.max(bA.min.x,bB.min.x));
@@ -4389,7 +4570,7 @@ function startApp() {
         chain = chain.then(function(){
           _setGlobalLoading(true);
           return idbGetGeoCache(entry.id).then(function(cached) {
-            if(cached && cached.v === 1) return _geoDeserialize(cached);
+            if(cached && cached.v >= 1) return _geoDeserialize(cached);
             return loadIFC(entry.buffer, DISC[0].c, function(){})
               .then(function(result) {
                 idbSaveGeoCache(entry.id, _geoSerialize(result));
@@ -4400,7 +4581,7 @@ function startApp() {
             var dObj = DISC.find(function(x){return x.id===disc;});
             var col = dObj ? dObj.c : DISC[0].c;
             var fSize = result.stats ? result.stats.fileSize : entry.buffer.byteLength;
-            d({t:'ADD_MODEL', v:{id:entry.id, name:entry.name.replace(/\.ifc$/i,''), discipline:disc, color:col, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], storeyData:result.storeyData||[], stats:result.stats||{fileSize:fSize}}});
+            d({t:'ADD_MODEL', v:{id:entry.id, name:entry.name.replace(/\.ifc$/i,''), discipline:disc, color:col, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], storeyData:result.storeyData||[], relatedPairs:result.relatedPairs||{}, stats:result.stats||{fileSize:fSize}}});
           }).catch(function(e){ console.warn('Failed to restore '+entry.name+':', e); })
             .then(function(){ _setGlobalLoading(false); });
         });
@@ -4711,7 +4892,7 @@ function startApp() {
               col = dObj ? dObj.c : col;
               var fSize = result.stats ? result.stats.fileSize : buf.byteLength;
               var modelId = uid();
-              d({t:'ADD_MODEL', v:{id:modelId, name:f.name.replace(/\.ifc$/i,''), discipline:disc, color:col, visible:true, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], storeyData:result.storeyData||[], stats:result.stats||{fileSize:fSize}}});
+              d({t:'ADD_MODEL', v:{id:modelId, name:f.name.replace(/\.ifc$/i,''), discipline:disc, color:col, visible:true, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], storeyData:result.storeyData||[], relatedPairs:result.relatedPairs||{}, stats:result.stats||{fileSize:fSize}}});
               idbSaveFile(modelId, f.name, buf, s.activeProject||'default');
               idbSaveGeoCache(modelId, _geoSerialize(result)); // cache geometry for fast project-switch restore
             });
@@ -5562,6 +5743,10 @@ function startApp() {
           <span style=${{fontSize:'.68rem',color:'var(--text-primary)'}}>Change-aware</span>
           <${MiniToggle} on=${rules.changeAware} onToggle=${function(){d({t:'UPD_RULES',u:{changeAware:!rules.changeAware}})}} />
         </div>
+        <div style=${TOGROW}>
+          <span class="cc-tip cc-tip-delay" data-tip="Suppress hard clashes between intentionally related elements (doors in walls, assembly parts, openings). Uses IFC relationship data." style=${{fontSize:'.68rem',color:'var(--text-primary)',cursor:'help'}}>Semantic filter</span>
+          <${MiniToggle} on=${rules.useSemanticFilter!==false} onToggle=${function(){d({t:'UPD_RULES',u:{useSemanticFilter:rules.useSemanticFilter===false?true:false}})}} />
+        </div>
         <button onClick=${runDetection} disabled=${!canRun}
           style=${{...S_BTN,width:'100%',background:canRun?'var(--accent)':'var(--bg-secondary)',color:canRun?'#fff':'var(--text-faint)',marginTop:'.3rem',fontWeight:600}}>
           ${s.detecting ? 'Detecting...' : 'Run Detection'}
@@ -6218,7 +6403,7 @@ function startApp() {
     </div>`;
     // Virtualized rendering for large lists
     var totalHeight = items.length * ROW_HEIGHT;
-    var containerH = scrollRef.current ? scrollRef.current.clientHeight : 600;
+    var containerH = scrollRef.current && scrollRef.current.clientHeight > 0 ? scrollRef.current.clientHeight : 600;
     var overscan = 5;
     var startIdx = Math.max(0, Math.floor(scrollTop / ROW_HEIGHT) - overscan);
     var endIdx = Math.min(items.length, Math.ceil((scrollTop + containerH) / ROW_HEIGHT) + overscan);
@@ -7836,7 +8021,7 @@ function startApp() {
       var types = [r.hard&&'hard', r.maxGap&&('gap '+r.maxGap+'mm')].filter(Boolean).join(' + ') || 'none';
       function _ruleLabel(id){ if(id==='all')return 'all'; if(typeof id==='string'&&id.indexOf('disc:')===0){var dd=DISC.find(function(x){return x.id===id.slice(5)});return dd?dd.label:id.slice(5);} var mm=s.models.find(function(x){return x.id===id});return mm?mm.name:id; }
       var against = r.modelA==='all'&&r.modelB==='all' ? 'all models against all' : _ruleLabel(r.modelA) + ' vs ' + _ruleLabel(r.modelB);
-      return 'Current setup: ' + types + ' clashes, ' + against + ', max gap ' + (r.maxGap||0) + 'mm' + (r.duplicates?', including duplicates':'.');
+      return 'Current setup: ' + types + ' clashes, ' + against + ', max gap ' + (r.maxGap||0) + 'mm' + (r.duplicates?', including duplicates':'') + (r.useSemanticFilter!==false?', semantic filter on':', semantic filter off') + '.';
     }
     if (/(?:what|which).*storey|worst.*storey|most clashes.*storey|storey.*most/.test(text)) {
       if (!s.clashes.length) return 'No clashes to analyse yet.';
@@ -7965,6 +8150,8 @@ function startApp() {
     if (/(?:exclude|ignore|no)\s+duplicates?/.test(text)) { d({t:'UPD_RULES',u:{duplicates:false}}); return 'Duplicates excluded.'; }
     if (/cross[\s-]*(?:model\s+)?only|no\s+self[\s-]*clash|exclude\s+self|not?\s+with\s+itself/.test(text)) { d({t:'UPD_RULES',u:{excludeSelf:true}}); return 'Cross-model only — self-clashes excluded.'; }
     if (/(?:include|enable|allow)\s+self[\s-]*clash|self[\s-]*clash.*on/.test(text)) { d({t:'UPD_RULES',u:{excludeSelf:false}}); return 'Self-clashes included.'; }
+    if (/(?:enable|turn\s+on|activate)\s+semantic[\s-]*filter/.test(text)) { d({t:'UPD_RULES',u:{useSemanticFilter:true}}); return 'Semantic filter enabled — intentional relationships (doors in walls, assembly parts) will suppress hard clashes.'; }
+    if (/(?:disable|turn\s+off|deactivate)\s+semantic[\s-]*filter/.test(text)) { d({t:'UPD_RULES',u:{useSemanticFilter:false}}); return 'Semantic filter disabled — all geometric intersections will be reported.'; }
 
     // ── Overlap volume threshold ──────────────────────────────────
     var ovMatch = text.match(/(?:min(?:imum)?\s+)?overlap\s+(?:volume?\s+)?(\d+(?:\.\d+)?)\s*(?:cm3|cm³)?/i);
@@ -8878,9 +9065,9 @@ function startApp() {
             fontSize:'1.1rem',lineHeight:1,padding:'2px 4px',borderRadius:4}} title="Close panel">×</button>
       </div>
       ${tab==='models'   && html`<${ModelSidebar}  s=${s} d=${d} />`}
-      ${tab==='clashes'  && html`<${IssuePanel} s=${s} d=${d} hideTabBar=${true} />`}
-      ${tab==='issues'   && html`<${IssuePanel} s=${s} d=${d} hideTabBar=${true} />`}
-      ${tab==='explorer' && html`<${IssuePanel} s=${s} d=${d} hideTabBar=${true} />`}
+      ${tab==='clashes'  && html`<${IssuePanel} key="clashes" s=${s} d=${d} hideTabBar=${true} />`}
+      ${tab==='issues'   && html`<${IssuePanel} key="issues" s=${s} d=${d} hideTabBar=${true} />`}
+      ${tab==='explorer' && html`<${IssuePanel} key="explorer" s=${s} d=${d} hideTabBar=${true} />`}
     </div>`;
   }
 
@@ -9017,6 +9204,11 @@ function startApp() {
       document.documentElement.setAttribute('data-theme', t);
       try { localStorage.setItem('cc_theme', t); } catch(e) {}
     }, [s.prefs.theme]);
+    // ── Clean up 3D state when switching tabs ──
+    useEffect(function(){
+      if(_unghostAll) _unghostAll();
+      if(window._ccRemoveActiveClashMarker) window._ccRemoveActiveClashMarker();
+    }, [s.tab]);
     // ── Restore project files on initial load (runs once, before any tab is opened) ──
     useEffect(function(){
       var key = '_ccRestored_' + (s.activeProject || 'default');

@@ -1,5 +1,11 @@
 # Changelog
 
+## v2.0.22 (2026-03-24)
+- Fix empty clash list when switching between issues and clashes tabs
+
+## v2.0.21 (2026-03-24)
+- Add periodic memory cleanup and flush geo caches after detection
+
 ## v2.0.20 (2026-03-24)
 - Fix model visibility not persisting on refresh; default issue markers off
 
