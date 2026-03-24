@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.85 (2026-03-24)
+- Show model loading status in open chat panel input area
+
 ## v1.2.84 (2026-03-24)
 - Replace prompt() with inline text input for new project creation
 

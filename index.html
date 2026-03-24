@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.84',hash:'84e7769',date:'2026-03-24T09:35:09Z'};
+  var CC_VERSION = {v:'1.2.85',hash:'577a26f',date:'2026-03-24T09:38:26Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -253,6 +253,7 @@ function startApp() {
     models:[], clashes:[], issues:[], activeId:null, showModal:false, showSettings:false, modalElement:null, tab:null,
     rules:{ modelA:'all', modelB:'all', hard:true, maxGap:50, duplicates:false, changeAware:false, excludeSelf:false, excludeTypes:[] },
     clashGroupBy:'none', // 'none','storey','discipline','status','type'
+    clashSortBy:'none', // 'none','distance_asc','distance_desc'
     detecting:false, switchingProject:false, sectionAxis:null, sectionPos:0.5, sectionCustom:null,
     sectionBox:null, // {enabled, min:[x,y,z], max:[x,y,z]} – 6-plane box clipping
     filters:Object.assign({},INIT_FILTERS), floors:[],
@@ -338,6 +339,7 @@ function startApp() {
       case 'SET_PROJECT_LIST': return Object.assign({},s,{projectList:a.v});
       case 'LOAD_PROJECT_STATE': return Object.assign({},s,a.data);
       case 'CLASH_GROUP_BY': return Object.assign({},s,{clashGroupBy:a.v});
+      case 'CLASH_SORT_BY': return Object.assign({},s,{clashSortBy:a.v});
       // 2D Underlays
       case 'ADD_UNDERLAY':    return Object.assign({},s,{underlays:s.underlays.concat([a.v]),activeUnderlay:a.v.id});
       case 'DEL_UNDERLAY':    return Object.assign({},s,{underlays:s.underlays.filter(function(u){return u.id!==a.id}),activeUnderlay:s.activeUnderlay===a.id?null:s.activeUnderlay});
@@ -5416,13 +5418,20 @@ function startApp() {
           ${s.prefs.showIssueMarkers!==false?'Markers On':'Markers Off'}
         </button>
       </div>`}
-      ${!isExplorerTab && isClashTab && items.length>0 && html`<div style=${{padding:'.25rem .5rem',borderBottom:'1px solid var(--border-subtle)',display:'flex',alignItems:'center',gap:'.3rem',flexShrink:0}}>
-        <span style=${{fontSize:'.6rem',color:'var(--text-faint)'}}>Group:</span>
-        ${['none','storey','discipline','status','type'].map(function(g){return html`<button key=${g} onClick=${function(){d({t:'CLASH_GROUP_BY',v:g})}}
-          style=${{...S_BTN,fontSize:'.55rem',padding:'.1rem .3rem',background:s.clashGroupBy===g?'var(--accent)':'var(--bg-secondary)',color:s.clashGroupBy===g?'#fff':'var(--text-faint)'}}>${g==='none'?'None':g.charAt(0).toUpperCase()+g.slice(1)}</button>`})}
+      ${!isExplorerTab && isClashTab && items.length>0 && html`<div style=${{padding:'.25rem .5rem',borderBottom:'1px solid var(--border-subtle)',display:'flex',flexDirection:'column',gap:'.25rem',flexShrink:0}}>
+        <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
+          <span style=${{fontSize:'.6rem',color:'var(--text-faint)'}}>Group:</span>
+          ${['none','storey','discipline','status','type'].map(function(g){return html`<button key=${g} onClick=${function(){d({t:'CLASH_GROUP_BY',v:g})}}
+            style=${{...S_BTN,fontSize:'.55rem',padding:'.1rem .3rem',background:s.clashGroupBy===g?'var(--accent)':'var(--bg-secondary)',color:s.clashGroupBy===g?'#fff':'var(--text-faint)'}}>${g==='none'?'None':g.charAt(0).toUpperCase()+g.slice(1)}</button>`})}
+        </div>
+        <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
+          <span style=${{fontSize:'.6rem',color:'var(--text-faint)'}}>Sort:</span>
+          ${[['none','None'],['distance_asc','Gap ↑'],['distance_desc','Gap ↓']].map(function(sv){return html`<button key=${sv[0]} onClick=${function(){d({t:'CLASH_SORT_BY',v:sv[0]})}}
+            style=${{...S_BTN,fontSize:'.55rem',padding:'.1rem .3rem',background:s.clashSortBy===sv[0]?'var(--accent)':'var(--bg-secondary)',color:s.clashSortBy===sv[0]?'#fff':'var(--text-faint)'}}>${sv[1]}</button>`})}
+        </div>
       </div>`}
       ${!isExplorerTab && items.length>0 && html`<${BulkActionBar} s=${s} d=${d} items=${items} isClash=${isClashTab} />`}
-      ${!isExplorerTab && html`<${VirtualList} items=${items} activeId=${s.activeId} d=${d} isClash=${isClashTab} prefs=${s.prefs} models=${s.models} groupBy=${isClashTab?s.clashGroupBy:'none'} selectMode=${s.selectMode} selected=${s.selected} />`}
+      ${!isExplorerTab && html`<${VirtualList} items=${items} activeId=${s.activeId} d=${d} isClash=${isClashTab} prefs=${s.prefs} models=${s.models} groupBy=${isClashTab?s.clashGroupBy:'none'} sortBy=${isClashTab?s.clashSortBy:'none'} selectMode=${s.selectMode} selected=${s.selected} />`}
     </div>`;
   }
 
@@ -5492,8 +5501,18 @@ function startApp() {
   }
 
   // Group clashes by a field
-  function groupClashes(items, groupBy) {
-    if (!groupBy || groupBy === 'none') return null;
+  function _clashSortFn(sortBy) {
+    if (sortBy === 'distance_asc') return function(a,b){ return (a.distance||0)-(b.distance||0); };
+    if (sortBy === 'distance_desc') return function(a,b){ return (b.distance||0)-(a.distance||0); };
+    return null;
+  }
+
+  function groupClashes(items, groupBy, sortBy) {
+    var sortFn = _clashSortFn(sortBy);
+    if (!groupBy || groupBy === 'none') {
+      if (sortFn) return [{ label: 'All', items: items.slice().sort(sortFn) }];
+      return null;
+    }
     var groups = {};
     items.forEach(function(it) {
       var key;
@@ -5508,7 +5527,7 @@ function startApp() {
       groups[key].push(it);
     });
     return Object.keys(groups).sort().map(function(k) {
-      return { label: k, items: groups[k] };
+      return { label: k, items: sortFn ? groups[k].sort(sortFn) : groups[k] };
     });
   }
 
@@ -5518,6 +5537,7 @@ function startApp() {
   function VirtualList(props) {
     var items=props.items, activeId=props.activeId, d=props.d, isClash=props.isClash, prefs=props.prefs, models=props.models||[];
     var groupBy = props.groupBy || 'none';
+    var sortBy = props.sortBy || 'none';
     var selectMode=props.selectMode, selected=props.selected||{};
     var scrollRef = useRef(null);
     var _st = useState(0), scrollTop=_st[0], setScrollTop=_st[1];
@@ -5530,7 +5550,7 @@ function startApp() {
       </div>
     </div>`;
     // Grouped rendering
-    var groups = groupClashes(items, groupBy);
+    var groups = groupClashes(items, groupBy, sortBy);
     if (groups) {
       function toggleGroup(label) {
         setCollapsed(function(prev) {
