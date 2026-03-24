@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.0.30 (2026-03-24)
+- Add Phase 0 AI training data collection (export + share)
+
+## v2.0.29 (2026-03-24)
+- Fix navigation cube camera alignment and add HTML compass overlay
+
+## v2.0.28 (2026-03-24)
+- Change viewcube into a proper navigation cube with touch + edge/corner support
+
+## v2.0.27 (2026-03-24)
+- Fix React hooks violation in WelcomePopup causing crash on dismiss
+
 ## v2.0.25 (2026-03-24)
 - Add tooltips to remaining filter labels and confirm before re-running detection
 

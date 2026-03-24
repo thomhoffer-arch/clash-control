@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.25',hash:'005002e',date:'2026-03-24T16:08:30Z'};
+  var CC_VERSION = {v:'2.0.30',hash:'f486bb3',date:'2026-03-24T19:47:55Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -252,6 +252,8 @@ function startApp() {
   var INIT = {
     models:[], clashes:[], issues:[], activeId:null, showModal:false, showSettings:false, modalElement:null, tab:null,
     rules:{ modelA:'all', modelB:'all', hard:true, maxGap:50, duplicates:false, changeAware:false, excludeSelf:true, excludeTypes:[], minOverlapVolM3:1e-5, toleranceByTypePair:{}, useSemanticFilter:true },
+    detectionSettings:null, // Captured at detection run time: {clearance_mm, discipline_filters}
+    trainingMode:false, // When true, shows Training tab for AI data annotation
     clashGroupBy:'none', clashSortBy:'none',
     issueGroupBy:'none', issueSortBy:'none',
     detecting:false, switchingProject:false, sectionAxis:null, sectionPos:0.5, sectionCustom:null,
@@ -303,7 +305,7 @@ function startApp() {
       case 'UPD_MODEL':   return Object.assign({},s,{models:s.models.map(function(m){return m.id===a.id?Object.assign({},m,a.u):m})});
       case 'TOGGLE_STOREY': return Object.assign({},s,{models:s.models.map(function(m){if(m.id!==a.id)return m;var hs=Object.assign({},m.hiddenStoreys||{});if(hs[a.storey])delete hs[a.storey];else hs[a.storey]=true;return Object.assign({},m,{hiddenStoreys:hs});})});
       case 'TOGGLE_ALL_STOREYS': return Object.assign({},s,{models:s.models.map(function(m){if(m.id!==a.id)return m;return Object.assign({},m,{hiddenStoreys:a.hide?a.storeys.reduce(function(o,st){o[st]=true;return o;},{}):{}}); })});
-      case 'SET_CLASHES': var newSt={clashes:a.v, detecting:false, activeId:null, floors:deriveFloors(a.v)}; if(s.prefs.resetFiltersOnRun!==false) newSt.filters=Object.assign({},INIT_FILTERS); return Object.assign({},s,newSt);
+      case 'SET_CLASHES': var newSt={clashes:a.v, detecting:false, activeId:null, floors:deriveFloors(a.v)}; if(a.detectionSettings) newSt.detectionSettings=a.detectionSettings; if(s.prefs.resetFiltersOnRun!==false) newSt.filters=Object.assign({},INIT_FILTERS); return Object.assign({},s,newSt);
       case 'DETECTING':   return Object.assign({},s,{detecting:true});
       case 'SWITCHING_PROJECT': return Object.assign({},s,{switchingProject:!!a.v});
       case 'ADD_ISSUE':   return Object.assign({},s,{issues:s.issues.concat([a.v])});
@@ -318,6 +320,7 @@ function startApp() {
       case 'SECTION_CUSTOM': return Object.assign({},s,{sectionAxis:null, sectionCustom:a.v, sectionPos:a.pos!=null?a.pos:0.5});
       case 'TAB':         var tabUpd={tab:a.v}; if(a.v!==s.tab&&(a.v==='clashes'||a.v==='issues'||s.tab==='clashes'||s.tab==='issues'))tabUpd.activeId=null; return Object.assign({},s,tabUpd);
       case 'SETTINGS':    return Object.assign({},s,{showSettings:a.v});
+      case 'TRAINING_MODE': var tmOn=!s.trainingMode; return Object.assign({},s,{trainingMode:tmOn, tab:tmOn?'training':s.tab==='training'?null:s.tab});
       case 'UPD_PREFS':   return Object.assign({},s,{prefs:Object.assign({},s.prefs,a.u)});
       case 'MEASURE_MODE': return Object.assign({},s,{measureMode:a.v});
       case 'ADD_MEASUREMENT': return Object.assign({},s,{measurements:s.measurements.concat([a.v])});
@@ -1697,7 +1700,10 @@ function startApp() {
             elemAType:tA, elemBType:tB, elemAName:nA, elemBName:nB,
             globalIdA:pA.globalId||'', globalIdB:pB.globalId||'',
             elemAStorey:pA.storey||'', elemBStorey:pB.storey||'',
-            elemAMaterial:pA.material||'', elemBMaterial:pB.material||''
+            elemAMaterial:pA.material||'', elemBMaterial:pB.material||'',
+            objectTypeA:pA.objectType||'', objectTypeB:pB.objectType||'',
+            overlapVolM3:sizeA.x*sizeA.y*sizeA.z, bboxA:{dx:Math.round(sizeA.x*1000*10)/10,dy:Math.round(sizeA.y*1000*10)/10,dz:Math.round(sizeA.z*1000*10)/10},
+            bboxB:{dx:Math.round(sizeB.x*1000*10)/10,dy:Math.round(sizeB.y*1000*10)/10,dz:Math.round(sizeB.z*1000*10)/10}, clearanceMm:null
           });
           return;
         }
@@ -1806,6 +1812,11 @@ function startApp() {
         var pA=eA.props||{}, pB=eB.props||{};
         var tA=pA.ifcType||'Element', tB=pB.ifcType||'Element';
         var nA=pA.name||('#'+eA.expressId), nB=pB.name||('#'+eB.expressId);
+        // AABB overlap volume (m³) and bbox dimensions (mm) for AI training data
+        var _ovx=Math.max(0,Math.min(bA.max.x,bB.max.x)-Math.max(bA.min.x,bB.min.x));
+        var _ovy=Math.max(0,Math.min(bA.max.y,bB.max.y)-Math.max(bA.min.y,bB.min.y));
+        var _ovz=Math.max(0,Math.min(bA.max.z,bB.max.z)-Math.max(bA.min.z,bB.min.z));
+        var _szA=bA.getSize(_tmpSizeA), _szB=bB.getSize(_tmpSizeB);
         clashes.push({
           id:uid(), source:'auto', type:hardPt?'hard':'soft', status:'open',
           title:sameModel?mA.name+' (self)':mA.discipline.toUpperCase()+' \u2194 '+mB.discipline.toUpperCase(),
@@ -1817,7 +1828,12 @@ function startApp() {
           elemAType:tA, elemBType:tB, elemAName:nA, elemBName:nB,
           globalIdA:pA.globalId||'', globalIdB:pB.globalId||'',
           elemAStorey:pA.storey||'', elemBStorey:pB.storey||'',
-          elemAMaterial:pA.material||'', elemBMaterial:pB.material||''
+          elemAMaterial:pA.material||'', elemBMaterial:pB.material||'',
+          objectTypeA:pA.objectType||'', objectTypeB:pB.objectType||'',
+          overlapVolM3:_ovx*_ovy*_ovz,
+          bboxA:{dx:Math.round(_szA.x*1000*10)/10,dy:Math.round(_szA.y*1000*10)/10,dz:Math.round(_szA.z*1000*10)/10},
+          bboxB:{dx:Math.round(_szB.x*1000*10)/10,dy:Math.round(_szB.y*1000*10)/10,dz:Math.round(_szB.z*1000*10)/10},
+          clearanceMm:isSoft?Math.round(geoDist*1000):null
         });
       }
     });
@@ -2075,6 +2091,90 @@ function startApp() {
       });
     };
     inp.click();
+  }
+
+  // ── AI Training Data Export ─────────────────────────────────
+  // Exports anonymous clash metadata for training the ClashControl AI model.
+  // GDPR note: This output intentionally excludes all personal data and
+  // project-identifying information. It contains only IFC type metadata,
+  // geometric metrics (dimensions, penetration depth, overlap volume), and
+  // user verdicts. No element names, GUIDs, coordinates, file names, or
+  // user identifiers are included. See the AI Layer Implementation Guide
+  // for the full GDPR rationale.
+
+  var _AI_VERDICT_MAP = {open:'unreviewed', in_progress:'true_clash', resolved:'acceptable', closed:'false_positive'};
+
+  function _buildAITrainingPayload(clashes, detectionSettings, models) {
+    var reviewed = clashes.filter(function(c){ return c.status!=='open'; });
+    if (reviewed.length===0) return null;
+    var records = reviewed.map(function(c) {
+      var discA = '', discB = '';
+      if (c.disciplines) { discA = c.disciplines[0]||''; discB = c.disciplines[1]||''; }
+      // Look up predefined type (objectType) from model elements if not on clash object
+      var ptA = c.objectTypeA || '', ptB = c.objectTypeB || '';
+      if (!ptA || !ptB) {
+        var pA = _lookupElProps(models, c.modelAId, c.elemA);
+        var pB = _lookupElProps(models, c.modelBId, c.elemB);
+        if (pA && !ptA) ptA = pA.objectType || '';
+        if (pB && !ptB) ptB = pB.objectType || '';
+      }
+      // Penetration depth: distance is negative for hard clashes (in mm)
+      var penDepth = c.type==='hard' && c.distance<0 ? Math.round(Math.abs(c.distance)*10)/10 : 0;
+      return {
+        ifc_type_a: c.elemAType || '',
+        ifc_type_b: c.elemBType || '',
+        discipline_a: discA,
+        discipline_b: discB,
+        predefined_type_a: ptA || null,
+        predefined_type_b: ptB || null,
+        clash_type: c.type === 'duplicate' ? 'hard' : c.type,
+        clash_type_confirmed: c.clashTypeConfirmed || null,
+        penetration_depth_mm: penDepth,
+        overlap_volume_m3: c.overlapVolM3 != null ? Math.round(c.overlapVolM3 * 1e6) / 1e6 : 0,
+        clearance_mm: c.clearanceMm != null ? c.clearanceMm : null,
+        bbox_a: c.bboxA || {dx:0,dy:0,dz:0},
+        bbox_b: c.bboxB || {dx:0,dy:0,dz:0},
+        verdict: _AI_VERDICT_MAP[c.status] || 'unreviewed',
+        reasons: c.aiReasons || [],
+        note: c.aiNote || '',
+        app_version: CC_VERSION.v
+      };
+    });
+    return {
+      export_version: '1.0',
+      app_version: CC_VERSION.v,
+      clash_count: records.length,
+      detection_settings: detectionSettings || {clearance_mm:null, discipline_filters:['all']},
+      clashes: records
+    };
+  }
+
+  function exportAITrainingData(clashes, detectionSettings, models) {
+    var payload = _buildAITrainingPayload(clashes, detectionSettings, models);
+    if (!payload) return;
+    var json = JSON.stringify(payload, null, 2);
+    var blob = new Blob([json], {type:'application/json'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url; a.download = 'clashcontrol-training-data.json';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function shareAITrainingData(clashes, detectionSettings, models, onStatus) {
+    var payload = _buildAITrainingPayload(clashes, detectionSettings, models);
+    if (!payload) { onStatus('error','No reviewed clashes to share.'); return; }
+    var json = JSON.stringify(payload);
+    onStatus('sending', null);
+    var fd = new FormData();
+    fd.append('entry.1450623071', json);
+    fetch('https://docs.google.com/forms/d/e/1FAIpQLSdSMbfjcApszFebuvQXHKiWhH-zQJhk_38m1vvMQ-_bMP_6eA/formResponse', {
+      method:'POST', mode:'no-cors', body:fd
+    }).then(function(){
+      onStatus('ok', null);
+    }).catch(function(){
+      onStatus('error', 'Submission failed \u2014 you can export the file and share it manually instead');
+    });
   }
 
   // ── BCF Export (supports v2.1 and v3.0) ──────────────────────
@@ -4016,6 +4116,19 @@ function startApp() {
           ${s.prefs.showIssueMarkers!==false?'Issue Markers On':'Issue Markers Off'}
         </button>
       </div>`}
+      ${s.clashes.length>0 && html`<button onClick=${function(){d({t:'TRAINING_MODE'});}}
+        style=${{position:'absolute',top:'2.6rem',left:'50%',transform:'translateX(-50%)',
+          zIndex:20,display:'flex',alignItems:'center',gap:'.4rem',pointerEvents:'auto',
+          padding:'.45rem 1.1rem',borderRadius:999,
+          background:s.trainingMode?'rgba(124,58,237,.85)':'var(--overlay-bg)',
+          border:'1px solid '+(s.trainingMode?'#a78bfa':'var(--border)'),
+          color:s.trainingMode?'#e9d5ff':'var(--text-muted)',fontSize:'.74rem',cursor:'pointer',
+          boxShadow:s.trainingMode?'0 0 20px rgba(124,58,237,.3)':'var(--shadow-md)',whiteSpace:'nowrap'}}>
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93V12h3.5a2.25 2.25 0 0 1 0 4.5h-3.5v1.25A3.25 3.25 0 0 1 9.5 21 3.25 3.25 0 0 1 6.25 17.75V14.5h-1A2.25 2.25 0 0 1 3 12.25 2.25 2.25 0 0 1 5.25 10h3.5V9.93A4 4 0 0 1 12 2z"/>
+        </svg>
+        ${s.trainingMode?'Training Mode On':'Training Mode'}
+      </button>`}
       ${s.models.length>0 && html`<div style=${{position:'absolute',top:'.75rem',right:'50%',transform:'translateX(50%)',marginRight:'-45%',pointerEvents:'auto'}}>
         <div style=${{display:'flex',alignItems:'center',gap:'.2rem'}}>
           <button onClick=${function(){setFinderOpen(!finderOpen);if(finderOpen){doFind('');setFindQuery('');}}}
@@ -4255,10 +4368,14 @@ function startApp() {
     </div>`;
   }
 
-  // ── View Cube (Revit-style 3D cube with compass) ──────────────
+  // ── Navigation Cube (Revit-style 3D cube with compass) ────────
+  // Supports face, edge, and corner clicks for 26 snap directions.
+  // Touch-enabled for mobile. Drag to orbit the main viewport.
+  // Camera is along +Z so cube orientation directly matches the grid axes.
   function ViewCube(props) {
     var state3d = props.state3d;
     var canvasRef = useRef(null);
+    var compassRef = useRef(null);
     var vcState = useRef(null);
 
     // Face definitions: label + normal. Order MUST stay fixed (BOX_FACE_MAP depends on it).
@@ -4331,15 +4448,17 @@ function startApp() {
       renderer.setPixelRatio(window.devicePixelRatio);
 
       var scene = new THREE.Scene();
-      // Perspective camera gives real depth cues
-      var camera = new THREE.PerspectiveCamera(40, 1, 0.1, 20);
-      camera.position.set(2.3, 2.3, 2.3);
+      // Camera along +Z axis so cube rotation directly maps to main viewport orientation.
+      // This ensures FRONT face points toward camera when main camera is at +Z (front view),
+      // aligning the nav cube with the grid axes at origin.
+      var camera = new THREE.PerspectiveCamera(28, 1, 0.1, 20);
+      camera.position.set(0, 0, 4);
       camera.lookAt(0, 0, 0);
 
-      // Strong key light from upper-right-front + dim fill from opposite side
-      scene.add(new THREE.AmbientLight(0xffffff, 0.45));
-      var dKey = new THREE.DirectionalLight(0xffffff, 1.1);
-      dKey.position.set(3, 5, 4);
+      // Lighting: key light from upper-right-front + dim fill from opposite side
+      scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+      var dKey = new THREE.DirectionalLight(0xffffff, 0.95);
+      dKey.position.set(2, 4, 5);
       scene.add(dKey);
       var dFill = new THREE.DirectionalLight(0x6688aa, 0.3);
       dFill.position.set(-3, -2, -3);
@@ -4365,30 +4484,19 @@ function startApp() {
       cubeGroup.add(new THREE.LineSegments(
         new THREE.EdgesGeometry(new THREE.BoxGeometry(1.004, 1.004, 1.004)), edgeMat));
 
-      scene.add(cubeGroup);
-
-      // Compass ring
-      var compassGroup = new THREE.Group();
-      var ring = new THREE.Mesh(
-        new THREE.RingGeometry(1.25, 1.38, 64),
-        new THREE.MeshBasicMaterial({color:0x475569, side:THREE.DoubleSide, transparent:true, opacity:0.5}));
-      ring.rotation.x = -Math.PI/2;
-      ring.position.y = -0.02;
-      compassGroup.add(ring);
-      [{l:'N',a:0},{l:'E',a:Math.PI/2},{l:'S',a:Math.PI},{l:'W',a:-Math.PI/2}].forEach(function(cl){
-        var lc=document.createElement('canvas'); lc.width=32; lc.height=32;
-        var lctx=lc.getContext('2d');
-        lctx.fillStyle = cl.l==='N'?'#ef4444':'#94a3b8';
-        lctx.font='bold 22px system-ui'; lctx.textAlign='center'; lctx.textBaseline='middle';
-        lctx.fillText(cl.l,16,16);
-        var lt=new THREE.CanvasTexture(lc); lt.minFilter=THREE.LinearFilter;
-        var ls=new THREE.Mesh(new THREE.PlaneGeometry(0.22,0.22),
-          new THREE.MeshBasicMaterial({map:lt,transparent:true,side:THREE.DoubleSide,depthTest:false}));
-        ls.position.set(Math.sin(cl.a)*1.52, 0, -Math.cos(cl.a)*1.52);
-        ls.rotation.x=-Math.PI/2;
-        compassGroup.add(ls);
+      // Axis indicators at cube corner — match the AxesHelper at the grid origin
+      // X=red, Y=green, Z=blue. Extends from the -X/-Y/-Z corner outward along each axis.
+      var axLen = 0.4;
+      [{d:[1,0,0],c:0xef4444},{d:[0,1,0],c:0x22c55e},{d:[0,0,1],c:0x3b82f6}].forEach(function(ax){
+        var p0 = new THREE.Vector3(-0.5,-0.5,-0.5);
+        var p1 = new THREE.Vector3(-0.5+ax.d[0]*axLen, -0.5+ax.d[1]*axLen, -0.5+ax.d[2]*axLen);
+        var geo = new THREE.BufferGeometry().setFromPoints([p0, p1]);
+        var line = new THREE.Line(geo, new THREE.LineBasicMaterial({color:ax.c, depthTest:false}));
+        line.renderOrder = 1;
+        cubeGroup.add(line);
       });
-      scene.add(compassGroup);
+
+      scene.add(cubeGroup);
 
       var raycaster = new THREE.Raycaster();
       var mouse = new THREE.Vector2();
@@ -4401,12 +4509,18 @@ function startApp() {
 
       vcState.current = {renderer:renderer, scene:scene, camera:camera,
         cubeGroup:cubeGroup, cubeMesh:cubeMesh, materials:materials,
-        compassGroup:compassGroup, raycaster:raycaster, mouse:mouse, hoveredIdx:null};
+        raycaster:raycaster, mouse:mouse, hoveredKey:null};
 
       // ── Animation loop ──────────────────────────────────────────
       // Rotation is derived from orbit spherical angles (theta/phi) rather than
       // camera.quaternion, which suffers gimbal-lock when looking straight up/down.
       var animId;
+      // HTML compass: cache label elements once, update positions per frame
+      var compEl = compassRef.current;
+      var compLabels = compEl ? compEl.querySelectorAll('[data-compass]') : [];
+      // Compass angles: N at top (-PI/2 in screen coords), E=right(0), S=bottom(PI/2), W=left(PI)
+      var COMP_A = [-Math.PI/2, 0, Math.PI/2, Math.PI];
+      var COMP_R = 62, COMP_CX = 70, COMP_CY = 70;
       function animate() {
         animId = requestAnimationFrame(animate);
         var S = state3d.current;
@@ -4420,44 +4534,80 @@ function startApp() {
         _qCam.multiplyQuaternions(_qY, _qX);
         // Invert so the face in the camera's direction faces the mini-camera
         vc.cubeGroup.quaternion.copy(_qCam).invert();
-        // Compass rotates only around Y (keeps N/S/E/W correct)
-        vc.compassGroup.quaternion.setFromAxisAngle(_AY, -theta);
         vc.renderer.render(vc.scene, vc.camera);
+        // Update HTML compass labels — orbit around center, text stays upright
+        for(var i=0;i<compLabels.length;i++){
+          var a = COMP_A[i] - theta;
+          compLabels[i].style.left = (COMP_CX + Math.cos(a) * COMP_R) + 'px';
+          compLabels[i].style.top  = (COMP_CY + Math.sin(a) * COMP_R) + 'px';
+        }
       }
       animate();
 
-      // ── Hover / click helpers ───────────────────────────────────
-      function getHit(e) {
+      // ── Hit-zone detection (face / edge / corner) ─────────────
+      // Returns {dir:[x,y,z], faces:[indices]} or null.
+      // Edge threshold: hits within this distance of a cube edge
+      // trigger a 2-face (edge) or 3-face (corner) navigation.
+      var EDGE_T = 0.15;
+      function getHitZone(cx, cy) {
         var vc = vcState.current; if(!vc) return null;
         var rect = canvas.getBoundingClientRect();
-        mouse.x = ((e.clientX-rect.left)/rect.width)*2-1;
-        mouse.y = -((e.clientY-rect.top)/rect.height)*2+1;
+        mouse.x = ((cx-rect.left)/rect.width)*2-1;
+        mouse.y = -((cy-rect.top)/rect.height)*2+1;
         raycaster.setFromCamera(mouse, camera);
         var hits = raycaster.intersectObject(cubeMesh);
-        return hits.length>0 ? BOX_FACE_MAP[hits[0].face.materialIndex] : null;
+        if(hits.length===0) return null;
+        var hit = hits[0];
+        var faceIdx = BOX_FACE_MAP[hit.face.materialIndex];
+        // Convert hit point to cube local space (unrotated unit cube -0.5..0.5)
+        var lp = cubeMesh.worldToLocal(hit.point.clone());
+        var comps = [lp.x, lp.y, lp.z];
+        var fn = FACES[faceIdx].normal;
+        var dir = [fn[0], fn[1], fn[2]];
+        var faces = [faceIdx];
+        // For axes perpendicular to the face normal, check if near an edge
+        for(var i=0;i<3;i++){
+          if(fn[i]!==0) continue;
+          if(Math.abs(comps[i]) > 0.5 - EDGE_T){
+            var sign = comps[i]>0?1:-1;
+            dir[i] = sign;
+            for(var j=0;j<FACES.length;j++){
+              if(FACES[j].normal[i]===sign){ faces.push(j); break; }
+            }
+          }
+        }
+        // Normalize direction
+        var len = Math.sqrt(dir[0]*dir[0]+dir[1]*dir[1]+dir[2]*dir[2]);
+        if(len>0){ dir[0]/=len; dir[1]/=len; dir[2]/=len; }
+        return {dir:dir, faces:faces};
       }
-      function updateHover(newIdx) {
+
+      // ── Hover highlight (supports multi-face for edges/corners) ─
+      function updateHover(zone) {
         var vc = vcState.current; if(!vc) return;
-        if(newIdx === vc.hoveredIdx) return;
-        vc.hoveredIdx = newIdx;
+        var newKey = zone ? zone.faces.slice().sort().join(',') : null;
+        if(newKey === vc.hoveredKey) return;
+        vc.hoveredKey = newKey;
+        var hovSet = {};
+        if(zone) zone.faces.forEach(function(f){ hovSet[f]=true; });
         vc.materials.forEach(function(mat, boxIdx) {
           var fi = BOX_FACE_MAP[boxIdx];
-          var isHov = fi === newIdx;
+          var isHov = !!hovSet[fi];
           mat.map = makeFaceTexture(FACES[fi].label, isHov);
           mat.map.needsUpdate = true;
           mat.color.setHex(isHov ? 0x2563eb : (FACE_CLR[FACES[fi].label]||0x1c3550));
         });
       }
 
-      // ── Drag-to-orbit / click ───────────────────────────────────
+      // ── Drag-to-orbit / click (mouse + touch) ────────────────
       var isDragging=false, dragStart={x:0,y:0}, didDrag=false;
-      function onDown(e) { isDragging=true; didDrag=false; dragStart.x=e.clientX; dragStart.y=e.clientY; canvas.style.cursor='grabbing'; }
-      function onDrag(e) {
-        if(!isDragging){ updateHover(getHit(e)); return; }
-        var dx=e.clientX-dragStart.x, dy=e.clientY-dragStart.y;
+
+      function onPointerDown(cx, cy) { isDragging=true; didDrag=false; dragStart.x=cx; dragStart.y=cy; canvas.style.cursor='grabbing'; }
+      function onPointerDrag(cx, cy) {
+        var dx=cx-dragStart.x, dy=cy-dragStart.y;
         if(Math.abs(dx)>3||Math.abs(dy)>3) didDrag=true;
         if(!didDrag) return;
-        dragStart.x=e.clientX; dragStart.y=e.clientY;
+        dragStart.x=cx; dragStart.y=cy;
         var S=state3d.current;
         if(S&&S.orbit){
           S.orbit.sph.theta -= dx*0.007;
@@ -4465,20 +4615,49 @@ function startApp() {
           S.orbit.apply(); invalidate();
         }
       }
-      function onUp(e) {
-        if(isDragging&&!didDrag){ var fi=getHit(e); if(fi!==null) flyToDir(FACES[fi].normal); }
+      function onPointerUp(cx, cy) {
+        if(isDragging&&!didDrag){ var zone=getHitZone(cx,cy); if(zone) flyToDir(zone.dir); }
         isDragging=false; canvas.style.cursor='pointer';
       }
-      canvas.addEventListener('mousedown', onDown);
-      canvas.addEventListener('mousemove', onDrag);
-      canvas.addEventListener('mouseup',   onUp);
+
+      // Mouse events
+      canvas.addEventListener('mousedown', function(e){ onPointerDown(e.clientX, e.clientY); });
+      canvas.addEventListener('mousemove', function(e){
+        if(!isDragging){ updateHover(getHitZone(e.clientX, e.clientY)); return; }
+        onPointerDrag(e.clientX, e.clientY);
+      });
+      canvas.addEventListener('mouseup', function(e){ onPointerUp(e.clientX, e.clientY); });
       canvas.addEventListener('mouseleave', function(){ isDragging=false; canvas.style.cursor='pointer'; updateHover(null); });
+
+      // Touch events (navigation cube works on mobile)
+      canvas.addEventListener('touchstart', function(e){
+        e.preventDefault();
+        var t=e.touches[0]; if(!t) return;
+        onPointerDown(t.clientX, t.clientY);
+      }, {passive:false});
+      canvas.addEventListener('touchmove', function(e){
+        e.preventDefault();
+        var t=e.touches[0]; if(!t) return;
+        onPointerDrag(t.clientX, t.clientY);
+      }, {passive:false});
+      canvas.addEventListener('touchend', function(e){
+        e.preventDefault();
+        var t=e.changedTouches[0]; if(!t) return;
+        onPointerUp(t.clientX, t.clientY);
+      }, {passive:false});
 
       return function(){ cancelAnimationFrame(animId); renderer.dispose(); };
     }, []);
 
-    return html`<div style=${{position:'absolute',top:'.5rem',right:'.5rem',pointerEvents:'auto',width:120,height:120}}>
-      <canvas ref=${canvasRef} width="120" height="120" style=${{cursor:'pointer',width:'100%',height:'100%'}} />
+    var compassLblStyle = {position:'absolute',transform:'translate(-50%,-50%)',fontSize:'10px',fontWeight:'bold',pointerEvents:'none',userSelect:'none'};
+    return html`<div style=${{position:'absolute',top:'.5rem',right:'.5rem',pointerEvents:'auto',width:140,height:140}}>
+      <div ref=${compassRef} style=${{position:'absolute',top:0,left:0,width:'100%',height:'100%',pointerEvents:'none'}}>
+        <span data-compass style=${{...compassLblStyle,color:'#ef4444'}}>N</span>
+        <span data-compass style=${{...compassLblStyle,color:'#94a3b8'}}>E</span>
+        <span data-compass style=${{...compassLblStyle,color:'#94a3b8'}}>S</span>
+        <span data-compass style=${{...compassLblStyle,color:'#94a3b8'}}>W</span>
+      </div>
+      <canvas ref=${canvasRef} width="120" height="120" style=${{cursor:'pointer',position:'absolute',top:10,left:10,width:120,height:120}} />
     </div>`;
   }
 
@@ -5569,20 +5748,31 @@ function startApp() {
       }
       cb();
     }
+    // Build detection settings snapshot at run time (for AI training data export)
+    function _captureDetectionSettings(rules, models) {
+      var discs = [];
+      var mA = rules.modelA, mB = rules.modelB;
+      if (mA && mA.indexOf('disc:')===0) discs.push(mA.slice(5));
+      if (mB && mB.indexOf('disc:')===0 && discs.indexOf(mB.slice(5))===-1) discs.push(mB.slice(5));
+      if (discs.length===0) discs = ['all'];
+      return { clearance_mm: rules.maxGap > 0 ? rules.maxGap : null, discipline_filters: discs };
+    }
     function runDetection() {
       if (!canRun) return;
       _confirmIfClashes(function(){
+        var ds = _captureDetectionSettings(s.rules, s.models);
         d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
-        setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, s.rules)}); }, 20);
+        setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, s.rules), detectionSettings:ds}); }, 20);
       });
     }
     function applyAndRun(preset) {
       if (!canRun) return;
       _confirmIfClashes(function(){
         var merged = Object.assign({}, s.rules, preset.r);
+        var ds = _captureDetectionSettings(merged, s.models);
         d({t:'UPD_RULES', u:preset.r});
         d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
-        setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, merged)}); }, 20);
+        setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, merged), detectionSettings:ds}); }, 20);
       });
     }
 
@@ -6080,6 +6270,7 @@ function startApp() {
         </div>`;
       }()}
       ${!isExplorerTab && items.length>0 && html`<${BulkActionBar} s=${s} d=${d} items=${items} isClash=${isClashTab} />`}
+
       ${!isExplorerTab && html`<${VirtualList} items=${items} activeId=${s.activeId} d=${d} isClash=${isClashTab} prefs=${s.prefs} models=${s.models} groupBy=${isClashTab?s.clashGroupBy:s.issueGroupBy} sortBy=${isClashTab?s.clashSortBy:s.issueSortBy} selectMode=${s.selectMode} selected=${s.selected} />`}
     </div>`;
   }
@@ -8997,6 +9188,153 @@ function startApp() {
     </div>`;
   }
 
+  // ── Training Panel (AI data annotation + export/share) ──────
+  // Shown in SidePanel when trainingMode is on and 'training' tab is active.
+  // Contains all clashes with annotation controls, plus export/share buttons.
+  function TrainingPanel(props) {
+    var s = props.s, d = props.d;
+    var clashes = s.clashes;
+    var ss = useState({status:null,msg:null}), shareState=ss[0], setShareState=ss[1];
+    var stExpanded = useState(null), expandedId=stExpanded[0], setExpanded=stExpanded[1];
+    var reviewedCount = clashes.filter(function(c){return c.status!=='open';}).length;
+    var totalCount = clashes.length;
+
+    function doExport() { exportAITrainingData(clashes, s.detectionSettings, s.models); }
+    function doShare() {
+      shareAITrainingData(clashes, s.detectionSettings, s.models, function(status, msg) {
+        setShareState({status:status, msg:msg});
+        if (status==='ok') setTimeout(function(){ setShareState({status:null,msg:null}); }, 4000);
+      });
+    }
+    var isSending = shareState.status==='sending';
+
+    var CTYPES = [{k:'hard',l:'Hard'},{k:'soft',l:'Soft'},{k:'no_clash',l:'None'}];
+    var REASONS = ['Installation tolerance','Already coordinated','Different levels','Sleeve / opening present','Insulation overlap','Modelling error','Rule exception'];
+
+    if (totalCount===0) return html`<div style=${{padding:'1.5rem',textAlign:'center',color:'var(--text-muted)',fontSize:'.7rem'}}>
+      Run clash detection first to annotate training data.
+    </div>`;
+
+    return html`<div style=${{display:'flex',flexDirection:'column',height:'100%',overflow:'hidden'}}>
+      <div style=${{padding:'.5rem .6rem',borderBottom:'1px solid var(--border-subtle)',flexShrink:0}}>
+        <div style=${{fontSize:'.6rem',color:'var(--text-muted)',marginBottom:'.3rem',lineHeight:1.4}}>
+          Help improve ClashControl by reviewing clashes and sharing anonymous metadata. No element names, coordinates, or project information is included.
+        </div>
+        <div style=${{display:'flex',gap:'.3rem',alignItems:'center',flexWrap:'wrap',marginBottom:'.3rem'}}>
+          <button onClick=${doExport}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.25rem .5rem',background:'var(--bg-secondary)',color:'var(--text-muted)',border:'1px solid var(--border)'}}>Export AI training data</button>
+          <button onClick=${doShare} disabled=${isSending || reviewedCount===0}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.25rem .5rem',
+              background:isSending||reviewedCount===0?'var(--bg-secondary)':'#7c3aed',
+              color:isSending||reviewedCount===0?'var(--text-faint)':'#fff',
+              border:'1px solid '+(isSending||reviewedCount===0?'var(--border)':'#7c3aed'),
+              opacity:isSending?0.6:1}}>${isSending?'Sending\u2026':'Share training data'}</button>
+        </div>
+        ${shareState.status==='ok' && html`<div style=${{fontSize:'.6rem',color:'#22c55e',marginBottom:'.2rem'}}>Submitted, thank you!</div>`}
+        ${shareState.status==='error' && shareState.msg && html`<div style=${{fontSize:'.6rem',color:'#ef4444',marginBottom:'.2rem'}}>${shareState.msg}</div>`}
+        <div style=${{fontSize:'.55rem',color:'var(--text-faint)'}}>
+          ${reviewedCount} / ${totalCount} clashes reviewed
+          <span style=${{display:'inline-block',width:60,height:4,background:'var(--bg-secondary)',borderRadius:2,marginLeft:'.3rem',verticalAlign:'middle'}}>
+            <span style=${{display:'block',width:(reviewedCount/Math.max(totalCount,1)*100)+'%',height:'100%',background:'#7c3aed',borderRadius:2}}></span>
+          </span>
+        </div>
+      </div>
+      <div style=${{flex:1,overflowY:'auto'}}>
+        ${clashes.map(function(c) {
+          var isExp = expandedId===c.id;
+          var typeBg = c.type==='hard'?'#7f1d1d':c.type==='soft'?'#78350f':'#1e3a5f';
+          var typeCol = c.type==='hard'?'#fca5a5':c.type==='soft'?'#fcd34d':'#93c5fd';
+          var stBg = (STAT[c.status]||STAT.open).bg;
+          var curCT = c.clashTypeConfirmed != null ? c.clashTypeConfirmed : c.type;
+          var curReasons = c.aiReasons || [];
+          var curNote = c.aiNote || '';
+          return html`<div key=${c.id} style=${{borderBottom:'1px solid var(--border-subtle)'}}>
+            <div onClick=${function(){setExpanded(isExp?null:c.id);}}
+              style=${{padding:'.45rem .6rem',cursor:'pointer',background:isExp?'var(--bg-secondary)':'transparent',
+                borderLeft:isExp?'2px solid #7c3aed':'2px solid transparent'}}>
+              <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
+                <span style=${{fontSize:'.5rem',padding:'.1rem .25rem',borderRadius:3,background:typeBg,color:typeCol,fontWeight:700}}>${c.type==='hard'?'Hard':c.type==='soft'?'Soft':'Dup'}</span>
+                <span style=${{flex:1,fontSize:'.65rem',color:'var(--text-primary)',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>${c.elemAType} vs ${c.elemBType}</span>
+                <span style=${{fontSize:'.5rem',padding:'.1rem .25rem',borderRadius:4,background:stBg+'22',color:stBg,fontWeight:600}}>${(STAT[c.status]||STAT.open).label}</span>
+                ${c.clashTypeConfirmed && html`<span style=${{fontSize:'.5rem',color:'#a78bfa'}}>✓</span>`}
+              </div>
+              ${c.distance!=null && html`<div style=${{fontSize:'.55rem',color:'var(--text-faint)',marginTop:'.1rem'}}>
+                ${c.distance<0?Math.abs(c.distance)+'mm penetration':c.distance===0?'Touching':c.distance+'mm gap'}
+                ${c.disciplines?' \u2022 '+c.disciplines.join(' \u2194 '):''}
+              </div>`}
+            </div>
+            ${isExp && html`<div style=${{padding:'.4rem .6rem',background:'var(--bg-primary)',borderTop:'1px solid var(--border-subtle)'}}>
+              <div style=${{display:'flex',gap:'.25rem',marginBottom:'.35rem',flexWrap:'wrap'}}>
+                ${Object.keys(STAT).map(function(k){return html`<button key=${k}
+                  onClick=${function(){d({t:'UPD_CLASH',id:c.id,u:{status:k}});}}
+                  style=${{...S_BTN,fontSize:'.55rem',padding:'.15rem .35rem',background:c.status===k?STAT[k].bg:'var(--bg-secondary)',color:c.status===k?'#fff':'var(--text-faint)'}}>${STAT[k].label}</button>`})}
+              </div>
+              <div style=${{fontSize:'.55rem',fontWeight:600,color:'var(--text-muted)',marginBottom:'.15rem'}}>Clash type</div>
+              <div style=${{display:'flex',gap:'.25rem',marginBottom:'.3rem',flexWrap:'wrap'}}>
+                ${CTYPES.map(function(ct){var sel=curCT===ct.k;return html`<button key=${ct.k}
+                  onClick=${function(){d({t:'UPD_CLASH',id:c.id,u:{clashTypeConfirmed:ct.k}});}}
+                  style=${{...S_BTN,fontSize:'.55rem',padding:'.1rem .35rem',background:sel?'#1e3a5f':'var(--bg-secondary)',color:sel?'#93c5fd':'var(--text-faint)',border:'1px solid '+(sel?'#3b82f6':'var(--border)')}}>${ct.l}</button>`})}
+              </div>
+              <div style=${{fontSize:'.55rem',fontWeight:600,color:'var(--text-muted)',marginBottom:'.15rem'}}>Reason</div>
+              <div style=${{display:'flex',gap:'.2rem',marginBottom:'.3rem',flexWrap:'wrap'}}>
+                ${REASONS.map(function(r){var sel=curReasons.indexOf(r)>=0;return html`<span key=${r}
+                  onClick=${function(){var nr=sel?curReasons.filter(function(x){return x!==r}):curReasons.concat([r]);d({t:'UPD_CLASH',id:c.id,u:{aiReasons:nr}});}}
+                  style=${{fontSize:'.55rem',padding:'.1rem .35rem',borderRadius:10,cursor:'pointer',whiteSpace:'nowrap',
+                    border:'1px solid '+(sel?'#3b82f6':'var(--border)'),
+                    background:sel?'#1e3a5f':'var(--bg-secondary)',
+                    color:sel?'#93c5fd':'var(--text-muted)'}}>${r}</span>`})}
+              </div>
+              <input type="text" value=${curNote} maxLength="140" placeholder="Optional note \u2014 do not include project names or locations"
+                onInput=${function(e){d({t:'UPD_CLASH',id:c.id,u:{aiNote:e.target.value}});}}
+                style=${{width:'100%',fontSize:'.55rem',padding:'.2rem .3rem',background:'var(--bg-secondary)',
+                  border:'1px solid var(--border)',borderRadius:3,color:'var(--text-primary)',boxSizing:'border-box'}} />
+            </div>`}
+          </div>`;
+        })}
+      </div>
+    </div>`;
+  }
+
+  // ── Training Mode Info Popup ──────────────────────────────────
+  function TrainingModePopup(props) {
+    var d = props.d;
+    var stShow = useState(function(){
+      try { return !localStorage.getItem('cc_training_informed'); } catch(e){ return true; }
+    });
+    var show = stShow[0], setShow = stShow[1];
+    if (!show || !props.active) return null;
+    function dismiss() {
+      try { localStorage.setItem('cc_training_informed','1'); } catch(e){}
+      setShow(false);
+    }
+    return html`<div style=${{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:2000,
+      background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
+      onClick=${dismiss}>
+      <div onClick=${function(e){e.stopPropagation();}}
+        style=${{background:'var(--bg-primary)',border:'1px solid var(--border)',borderRadius:12,
+          padding:'1.5rem',maxWidth:440,width:'90%',boxShadow:'0 8px 32px rgba(0,0,0,.4)'}}>
+        <div style=${{display:'flex',alignItems:'center',gap:'.5rem',marginBottom:'.8rem'}}>
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93V12h3.5a2.25 2.25 0 0 1 0 4.5h-3.5v1.25A3.25 3.25 0 0 1 9.5 21 3.25 3.25 0 0 1 6.25 17.75V14.5h-1A2.25 2.25 0 0 1 3 12.25 2.25 2.25 0 0 1 5.25 10h3.5V9.93A4 4 0 0 1 12 2z"/>
+          </svg>
+          <span style=${{fontSize:'.95rem',fontWeight:700,color:'var(--text-primary)'}}>AI Training Mode</span>
+        </div>
+        <p style=${{fontSize:'.75rem',color:'var(--text-secondary)',lineHeight:1.6,marginBottom:'.6rem'}}>
+          You are helping improve ClashControl's future AI clash classifier. In Training Mode, you can review detected clashes and label them with verdicts, clash types, and reasons.
+        </p>
+        <p style=${{fontSize:'.75rem',color:'var(--text-secondary)',lineHeight:1.6,marginBottom:'.6rem'}}>
+          When you're done, you can export or share the anonymous training data. The data contains <strong style=${{color:'var(--text-primary)'}}>only IFC type metadata and geometric metrics</strong> \u2014 no element names, coordinates, project names, or personal information.
+        </p>
+        <p style=${{fontSize:'.7rem',color:'var(--text-muted)',lineHeight:1.5,marginBottom:'1rem'}}>
+          Sharing is completely optional and manual. Nothing is sent without your explicit action. You can turn off Training Mode at any time to return to normal use.
+        </p>
+        <button onClick=${dismiss}
+          style=${{...S_BTN,width:'100%',padding:'.5rem',fontSize:'.8rem',fontWeight:600,
+            background:'#7c3aed',color:'#fff',border:'none',borderRadius:6}}>Got it, let's start</button>
+      </div>
+    </div>`;
+  }
+
   // ── Right Rail (navigation tabs) ───────────────────────────────
 
   function RightRail(props) {
@@ -9032,6 +9370,12 @@ function startApp() {
       ${tabBtn('clashes', SVG_CLASHES, 'Clashes',  clashN)}
       ${tabBtn('issues',  SVG_ISSUES,  'Issues',   issueN)}
       ${tabBtn('explorer',SVG_EXPLORE, 'Explorer', 0)}
+      ${s.trainingMode && function(){
+        var SVG_TRAIN = '<path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93V12h3.5a2.25 2.25 0 0 1 0 4.5h-3.5v1.25A3.25 3.25 0 0 1 9.5 21 3.25 3.25 0 0 1 6.25 17.75V14.5h-1A2.25 2.25 0 0 1 3 12.25 2.25 2.25 0 0 1 5.25 10h3.5V9.93A4 4 0 0 1 12 2z"/>';
+        return html`<div style=${{marginTop:'.3rem',borderTop:'1px solid var(--border-subtle)',paddingTop:'.3rem'}}>
+          ${tabBtn('training', SVG_TRAIN, 'Training', 0)}
+        </div>`;
+      }()}
     </div>`;
   }
 
@@ -9046,7 +9390,7 @@ function startApp() {
     if (!tab) return null;
     var projects=s.projectList||[];
     var activeProj=projects.find(function(p){return p.id===s.activeProject;})||projects[0]||{name:'Default'};
-    var TITLES={models:'Models',clashes:'Clashes',issues:'Issues',explorer:'Explorer'};
+    var TITLES={models:'Models',clashes:'Clashes',issues:'Issues',explorer:'Explorer',training:'Training'};
     function onResizeDown(e){
       e.preventDefault();
       dragRef.current={startX:e.clientX,startW:panelW};
@@ -9078,6 +9422,7 @@ function startApp() {
       ${tab==='clashes'  && html`<${IssuePanel} key="clashes" s=${s} d=${d} hideTabBar=${true} />`}
       ${tab==='issues'   && html`<${IssuePanel} key="issues" s=${s} d=${d} hideTabBar=${true} />`}
       ${tab==='explorer' && html`<${IssuePanel} key="explorer" s=${s} d=${d} hideTabBar=${true} />`}
+      ${tab==='training' && html`<${TrainingPanel} s=${s} d=${d} />`}
     </div>`;
   }
 
@@ -9093,7 +9438,6 @@ function startApp() {
     // Animate in
     var stVisible = useState(false), vis = stVisible[0], setVis = stVisible[1];
     useEffect(function(){ if(show) requestAnimationFrame(function(){ setVis(true); }); },[show]);
-    if (!show) return null;
     function dismiss() {
       setVis(false);
       setTimeout(function(){
@@ -9102,11 +9446,13 @@ function startApp() {
       }, 200);
     }
     useEffect(function(){
+      if(!show) return;
       function onKey(e){if(e.key==='Escape') dismiss();}
       window.addEventListener('keydown', onKey);
       return function(){window.removeEventListener('keydown', onKey);};
-    },[]);
+    },[show]);
     function openBridge() { dismiss(); setTimeout(function(){ d({t:'REVIT_BRIDGE',v:true}); },250); }
+    if (!show) return null;
 
     var cardBg = 'var(--card-bg)';
     var cardBorder = 'var(--card-border)';
@@ -9461,6 +9807,7 @@ function startApp() {
       ${s.showRevitBridge && html`<${RevitBridgePanel} s=${s} d=${d} />`}
       <${NLCommandPanel} s=${s} d=${d} />
       <${WelcomePopup} d=${d} theme=${s.prefs.theme} />
+      <${TrainingModePopup} d=${d} active=${s.trainingMode} />
     </div>`;
   }
 
