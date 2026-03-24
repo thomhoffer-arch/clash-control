@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.11 (2026-03-24)
+- Add collapse button to clash/issue detail panel
+
 ## v2.0.10 (2026-03-24)
 - Add spatial sort for clashes: floor-by-floor, element-by-element walkthrough
 

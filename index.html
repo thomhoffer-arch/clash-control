@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.10',hash:'dbc8ece',date:'2026-03-24T11:24:32Z'};
+  var CC_VERSION = {v:'2.0.11',hash:'4cf80aa',date:'2026-03-24T11:25:40Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -6090,6 +6090,13 @@ function startApp() {
       document.addEventListener('keydown', onKey);
       return function(){document.removeEventListener('keydown', onKey);};
     }, [flatItems, activeId, groupStarts]);
+
+    // Auto-scroll to active item when it changes (e.g. clicking a 3D marker)
+    useEffect(function(){
+      if(!activeId||!scrollRef.current) return;
+      var row = scrollRef.current.querySelector('[data-item-id="'+activeId+'"]');
+      if(row) row.scrollIntoView({block:'nearest',behavior:'smooth'});
+    }, [activeId]);
 
     if(items.length===0) return html`<div style=${{flex:1,overflowY:'auto'}}>
       <div style=${{textAlign:'center',color:'var(--text-faint)',fontSize:'.75rem',padding:'2.5rem 1rem'}}>
