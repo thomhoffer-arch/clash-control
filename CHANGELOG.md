@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.40 (2026-03-24)
+- Show header bar on mobile and make nav cube theme-aware
+
 ## v2.0.39 (2026-03-24)
 - Make welcome popup scrollable so buttons aren't hidden behind mobile nav
 
