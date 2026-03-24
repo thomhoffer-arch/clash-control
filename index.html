@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.16',hash:'4bd06d8',date:'2026-03-24T12:14:53Z'};
+  var CC_VERSION = {v:'2.0.17',hash:'97332ce',date:'2026-03-24T12:21:48Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -4372,7 +4372,13 @@ function startApp() {
       window._ccModelLoading = !!v;
       window.dispatchEvent(new CustomEvent('cc-model-loading', {detail:{loading:!!v}}));
     }
-    idbGetProjectFiles(pid).then(function(stored){
+    // Load project data (modelMeta, clashes, etc.) FIRST so that modelMeta
+    // is in state before any ADD_MODEL fires — otherwise visibility is lost.
+    idbGetProjectData(pid).then(function(data){
+      if(data) d({t:'LOAD_PROJECT_STATE', data:data});
+    }).then(function(){
+      return idbGetProjectFiles(pid);
+    }).then(function(stored){
       if(!stored.length) { d({t:'SWITCHING_PROJECT', v:false}); return; }
       var chain = Promise.resolve();
       stored.forEach(function(entry){
@@ -4390,16 +4396,12 @@ function startApp() {
             var dObj = DISC.find(function(x){return x.id===disc;});
             var col = dObj ? dObj.c : DISC[0].c;
             var fSize = result.stats ? result.stats.fileSize : entry.buffer.byteLength;
-            d({t:'ADD_MODEL', v:{id:entry.id, name:entry.name.replace(/\.ifc$/i,''), discipline:disc, color:col, visible:true, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], storeyData:result.storeyData||[], stats:result.stats||{fileSize:fSize}}});
+            d({t:'ADD_MODEL', v:{id:entry.id, name:entry.name.replace(/\.ifc$/i,''), discipline:disc, color:col, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], storeyData:result.storeyData||[], stats:result.stats||{fileSize:fSize}}});
           }).catch(function(e){ console.warn('Failed to restore '+entry.name+':', e); })
             .then(function(){ _setGlobalLoading(false); });
         });
       });
       chain.then(function(){ d({t:'SWITCHING_PROJECT', v:false}); });
-    });
-    // Also restore saved session data
-    idbGetProjectData(pid).then(function(data){
-      if(data) d({t:'LOAD_PROJECT_STATE', data:data});
     });
   }
 
