@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.29 (2026-03-24)
+- Fix navigation cube camera alignment and add HTML compass overlay
+
 ## v2.0.28 (2026-03-24)
 - Change viewcube into a proper navigation cube with touch + edge/corner support
 
