@@ -24,6 +24,14 @@ Built for architects, engineers, and BIM coordinators who are tired of paying th
 - **Works offline** — PWA with service worker caching, no server required
 - **Zero dependencies** — single HTML file, no build step, no node_modules
 
+## What's new
+
+- **Discipline-colored outlines** — element outlines now match the model category color (structural = blue, MEP = red, architectural = purple, civil = green) when selecting or inspecting clashes
+- **Smarter soft clash markers** — markers are placed at the actual closest point between elements, weighted toward the smaller element so they no longer appear in the middle of a long beam
+- **Detection status in chat** — when clash detection is running with the chat panel open, the input area shows a live status bar with a glowing animated border
+- **Clearance & Tolerance tooltips** — hover over the labels for 1 second to see what each setting does
+- **Cleaner clash cards** — removed penetration depth display from hard clash cards for a less cluttered list
+
 ## How to use
 
 1. Open `index.html` in a modern browser (Chrome, Edge, Firefox)
