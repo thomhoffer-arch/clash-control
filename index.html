@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.25',hash:'005002e',date:'2026-03-24T16:08:30Z'};
+  var CC_VERSION = {v:'2.0.26',hash:'f80ca08',date:'2026-03-24T16:55:54Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -9093,7 +9093,6 @@ function startApp() {
     // Animate in
     var stVisible = useState(false), vis = stVisible[0], setVis = stVisible[1];
     useEffect(function(){ if(show) requestAnimationFrame(function(){ setVis(true); }); },[show]);
-    if (!show) return null;
     function dismiss() {
       setVis(false);
       setTimeout(function(){
@@ -9102,11 +9101,13 @@ function startApp() {
       }, 200);
     }
     useEffect(function(){
+      if(!show) return;
       function onKey(e){if(e.key==='Escape') dismiss();}
       window.addEventListener('keydown', onKey);
       return function(){window.removeEventListener('keydown', onKey);};
-    },[]);
+    },[show]);
     function openBridge() { dismiss(); setTimeout(function(){ d({t:'REVIT_BRIDGE',v:true}); },250); }
+    if (!show) return null;
 
     var cardBg = 'var(--card-bg)';
     var cardBorder = 'var(--card-border)';
