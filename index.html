@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.83',hash:'125e9a6',date:'2026-03-24T09:34:30Z'};
+  var CC_VERSION = {v:'1.2.84',hash:'84e7769',date:'2026-03-24T09:35:09Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -7888,7 +7888,7 @@ function startApp() {
         <div ref=${bottomRef}></div>
       </div>
 
-      ${isDetecting ? html`<div style=${{
+      ${(isDetecting || modelLoading) ? html`<div style=${{
         padding:'.55rem .7rem', borderTop:'1px solid '+borderCol,
         display:'flex', alignItems:'center', gap:'.45rem'
       }}>
@@ -7899,7 +7899,7 @@ function startApp() {
           animation:'nlBorderPulse 2s ease-in-out infinite'
         }}>
           <span class="spin" style=${{display:'inline-block',width:'.7rem',height:'.7rem',borderRadius:'50%',border:'1.5px solid rgba(96,165,250,.3)',borderTopColor:'#60a5fa',flexShrink:0}}></span>
-          <span style=${{fontSize:'.74rem',color:'#60a5fa',fontWeight:500}}>Running clash detection…</span>
+          <span style=${{fontSize:'.74rem',color:'#60a5fa',fontWeight:500}}>${isDetecting ? 'Running clash detection…' : 'Model loading…'}</span>
         </div>
       </div>` : html`<div style=${{
         padding:'.55rem .7rem', borderTop:'1px solid '+borderCol,

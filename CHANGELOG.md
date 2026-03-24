@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.84 (2026-03-24)
+- Replace prompt() with inline text input for new project creation
+
 ## v1.2.83 (2026-03-24)
 - Allow deleting default project — resets to clean startup state
 
