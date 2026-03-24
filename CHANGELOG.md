@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.5 (2026-03-24)
+- Remove redundant single-H (Home) shortcut — use ZF/ZA instead
+
 ## v2.0.4 (2026-03-24)
 - Add HH (temp hide), HI (isolate), HR (reset) chord shortcuts
 
