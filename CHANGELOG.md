@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.13 (2026-03-24)
+- Switch to relevant tab when clicking 3D markers
+
 ## v2.0.12 (2026-03-24)
 - Auto-scroll clash list to active item when selected via 3D marker
 
