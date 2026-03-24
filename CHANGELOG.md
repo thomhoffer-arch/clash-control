@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.90 (2026-03-24)
+- Tighten segment merge radius from 500mm to 50mm
+
 ## v1.2.88 (2026-03-24)
 - Allow self-clashes within models during multi-model detection
 
