@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.18',hash:'e8a8c3f',date:'2026-03-24T12:22:57Z'};
+  var CC_VERSION = {v:'2.0.19',hash:'dc06594',date:'2026-03-24T12:31:53Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -243,7 +243,7 @@ function startApp() {
   };
   var INIT_PREFS = {
     autoFlyTo:true, autoHighlight:true, showGrid:true, showAxes:true,
-    showClashMarkers:false, showIssueMarkers:true, hoverHighlight:true, outlineSelected:true,
+    showClashMarkers:false, showIssueMarkers:false, hoverHighlight:true, outlineSelected:true,
     defaultPriority:'normal', defaultCategory:'design', defaultStatus:'open',
     defaultMaxGap:50, resetFiltersOnRun:true,
     theme:(function(){ try { return localStorage.getItem('cc_theme')||'dark'; } catch(e){ return 'dark'; } })(),
@@ -9041,7 +9041,7 @@ function startApp() {
         if(_hasProjectData(s)) _saveCurrentProjectData(s);
       }, 2000);
       return function(){ clearTimeout(timer); };
-    }, [s.clashes, s.issues, s.viewpoints, s.measurements, s.rules]);
+    }, [s.clashes, s.issues, s.viewpoints, s.measurements, s.rules, s.models]);
     // Start an IDB save on tab close. IDB is async but modern browsers typically
     // complete in-progress transactions before unloading; covers the debounce gap.
     useEffect(function(){
