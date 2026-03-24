@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.76',hash:'04a76d0',date:'2026-03-24T09:01:59Z'};
+  var CC_VERSION = {v:'1.2.81',hash:'a19647b',date:'2026-03-24T09:28:20Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -245,13 +245,13 @@ function startApp() {
     autoFlyTo:true, autoHighlight:true, showGrid:true, showAxes:true,
     showClashMarkers:false, showIssueMarkers:true, hoverHighlight:true, outlineSelected:true,
     defaultPriority:'normal', defaultCategory:'design', defaultStatus:'open',
-    defaultClearance:50, resetFiltersOnRun:true,
+    defaultMaxGap:50, resetFiltersOnRun:true,
     theme:(function(){ try { return localStorage.getItem('cc_theme')||'dark'; } catch(e){ return 'dark'; } })(),
     renderStyle:'standard' // 'standard','shaded','rendered','wireframe'
   };
   var INIT = {
     models:[], clashes:[], issues:[], activeId:null, showModal:false, showSettings:false, modalElement:null, tab:null,
-    rules:{ modelA:'all', modelB:'all', hard:true, soft:false, clearance:50, hardTolerance:0, duplicates:false, changeAware:false, excludeSelf:false, excludeTypes:[] },
+    rules:{ modelA:'all', modelB:'all', hard:true, maxGap:50, duplicates:false, changeAware:false, excludeSelf:false, excludeTypes:[] },
     clashGroupBy:'none', // 'none','storey','discipline','status','type'
     detecting:false, switchingProject:false, sectionAxis:null, sectionPos:0.5, sectionCustom:null,
     sectionBox:null, // {enabled, min:[x,y,z], max:[x,y,z]} – 6-plane box clipping
@@ -624,6 +624,33 @@ function startApp() {
     return String(v);
   }
 
+  // Extract element axis direction from IFC placement (for clash detection optimization)
+  // Returns [dx,dy,dz] normalized direction or null if not available
+  function _extractAxis(api, modelID, line) {
+    try {
+      var op = line.ObjectPlacement;
+      if (!op || !op.value) return null;
+      var placement = api.GetLine(modelID, op.value);
+      if (!placement || !placement.RelativePlacement) return null;
+      var rp = api.GetLine(modelID, placement.RelativePlacement.value);
+      if (!rp) return null;
+      // IfcAxis2Placement3D has Axis (Z-direction of local frame)
+      // For beams/pipes this is typically the element's long axis
+      if (rp.Axis && rp.Axis.value) {
+        var axDir = api.GetLine(modelID, rp.Axis.value);
+        if (axDir && axDir.DirectionRatios) {
+          var dr = axDir.DirectionRatios;
+          var dx = dr[0] && dr[0].value != null ? dr[0].value : dr[0];
+          var dy = dr[1] && dr[1].value != null ? dr[1].value : dr[1];
+          var dz = dr[2] && dr[2].value != null ? dr[2].value : dr[2];
+          var len = Math.sqrt(dx*dx+dy*dy+dz*dz);
+          if (len > 1e-10) return [dx/len, dy/len, dz/len];
+        }
+      }
+    } catch(e) {}
+    return null;
+  }
+
   function extractProperties(api, modelID, expressID) {
     var props = {expressId:expressID, globalId:'', ifcType:'', name:'', description:'', objectType:'', storey:'', storeyId:null, material:'', quantities:{}, psets:{}};
     try {
@@ -638,6 +665,14 @@ function startApp() {
         props.objectType = safeStr(line.ObjectType);
         // Store the raw type ID for lookups
         if (line.type != null) props.typeId = line.type;
+        // Extract axis direction for linear elements (beams, columns, pipes, ducts)
+        // Only for types where axis data is useful for clash optimization
+        var tid = line.type;
+        if (tid === IFC.IFCBEAM || tid === IFC.IFCCOLUMN || tid === IFC.IFCMEMBER ||
+            tid === IFC.IFCPIPESEGMENT || tid === IFC.IFCDUCTSEGMENT ||
+            tid === IFC.IFCFLOWSEGMENT || tid === IFC.IFCPILE) {
+          props.axis = _extractAxis(api, modelID, line);
+        }
       }
     } catch(e) {}
     return props;
@@ -981,8 +1016,8 @@ function startApp() {
     (el.meshes || []).forEach(function(mesh) {
       var pos = mesh.geometry && mesh.geometry.attributes && mesh.geometry.attributes.position;
       if (!pos) return;
-      mesh.updateMatrix();
-      var mat = mesh.matrix; // parent groups are identity
+      mesh.updateWorldMatrix(true, false);
+      var mat = mesh.matrixWorld;
       var v = new THREE.Vector3();
       for (var i = 0; i < pos.count; i++) {
         v.set(pos.getX(i), pos.getY(i), pos.getZ(i));
@@ -1003,8 +1038,8 @@ function startApp() {
       var geo = mesh.geometry;
       var pos = geo && geo.attributes && geo.attributes.position;
       if (!pos) return;
-      mesh.updateMatrix();
-      var mat = mesh.matrix;
+      mesh.updateWorldMatrix(true, false);
+      var mat = mesh.matrixWorld;
       var va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
       var idx = geo.index;
       var count = idx ? idx.count : pos.count;
@@ -1039,31 +1074,35 @@ function startApp() {
     var e1x=b1x-b0x,e1y=b1y-b0y,e1z=b1z-b0z;
     var e2x=b2x-b0x,e2y=b2y-b0y,e2z=b2z-b0z;
     var n2x=e1y*e2z-e1z*e2y, n2y=e1z*e2x-e1x*e2z, n2z=e1x*e2y-e1y*e2x;
+    // Degenerate triangle check (zero-area) — early exit
+    var nl2=n2x*n2x+n2y*n2y+n2z*n2z;
+    if(nl2<1e-10) return false;
     var d2=-(n2x*b0x+n2y*b0y+n2z*b0z);
     // Signed distances of A's vertices to plane B
     var da0=n2x*a0x+n2y*a0y+n2z*a0z+d2;
     var da1=n2x*a1x+n2y*a1y+n2z*a1z+d2;
     var da2=n2x*a2x+n2y*a2y+n2z*a2z+d2;
-    // All on same side → no intersection
-    if(da0>0&&da1>0&&da2>0) return false;
-    if(da0<0&&da1<0&&da2<0) return false;
+    // Epsilon: scale by plane normal length to handle large coordinates
+    // 1e-6 * sqrt(nl2) ≈ relative tolerance matching IFC precision (sub-mm)
+    var eps2 = 1e-6 * Math.sqrt(nl2);
+    // All on same side → no intersection (with epsilon for near-coplanar rejection)
+    if(da0>eps2&&da1>eps2&&da2>eps2) return false;
+    if(da0<-eps2&&da1<-eps2&&da2<-eps2) return false;
 
     // Plane of A: normal n1, distance d1
     var f1x=a1x-a0x,f1y=a1y-a0y,f1z=a1z-a0z;
     var f2x=a2x-a0x,f2y=a2y-a0y,f2z=a2z-a0z;
     var n1x=f1y*f2z-f1z*f2y, n1y=f1z*f2x-f1x*f2z, n1z=f1x*f2y-f1y*f2x;
+    var nl1=n1x*n1x+n1y*n1y+n1z*n1z;
+    if(nl1<1e-10) return false;
     var d1=-(n1x*a0x+n1y*a0y+n1z*a0z);
     // Signed distances of B's vertices to plane A
     var db0=n1x*b0x+n1y*b0y+n1z*b0z+d1;
     var db1=n1x*b1x+n1y*b1y+n1z*b1z+d1;
     var db2=n1x*b2x+n1y*b2y+n1z*b2z+d1;
-    if(db0>0&&db1>0&&db2>0) return false;
-    if(db0<0&&db1<0&&db2<0) return false;
-
-    // Degenerate triangle check (zero-area)
-    var nl1=n1x*n1x+n1y*n1y+n1z*n1z;
-    var nl2=n2x*n2x+n2y*n2y+n2z*n2z;
-    if(nl1<1e-12||nl2<1e-12) return false;
+    var eps1 = 1e-6 * Math.sqrt(nl1);
+    if(db0>eps1&&db1>eps1&&db2>eps1) return false;
+    if(db0<-eps1&&db1<-eps1&&db2<-eps1) return false;
 
     // Intersection line direction D = n1 × n2
     var Dx=n1y*n2z-n1z*n2y, Dy=n1z*n2x-n1x*n2z, Dz=n1x*n2y-n1y*n2x;
@@ -1193,9 +1232,26 @@ function startApp() {
     var pts = [];
     _bvhTraverseAll(bA.root, bA.tris, bB.root, bB.tris, pts, 24);
     if (!pts.length) return false;
-    // Average all intersection points for accurate centroid
-    var sx=0, sy=0, sz=0, n=pts.length/3;
-    for (var i=0; i<pts.length; i+=3) { sx+=pts[i]; sy+=pts[i+1]; sz+=pts[i+2]; }
+    // Validate: reject intersection points outside both elements' AABBs
+    // (catches false positives from near-coplanar/degenerate triangles)
+    var boxA = elA.box, boxB = elB.box;
+    var margin = 0.01; // 10mm tolerance for point-in-box check
+    var valid = [];
+    for (var i=0; i<pts.length; i+=3) {
+      var px=pts[i], py=pts[i+1], pz=pts[i+2];
+      if (px >= boxA.min.x-margin && px <= boxA.max.x+margin &&
+          py >= boxA.min.y-margin && py <= boxA.max.y+margin &&
+          pz >= boxA.min.z-margin && pz <= boxA.max.z+margin &&
+          px >= boxB.min.x-margin && px <= boxB.max.x+margin &&
+          py >= boxB.min.y-margin && py <= boxB.max.y+margin &&
+          pz >= boxB.min.z-margin && pz <= boxB.max.z+margin) {
+        valid.push(px, py, pz);
+      }
+    }
+    if (!valid.length) return false;
+    // Average validated intersection points for accurate centroid
+    var sx=0, sy=0, sz=0, n=valid.length/3;
+    for (var i=0; i<valid.length; i+=3) { sx+=valid[i]; sy+=valid[i+1]; sz+=valid[i+2]; }
     return [sx/n, sy/n, sz/n];
   }
 
@@ -1272,9 +1328,9 @@ function startApp() {
   // with highest AABB-centre variance, then sweeps an active set — only
   // elements that still overlap on that axis are retained. Y/Z overlap
   // checked inline. Result: O(n log n + k) where k = true candidates.
-  function _sweepAndPrune(grpA, grpB, rules, clearanceM) {
-    // Expand AABBs by this much when testing overlap
-    var margin = Math.max((rules.hardTolerance||0)/1000, rules.soft ? clearanceM : 0);
+  function _sweepAndPrune(grpA, grpB, rules, maxGapM) {
+    // Expand AABBs by maxGap when testing overlap
+    var margin = maxGapM;
 
     // Fast-lookup sets for model group membership
     var inA = {}, inB = {};
@@ -1367,7 +1423,7 @@ function startApp() {
       return models.filter(function(m){return m.id===id});
     };
     var grpA = pick(rules.modelA), grpB = pick(rules.modelB);
-    var clearanceM = (rules.clearance||0)/1000;
+    var maxGapM = (rules.maxGap||0)/1000;
     var clashes = [];
     var _tmpSizeA = new THREE.Vector3(), _tmpSizeB = new THREE.Vector3();
     var _tmpCtrA  = new THREE.Vector3(), _tmpCtrB  = new THREE.Vector3();
@@ -1387,7 +1443,7 @@ function startApp() {
     }
 
     // ── L0: Sweep and Prune — O(n log n + k) candidate pairs ───────
-    var candidates = _sweepAndPrune(grpA, grpB, rules, clearanceM);
+    var candidates = _sweepAndPrune(grpA, grpB, rules, maxGapM);
 
     candidates.forEach(function(pair) {
       var eA=pair.eA, mA=pair.mA, eB=pair.eB, mB=pair.mB, sameModel=pair.sameModel;
@@ -1425,13 +1481,50 @@ function startApp() {
         }
       }
 
+      // ── Parallel axis rejection (IFC-based, zero false negatives) ──
+      // Only applies when BOTH elements have real IFC axis data AND are
+      // linear (beams, pipes, ducts). If axes are nearly parallel,
+      // check if the center-to-center vector is also parallel — if so,
+      // the elements run alongside each other and can't intersect.
+      var pA = eA.props, pB = eB.props;
+      var axisA = pA && pA.axis, axisB = pB && pB.axis;
+      if (axisA && axisB) {
+        // dot product: |dot|→1 means parallel
+        var dot = axisA[0]*axisB[0] + axisA[1]*axisB[1] + axisA[2]*axisB[2];
+        if (Math.abs(dot) > 0.95) {
+          // Axes are nearly parallel — check if center-to-center is also along the axis
+          var cA = bA.getCenter(_tmpCtrA), cB = bB.getCenter(_tmpCtrB);
+          var ccx=cB.x-cA.x, ccy=cB.y-cA.y, ccz=cB.z-cA.z;
+          var ccLen = Math.sqrt(ccx*ccx+ccy*ccy+ccz*ccz);
+          if (ccLen > 1e-6) {
+            ccx/=ccLen; ccy/=ccLen; ccz/=ccLen;
+            var ccDot = Math.abs(ccx*axisA[0]+ccy*axisA[1]+ccz*axisA[2]);
+            // If center-to-center is also along the axis (>0.85), they're side by side
+            // AND the perpendicular distance between centers exceeds both cross-sections
+            if (ccDot > 0.85) {
+              // Perpendicular distance: sqrt(ccLen² - (ccLen*ccDot)²) = ccLen * sqrt(1 - ccDot²)
+              var perpDist = ccLen * Math.sqrt(1 - ccDot*ccDot);
+              // Estimate cross-section radii from the two shortest AABB dimensions
+              var szA = bA.getSize(_tmpSizeA), szB = bB.getSize(_tmpSizeB);
+              var dimsA = [szA.x,szA.y,szA.z].sort(function(a,b){return a-b;});
+              var dimsB = [szB.x,szB.y,szB.z].sort(function(a,b){return a-b;});
+              var radA = (dimsA[0]+dimsA[1])/4; // avg of two shortest / 2
+              var radB = (dimsB[0]+dimsB[1])/4;
+              if (perpDist > radA + radB) {
+                // Elements are parallel and separated — skip expensive BVH
+                return; // continue to next candidate
+              }
+            }
+          }
+        }
+      }
+
       // ── L1+L2: BVH dual-tree + Möller tri-tri ──────────────────
-      // (SAP already guarantees AABB overlap — no redundant box check needed)
       var hardPt=false, isSoft=false, geoDist=Infinity;
       if (rules.hard) hardPt = _meshesIntersect(eA, eB);
-      if (!hardPt && rules.soft && clearanceM>0) {
-        geoDist = _meshMinDist(eA, eB, clearanceM, _softPairBuf);
-        isSoft = geoDist<=clearanceM;
+      if (!hardPt && maxGapM>0) {
+        geoDist = _meshMinDist(eA, eB, maxGapM, _softPairBuf);
+        isSoft = geoDist<=maxGapM;
       }
 
       if (hardPt || isSoft) {
@@ -4913,12 +5006,12 @@ function startApp() {
 
     // Presets
     var PRESETS = [
-      {label:'All vs All',      desc:'Every model against every other',                     r:{modelA:'all',modelB:'all',hard:true,soft:false,clearance:50,duplicates:false,excludeSelf:false}},
-      {label:'Struct vs MEP',   desc:'Structural against MEP disciplines',                  r:{modelA:'disc:structural',modelB:'disc:mep',hard:true,soft:true,clearance:50,duplicates:false,excludeSelf:false}},
-      {label:'Arch vs MEP',     desc:'Architectural against MEP',                           r:{modelA:'disc:architectural',modelB:'disc:mep',hard:true,soft:true,clearance:50,duplicates:false,excludeSelf:false}},
-      {label:'Cross-discipline',desc:'All models, exclude self-clashes',                    r:{modelA:'all',modelB:'all',hard:true,soft:false,clearance:50,duplicates:false,excludeSelf:true}},
-      {label:'Near misses',     desc:'Soft clashes within clearance zone',                  r:{modelA:'all',modelB:'all',hard:false,soft:true,clearance:100,duplicates:false,excludeSelf:true}},
-      {label:'Duplicates',      desc:'Find duplicate elements at same location',            r:{modelA:'all',modelB:'all',hard:false,soft:false,clearance:0,duplicates:true,excludeSelf:false}}
+      {label:'All vs All',      desc:'Every model against every other',                     r:{modelA:'all',modelB:'all',hard:true,maxGap:0,duplicates:false,excludeSelf:false}},
+      {label:'Struct vs MEP',   desc:'Structural against MEP disciplines',                  r:{modelA:'disc:structural',modelB:'disc:mep',hard:true,maxGap:50,duplicates:false,excludeSelf:false}},
+      {label:'Arch vs MEP',     desc:'Architectural against MEP',                           r:{modelA:'disc:architectural',modelB:'disc:mep',hard:true,maxGap:50,duplicates:false,excludeSelf:false}},
+      {label:'Cross-discipline',desc:'All models, exclude self-clashes',                    r:{modelA:'all',modelB:'all',hard:true,maxGap:0,duplicates:false,excludeSelf:true}},
+      {label:'Near misses',     desc:'Near misses within max gap',                          r:{modelA:'all',modelB:'all',hard:false,maxGap:100,duplicates:false,excludeSelf:true}},
+      {label:'Duplicates',      desc:'Find duplicate elements at same location',            r:{modelA:'all',modelB:'all',hard:false,maxGap:0,duplicates:true,excludeSelf:false}}
     ];
 
     function applyPreset(preset) {
@@ -4988,24 +5081,14 @@ function startApp() {
           <span style=${{fontSize:'.68rem',color:'var(--text-primary)'}}>Hard clashes</span>
           <${MiniToggle} on=${rules.hard} onToggle=${function(){d({t:'UPD_RULES',u:{hard:!rules.hard}})}} />
         </div>
-        <div style=${TOGROW}>
-          <span style=${{fontSize:'.68rem',color:'var(--text-primary)'}}>Soft clashes (proximity)</span>
-          <${MiniToggle} on=${rules.soft} onToggle=${function(){d({t:'UPD_RULES',u:{soft:!rules.soft}})}} />
-        </div>
-        ${rules.soft && html`<div style=${{marginBottom:'.25rem'}}>
-          <span class="cc-tip cc-tip-delay" data-tip="Max gap between elements to flag as a soft/proximity clash" style=${{...FL,cursor:'help'}}>Clearance (mm)</span>
+        <div style=${{marginBottom:'.25rem'}}>
+          <span class="cc-tip cc-tip-delay" data-tip="Elements within this distance are flagged as near misses. Set to 0 for hard clashes only." style=${{...FL,cursor:'help'}}>Max gap (mm)</span>
           <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
-            <input type="range" min="10" max="500" step="5" value=${rules.clearance||50}
-              onInput=${function(e){d({t:'UPD_RULES',u:{clearance:+e.target.value}})}}
+            <input type="range" min="0" max="500" step="5" value=${rules.maxGap||0}
+              onInput=${function(e){d({t:'UPD_RULES',u:{maxGap:+e.target.value}})}}
               style=${{flex:1,height:4}} />
-            <span style=${{fontSize:'.65rem',color:'var(--accent-subtle)',fontWeight:600,minWidth:30,textAlign:'right'}}>${rules.clearance||50}</span>
+            <span style=${{fontSize:'.65rem',color:'var(--accent-subtle)',fontWeight:600,minWidth:30,textAlign:'right'}}>${rules.maxGap||0}</span>
           </div>
-        </div>`}
-        <div style=${TOGROW}>
-          <span class="cc-tip cc-tip-delay" data-tip="Ignore minor intersections smaller than this value (filters modelling noise)" style=${{fontSize:'.68rem',color:'var(--text-primary)',cursor:'help'}}>Hard tolerance (mm)</span>
-          <input type="number" min="0" max="100" step="1" value=${rules.hardTolerance||0}
-            onChange=${function(e){d({t:'UPD_RULES',u:{hardTolerance:+e.target.value}})}}
-            style=${{...S_INPUT,width:50,fontSize:'.65rem',padding:'.15rem .3rem',textAlign:'center'}} />
         </div>
         <div style=${TOGROW}>
           <span style=${{fontSize:'.68rem',color:'var(--text-primary)'}}>Duplicates</span>
@@ -5171,6 +5254,7 @@ function startApp() {
               style=${{...S_INPUT,fontSize:'.7rem',padding:'.3rem .4rem .3rem 1.85rem',width:'100%',background:f.search?'#0f1e33':'var(--bg-secondary)',border:f.search?'1px solid #3b82f6':'1px solid var(--border)',transition:'all .15s'}} />
             ${f.search && html`<button onClick=${function(){d({t:'UPD_FILTERS',u:{search:''}})}} style=${{position:'absolute',right:'.35rem',background:'none',border:'none',cursor:'pointer',color:'var(--text-faint)',fontSize:'.75rem',padding:0,lineHeight:1}}>✕</button>`}
           </div>
+          <span style=${{fontSize:'.58rem',color:items.length<rawItems.length?'#60a5fa':'var(--text-faint)',fontWeight:items.length<rawItems.length?600:400,whiteSpace:'nowrap',flexShrink:0}}>${items.length}${items.length<rawItems.length?' / '+rawItems.length:''}</span>
           <button onClick=${function(){setFiltersOpen(!filtersOpen)}}
             style=${{...S_BTN,padding:'.3rem .5rem',background:filtersOpen||activeCount>0?'#1e3a5f':'var(--bg-secondary)',color:filtersOpen||activeCount>0?'#93c5fd':'var(--text-faint)',border:'1px solid var(--border)',fontSize:'.65rem',whiteSpace:'nowrap',flexShrink:0}} aria-label="Toggle filters">
             ⚙${activeCount>0?html`<span style=${{background:'#3b82f6',color:'#fff',borderRadius:99,padding:'.05rem .3rem',fontSize:'.55rem',marginLeft:'.2rem'}}>${activeCount}</span>`:''}
@@ -5742,9 +5826,9 @@ function startApp() {
 
         <div style=${SEC}>Clash Detection</div>
         <div style=${TROW}>
-          <div><div style=${TLBL}>Default clearance distance</div><div style=${TSUB}>Initial soft clash tolerance (mm)</div></div>
-          <input type="number" min="0" max="2000" step="5" value=${p.defaultClearance||50}
-            onChange=${function(e){d({t:'UPD_PREFS',u:{defaultClearance:+e.target.value}});d({t:'UPD_RULES',u:{clearance:+e.target.value}});}}
+          <div><div style=${TLBL}>Default max gap</div><div style=${TSUB}>Initial max gap distance for near misses (mm)</div></div>
+          <input type="number" min="0" max="2000" step="5" value=${p.defaultMaxGap||50}
+            onChange=${function(e){d({t:'UPD_PREFS',u:{defaultMaxGap:+e.target.value}});d({t:'UPD_RULES',u:{maxGap:+e.target.value}});}}
             style=${{...S_INPUT,width:70,textAlign:'center'}} />
         </div>
         <div style=${TROW}>
@@ -6943,15 +7027,13 @@ function startApp() {
     'Output ONLY a single JSON object. No explanation, no markdown fences, no extra text.',
     '',
     'Loaded models: {{MODEL_LIST}}',
-    'Current rules: clearance={{CLEARANCE}}mm, hard={{HARD}}, soft={{SOFT}}, modelA={{MODEL_A}}, modelB={{MODEL_B}}',
+    'Current rules: maxGap={{MAX_GAP}}mm, hard={{HARD}}, modelA={{MODEL_A}}, modelB={{MODEL_B}}',
     '',
     'Convert all lengths to mm (5cm→50, 2in→51). Use model name substrings from the loaded list, or "all".',
     '',
     'Intent values and their fields:',
-    'run_detection: {intent, modelA, modelB, clearance, tolerance, soft, hard, duplicates, excludeSelf}',
-    'set_clearance: {intent, value}',
-    'set_tolerance: {intent, value}',
-    'set_soft: {intent, enabled}',
+    'run_detection: {intent, modelA, modelB, maxGap, hard, duplicates, excludeSelf}',
+    'set_max_gap: {intent, value}',
     'set_duplicates: {intent, enabled}',
     'filter_status: {intent, status: "open"|"resolved"|"all"}',
     'reset_filters: {intent}',
@@ -6963,7 +7045,7 @@ function startApp() {
     '',
     'Examples:',
     'User: look for pipe beam conflicts with 5cm gap',
-    '{"intent":"run_detection","modelA":"pipe","modelB":"beam","clearance":50,"hard":true,"soft":false,"duplicates":false}',
+    '{"intent":"run_detection","modelA":"pipe","modelB":"beam","maxGap":50,"hard":true,"duplicates":false}',
     'User: structural vs all others',
     '{"intent":"run_detection","modelA":"structural","modelB":"all","excludeSelf":true,"hard":true}',
     'User: show resolved clashes',
@@ -6992,15 +7074,12 @@ function startApp() {
       case 'run_detection': {
         if (!s.models.length) return 'No models loaded yet — drop IFC files onto the viewer first.';
         var mA = resolveModel(action.modelA), mB = resolveModel(action.modelB);
-        var upd = { modelA: mA?mA.id:'all', modelB: mB?mB.id:'all', hard: action.hard!==false, soft: action.soft===true, duplicates: action.duplicates===true };
+        var upd = { modelA: mA?mA.id:'all', modelB: mB?mB.id:'all', hard: action.hard!==false, duplicates: action.duplicates===true };
         if (action.excludeSelf) upd.excludeSelf = true;
-        if (typeof action.clearance === 'number') upd.clearance = action.clearance;
-        if (typeof action.tolerance === 'number') upd.hardTolerance = action.tolerance;
+        if (typeof action.maxGap === 'number') upd.maxGap = action.maxGap;
         return {_clashSetup:true, rules:upd, nameA:mA?mA.name:'All models', nameB:mB?mB.name:'All models'};
       }
-      case 'set_clearance': if (typeof action.value !== 'number') return null; d({t:'UPD_RULES', u:{clearance:action.value}}); return 'Clearance set to '+action.value+'mm.';
-      case 'set_tolerance': if (typeof action.value !== 'number') return null; d({t:'UPD_RULES', u:{hardTolerance:action.value}}); return 'Tolerance set to '+action.value+'mm.';
-      case 'set_soft': d({t:'UPD_RULES', u:{soft:!!action.enabled}}); return action.enabled ? 'Soft clashes enabled.' : 'Soft clashes off.';
+      case 'set_max_gap': if (typeof action.value !== 'number') return null; d({t:'UPD_RULES', u:{maxGap:action.value}}); return 'Max gap set to '+action.value+'mm.';
       case 'set_duplicates': d({t:'UPD_RULES', u:{duplicates:!!action.enabled}}); return action.enabled ? 'Duplicates included.' : 'Duplicates excluded.';
       case 'filter_status': var sv = {open:'open',resolved:'resolved',all:'all'}[action.status]||'all'; d({t:'UPD_FILTERS', u:{status:sv}}); d({t:'TAB',v:'clashes'}); return sv==='all'?'Showing all.':'Filtered to '+sv+'.';
       case 'reset_filters': d({t:'RESET_FILTERS'}); return 'Filters cleared.';
@@ -7023,8 +7102,8 @@ function startApp() {
     var r = s.rules || {};
     var prompt = NL_SYSTEM_PROMPT
       .replace('{{MODEL_LIST}}', modelList)
-      .replace('{{CLEARANCE}}', r.clearance || 50)
-      .replace('{{HARD}}', !!r.hard).replace('{{SOFT}}', !!r.soft)
+      .replace('{{MAX_GAP}}', r.maxGap || 0)
+      .replace('{{HARD}}', !!r.hard)
       .replace('{{MODEL_A}}', r.modelA || 'all').replace('{{MODEL_B}}', r.modelB || 'all');
 
     // 3. Try Ollama first (local, fast, bigger model)
@@ -7054,7 +7133,7 @@ function startApp() {
     // ── Help ───────────────────────────────────────────────────────
     if (/^help$|what can you do|how (?:do i|to) use|what.*commands?/.test(text)) {
       return 'I can control ClashControl with plain English:\n\n' +
-        '**Clash detection:** "check structural vs MEP", "find near misses", "clearance 75mm"\n' +
+        '**Clash detection:** "check structural vs MEP", "find near misses", "max gap 75mm"\n' +
         '**Filters:** "show open", "group by storey", "reset filters"\n' +
         '**Batch:** "mark all open clashes as resolved", "assign all issues to John"\n' +
         '**Analysis:** "how many clashes?", "analyze clashes", "summary"\n' +
@@ -7087,10 +7166,10 @@ function startApp() {
     }
     if (/what.*rules?|current.*(?:settings?|setup|config)|clash.*settings?|what(?:'s| is) set up/.test(text)) {
       var r = s.rules;
-      var types = [r.hard&&'hard', r.soft&&'soft'].filter(Boolean).join(' + ') || 'none';
+      var types = [r.hard&&'hard', r.maxGap&&('gap '+r.maxGap+'mm')].filter(Boolean).join(' + ') || 'none';
       function _ruleLabel(id){ if(id==='all')return 'all'; if(typeof id==='string'&&id.indexOf('disc:')===0){var dd=DISC.find(function(x){return x.id===id.slice(5)});return dd?dd.label:id.slice(5);} var mm=s.models.find(function(x){return x.id===id});return mm?mm.name:id; }
       var against = r.modelA==='all'&&r.modelB==='all' ? 'all models against all' : _ruleLabel(r.modelA) + ' vs ' + _ruleLabel(r.modelB);
-      return 'Current setup: ' + types + ' clashes, ' + against + ', clearance ' + (r.clearance||50) + 'mm' + (r.hardTolerance?' tolerance '+r.hardTolerance+'mm':'') + (r.duplicates?', including duplicates':'.');
+      return 'Current setup: ' + types + ' clashes, ' + against + ', max gap ' + (r.maxGap||0) + 'mm' + (r.duplicates?', including duplicates':'.');
     }
     if (/(?:what|which).*storey|worst.*storey|most clashes.*storey|storey.*most/.test(text)) {
       if (!s.clashes.length) return 'No clashes to analyse yet.';
@@ -7113,11 +7192,10 @@ function startApp() {
       return null;
     }
     function applyClashOpts(updRules) {
-      var clr = parseMM(text); if (clr !== null) { updRules.clearance = clr; updRules.soft = true; updRules.hard = true; }
-      if (/\bsoft\b|\bnear[\s-]*miss|\bclearance\b|\bproximity\b|\bwithin\b|\bnearby\b|\bclose\s+to\b/.test(text) && !/no\s+soft|disable\s+soft|exclude\s+soft/.test(text)) { updRules.soft=true; updRules.hard=true; }
-      if (/hard\s+only|no\s+soft|soft\s+(?:clashes?\s+)?off/.test(text)) { updRules.hard=true; updRules.soft=false; }
+      var gap = parseMM(text); if (gap !== null) { updRules.maxGap = gap; updRules.hard = true; }
+      if (/\bnear[\s-]*miss|\bproximity\b|\bwithin\b|\bnearby\b|\bclose\s+to\b|\bgap\b/.test(text)) { if (!gap) updRules.maxGap = updRules.maxGap || 50; updRules.hard = true; }
+      if (/hard\s+only|no\s+gap|gap\s*(?:=\s*)?0/.test(text)) { updRules.hard=true; updRules.maxGap=0; }
       if (/\bduplicates?\b/.test(text) && !/no\s+dup|exclude\s+dup|ignore\s+dup/.test(text)) updRules.duplicates=true;
-      // Cross-model only (exclude self-clashes)
       if (/\bcross[\s-]*(?:model\s+)?only\b|\bno\s+self[\s-]*clash|\bexclude\s+self|\bnot?\s+with\s+itself|\b(?:against|vs)\s+(?:all\s+)?others?\b/.test(text)) updRules.excludeSelf=true;
       return updRules;
     }
@@ -7192,12 +7270,12 @@ function startApp() {
       if (!s.models.length) return 'No models loaded yet.';
       var wv = parseFloat(withinMatch[1]), wu = withinMatch[2];
       var wmm = wu==='cm' ? Math.round(wv*10) : wu==='m' ? Math.round(wv*1000) : Math.round(wv);
-      var updW = applyClashOpts({ modelA:'all', modelB:'all', clearance:wmm, soft:true, hard:true });
+      var updW = applyClashOpts({ modelA:'all', modelB:'all', maxGap:wmm, hard:true });
       return {_clashSetup:true, rules:updW, nameA:'All models', nameB:'All models'};
     }
-    if (/(?:find|check|detect|run|scan)\s+(?:for\s+)?(?:near[\s-]*miss|proximity|soft\s+clash|clearance\s+clash)/.test(text)) {
+    if (/(?:find|check|detect|run|scan)\s+(?:for\s+)?(?:near[\s-]*miss|proximity|soft\s+clash|gap\s+clash)/.test(text)) {
       if (!s.models.length) return 'No models loaded yet.';
-      var updNM = applyClashOpts({ modelA:'all', modelB:'all', soft:true, hard:true });
+      var updNM = applyClashOpts({ modelA:'all', modelB:'all', maxGap:50, hard:true });
       return {_clashSetup:true, rules:updNM, nameA:'All models', nameB:'All models'};
     }
 
@@ -7209,22 +7287,13 @@ function startApp() {
     }
 
     // ── Individual rule settings (no run, just tweak) ────────────
-    var clrSet = text.match(/clearance\s+(?:to\s+|of\s+)?(\d+(?:\.\d+)?)\s*(mm|cm)|(\d+(?:\.\d+)?)\s*(mm|cm)\s+(?:clearance|gap|distance|proximity)/);
-    if (clrSet) {
-      var cv = clrSet[1]||clrSet[3], cu = clrSet[2]||clrSet[4];
-      var cmm = cu==='cm' ? Math.round(parseFloat(cv)*10) : Math.round(parseFloat(cv));
-      d({t:'UPD_RULES', u:{clearance:cmm, soft:true}});
-      return 'Clearance set to ' + cmm + 'mm (soft clashes enabled). Re-run detection to apply.';
+    var gapSet = text.match(/(?:max\s*)?gap\s+(?:to\s+|of\s+|=\s*)?(\d+(?:\.\d+)?)\s*(mm|cm)|(\d+(?:\.\d+)?)\s*(mm|cm)\s+(?:max\s*)?(?:gap|distance|proximity)/);
+    if (gapSet) {
+      var gv2 = gapSet[1]||gapSet[3], gu = gapSet[2]||gapSet[4];
+      var gmm = gu==='cm' ? Math.round(parseFloat(gv2)*10) : Math.round(parseFloat(gv2));
+      d({t:'UPD_RULES', u:{maxGap:gmm}});
+      return 'Max gap set to ' + gmm + 'mm. Re-run detection to apply.';
     }
-    var tolSet = text.match(/tolerance\s+(?:to\s+|of\s+)?(\d+(?:\.\d+)?)\s*(mm|cm)|(\d+(?:\.\d+)?)\s*(mm|cm)\s+tolerance/);
-    if (tolSet) {
-      var tv = tolSet[1]||tolSet[3], tu = tolSet[2]||tolSet[4];
-      var tmm = tu==='cm' ? Math.round(parseFloat(tv)*10) : Math.round(parseFloat(tv));
-      d({t:'UPD_RULES', u:{hardTolerance:tmm}});
-      return 'Tolerance set to ' + tmm + 'mm.';
-    }
-    if (/(?:include|enable|add|turn\s+on)\s+soft|soft\s+clashes?\s+on/.test(text)) { d({t:'UPD_RULES',u:{soft:true}}); return 'Soft clashes enabled. Re-run detection to apply.'; }
-    if (/(?:exclude|disable|remove|turn\s+off)\s+soft|hard\s+only|soft\s+(?:clashes?\s+)?off/.test(text)) { d({t:'UPD_RULES',u:{soft:false}}); return 'Soft clashes off — hard clashes only.'; }
     if (/(?:include|enable)\s+duplicates?/.test(text)) { d({t:'UPD_RULES',u:{duplicates:true}}); return 'Duplicates included.'; }
     if (/(?:exclude|ignore|no)\s+duplicates?/.test(text)) { d({t:'UPD_RULES',u:{duplicates:false}}); return 'Duplicates excluded.'; }
     if (/cross[\s-]*(?:model\s+)?only|no\s+self[\s-]*clash|exclude\s+self|not?\s+with\s+itself/.test(text)) { d({t:'UPD_RULES',u:{excludeSelf:true}}); return 'Cross-model only — self-clashes excluded.'; }
@@ -7239,8 +7308,8 @@ function startApp() {
       if (s.detecting) return 'Already running…';
       d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
       setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models,s.rules)}); }, 20);
-      var r2 = s.rules, types2 = [r2.hard&&'hard',r2.soft&&'soft'].filter(Boolean).join('+');
-      return 'Running ' + types2 + ' clash detection with ' + (r2.clearance||50) + 'mm clearance…';
+      var r2 = s.rules;
+      return 'Running clash detection' + (r2.maxGap ? ' with ' + r2.maxGap + 'mm max gap' : '') + '…';
     }
 
     // ── Result filtering & grouping ────────────────────────────────
@@ -7416,7 +7485,7 @@ function startApp() {
   function ClashSetupCard(props) {
     var setup = props.setup, s = props.s, d = props.d, onRun = props.onRun, setMsgs = props.setMsgs, idx = props.idx;
     var init = setup.rules;
-    var st = useState(Object.assign({hard:true,soft:false,clearance:s.rules.clearance||50,hardTolerance:s.rules.hardTolerance||0,duplicates:false,excludeSelf:false,excludeTypes:[]},init));
+    var st = useState(Object.assign({hard:true,maxGap:s.rules.maxGap||0,duplicates:false,excludeSelf:false,excludeTypes:[]},init));
     var rules = st[0], setRules = st[1];
     var stRan = useState(false), ran = stRan[0], setRan = stRan[1];
     var stExOpen = useState(false), exOpen = stExOpen[0], setExOpen = stExOpen[1];
@@ -7445,7 +7514,7 @@ function startApp() {
       setMsgs(function(prev){
         var next=prev.slice();
         next[idx]={role:'assistant',text:'Running: '+nameA.label+' vs '+nameB.label
-          +(rules.hard?' | hard':'')+(rules.soft?' | soft '+rules.clearance+'mm':'')
+          +(rules.hard?' | hard':'')+(rules.maxGap?' | max gap '+rules.maxGap+'mm':'')
           +(rules.duplicates?' | duplicates':'')+(rules.excludeSelf?' | cross-model only':'')
           +(rules.excludeTypes&&rules.excludeTypes.length?' | excl: '+rules.excludeTypes.join(', '):'')+'…',ran:true};
         return next;
@@ -7486,10 +7555,6 @@ function startApp() {
           Hard clashes
         </label>
         <label style=${chkRow}>
-          <input type="checkbox" checked=${rules.soft} onChange=${function(e){upd('soft',e.target.checked)}} />
-          Soft clashes
-        </label>
-        <label style=${chkRow}>
           <input type="checkbox" checked=${rules.duplicates} onChange=${function(e){upd('duplicates',e.target.checked)}} />
           Duplicates
         </label>
@@ -7499,23 +7564,14 @@ function startApp() {
         </label>
       </div>
 
-      ${rules.soft && html`<div style=${{display:'flex',alignItems:'center',gap:'.4rem',marginTop:'.4rem'}}>
-        <span class="cc-tip cc-tip-up cc-tip-delay" data-tip="Max gap between elements to flag as a soft/proximity clash"
-          style=${{fontSize:'.65rem',color:'var(--text-muted)',cursor:'help'}}>Clearance</span>
-        <input type="number" min="1" max="9999" value=${rules.clearance}
-          onChange=${function(e){upd('clearance',Math.max(1,parseInt(e.target.value)||50))}}
+      <div style=${{display:'flex',alignItems:'center',gap:'.4rem',marginTop:'.4rem'}}>
+        <span class="cc-tip cc-tip-up cc-tip-delay" data-tip="Elements within this distance are flagged as near misses. Set to 0 for hard clashes only."
+          style=${{fontSize:'.65rem',color:'var(--text-muted)',cursor:'help'}}>Max gap</span>
+        <input type="number" min="0" max="9999" value=${rules.maxGap}
+          onChange=${function(e){upd('maxGap',Math.max(0,parseInt(e.target.value)||0))}}
           style=${numSt} />
         <span style=${{fontSize:'.62rem',color:'var(--text-faint)'}}>mm</span>
-      </div>`}
-
-      ${rules.hard && html`<div style=${{display:'flex',alignItems:'center',gap:'.4rem',marginTop:'.3rem'}}>
-        <span class="cc-tip cc-tip-up cc-tip-delay" data-tip="Ignore minor intersections smaller than this value (filters modelling noise)"
-          style=${{fontSize:'.65rem',color:'var(--text-muted)',cursor:'help'}}>Tolerance</span>
-        <input type="number" min="0" max="999" value=${rules.hardTolerance}
-          onChange=${function(e){upd('hardTolerance',Math.max(0,parseInt(e.target.value)||0))}}
-          style=${numSt} />
-        <span style=${{fontSize:'.62rem',color:'var(--text-faint)'}}>mm</span>
-      </div>`}
+      </div>
 
       ${allIfcTypes.length>0 && html`<div style=${{marginTop:'.45rem'}}>
         <div onClick=${function(){setExOpen(!exOpen)}} style=${{fontSize:'.65rem',color:'var(--text-muted)',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',userSelect:'none'}}>
@@ -7539,8 +7595,8 @@ function startApp() {
       <div style=${{display:'flex',gap:'.4rem',marginTop:'.55rem',justifyContent:'flex-end'}}>
         <button onClick=${function(){setMsgs(function(prev){var n=prev.slice();n[idx]={role:'assistant',text:'Setup cancelled.'};return n;});}}
           style=${{...S_BTN,padding:'.25rem .6rem',fontSize:'.68rem',background:'none',color:'var(--text-muted)',border:'1px solid var(--border)'}}>Cancel</button>
-        <button onClick=${run} disabled=${!rules.hard&&!rules.soft&&!rules.duplicates}
-          style=${{...S_BTN,padding:'.25rem .8rem',fontSize:'.68rem',background:'var(--accent)',color:'#fff',fontWeight:600,opacity:(!rules.hard&&!rules.soft&&!rules.duplicates)?0.4:1}}>
+        <button onClick=${run} disabled=${!rules.hard&&!rules.maxGap&&!rules.duplicates}
+          style=${{...S_BTN,padding:'.25rem .8rem',fontSize:'.68rem',background:'var(--accent)',color:'#fff',fontWeight:600,opacity:(!rules.hard&&!rules.maxGap&&!rules.duplicates)?0.4:1}}>
           Run Detection
         </button>
       </div>
@@ -7841,7 +7897,7 @@ function startApp() {
           value=${input}
           onInput=${function(e){ setInput(e.target.value); }}
           onKeyDown=${onKeyDown}
-          placeholder="e.g. structural vs MEP with 50mm clearance"
+          placeholder="e.g. structural vs MEP with 50mm gap"
           rows="2"
           style=${{
             flex:1, resize:'none', background:inputBg, border:'1px solid '+borderCol,

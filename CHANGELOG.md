@@ -1,5 +1,20 @@
 # Changelog
 
+## v1.2.81 (2026-03-24)
+- Remove parallel element heuristic to prevent false negatives
+
+## v1.2.80 (2026-03-24)
+- Add parallel linear element rejection to reduce false hard clashes
+
+## v1.2.79 (2026-03-24)
+- Fix false hard clashes, show filtered count, improve detection accuracy
+
+## v1.2.78 (2026-03-24)
+- Replace Clearance/Tolerance with single Max Gap setting
+
+## v1.2.77 (2026-03-24)
+- Add What's New section to README
+
 ## v1.2.76 (2026-03-24)
 - Optimize soft clash marker: use AABB diagonal for weighting, zero-alloc scratch
 
