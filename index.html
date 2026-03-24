@@ -193,7 +193,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'1.2.59',hash:'62831bd',date:'2026-03-24T06:51:05Z'};
+  var CC_VERSION = {v:'1.2.60',hash:'e795d48',date:'2026-03-24T07:00:17Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -1392,7 +1392,19 @@ function startApp() {
       }
 
       if (isHard || isSoft) {
-        var ctr = bA.getCenter(_tmpCtrA);
+        // Clash point = center of AABB intersection region (where elements meet)
+        var ix0 = Math.max(bA.min.x,bB.min.x), iy0 = Math.max(bA.min.y,bB.min.y), iz0 = Math.max(bA.min.z,bB.min.z);
+        var ix1 = Math.min(bA.max.x,bB.max.x), iy1 = Math.min(bA.max.y,bB.max.y), iz1 = Math.min(bA.max.z,bB.max.z);
+        var hasOverlap = ix0<=ix1 && iy0<=iy1 && iz0<=iz1;
+        var cpx, cpy, cpz;
+        if (hasOverlap) {
+          // Center of the overlap region — this is where the clash actually occurs
+          cpx=(ix0+ix1)/2; cpy=(iy0+iy1)/2; cpz=(iz0+iz1)/2;
+        } else {
+          // Soft clash with gap — midpoint between the two closest faces
+          var cA = bA.getCenter(_tmpCtrA), cB = bB.getCenter(_tmpCtrB);
+          cpx=(cA.x+cB.x)/2; cpy=(cA.y+cB.y)/2; cpz=(cA.z+cB.z)/2;
+        }
         var dist = isHard ? 0 : Math.round(geoDist*1000);
         var pA=eA.props||{}, pB=eB.props||{};
         var tA=pA.ifcType||'Element', tB=pB.ifcType||'Element';
@@ -1402,8 +1414,8 @@ function startApp() {
           title:sameModel?mA.name+' (self)':mA.discipline.toUpperCase()+' \u2194 '+mB.discipline.toUpperCase(),
           description:tA+': '+nA+' ('+mA.name+') vs '+tB+': '+nB+' ('+mB.name+')',
           modelAId:mA.id, modelBId:mB.id, elemA:eA.expressId, elemB:eB.expressId,
-          point:[ctr.x,ctr.y,ctr.z], createdAt:new Date().toISOString(),
-          distance:dist, elevation:Math.round(ctr.y*1000)/1000,
+          point:[cpx,cpy,cpz], createdAt:new Date().toISOString(),
+          distance:dist, elevation:Math.round(cpy*1000)/1000,
           disciplines:[mA.discipline,mB.discipline], selfClash:sameModel,
           elemAType:tA, elemBType:tB, elemAName:nA, elemBName:nB,
           elemAStorey:pA.storey||'', elemBStorey:pB.storey||'',
@@ -6867,12 +6879,7 @@ function startApp() {
         if (action.excludeSelf) upd.excludeSelf = true;
         if (typeof action.clearance === 'number') upd.clearance = action.clearance;
         if (typeof action.tolerance === 'number') upd.hardTolerance = action.tolerance;
-        d({t:'UPD_RULES', u:upd});
-        if (s.detecting) return 'Rules updated — detection already running.';
-        d({t:'DETECTING'}); d({t:'TAB', v:'clashes'});
-        setTimeout(function() { d({t:'SET_CLASHES', v:detectClashes(s.models, Object.assign({}, s.rules, upd))}); }, 20);
-        var aN = mA?mA.name:'all models', bN = mB?mB.name:'all models';
-        return 'Running: ' + aN + ' vs ' + bN + (upd.excludeSelf?' (cross-model only)':'') + (upd.clearance?' with '+upd.clearance+'mm clearance':'') + '…';
+        return {_clashSetup:true, rules:upd, nameA:mA?mA.name:'All models', nameB:mB?mB.name:'All models'};
       }
       case 'set_clearance': if (typeof action.value !== 'number') return null; d({t:'UPD_RULES', u:{clearance:action.value}}); return 'Clearance set to '+action.value+'mm.';
       case 'set_tolerance': if (typeof action.value !== 'number') return null; d({t:'UPD_RULES', u:{hardTolerance:action.value}}); return 'Tolerance set to '+action.value+'mm.';
@@ -7016,12 +7023,8 @@ function startApp() {
       if (!s.models.length) return 'No models loaded yet — drop IFC files onto the viewer first.';
       var mA = resolveModel(rawA), mB = resolveModel(rawB);
       var updRules = applyClashOpts({ modelA: mA?mA.id:'all', modelB: mB?mB.id:'all' });
-      d({t:'UPD_RULES', u:updRules});
-      if (s.detecting) return 'Rules updated — detection already running.';
-      d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
-      setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, Object.assign({},s.rules,updRules))}); }, 20);
-      var aN = mA?mA.name:'all models', bN = mB?mB.name:'all models';
-      return 'Running: ' + aN + ' vs ' + bN + (updRules.clearance?' with '+updRules.clearance+'mm clearance':'') + '…';
+      // Return a setup card object instead of immediately running
+      return {_clashSetup:true, rules:updRules, nameA:mA?mA.name:'All models', nameB:mB?mB.name:'All models'};
     }
 
     // "X vs/versus/against Y"
@@ -7059,15 +7062,10 @@ function startApp() {
       });
       if(foundRefs.length>=2) return runSetup(foundRefs[0].word, foundRefs[1].word);
       if(foundRefs.length===1) {
-        // One reference found → run it against all others
         if(!s.models.length) return 'No models loaded yet.';
         var ref = foundRefs[0];
         var updSingle = applyClashOpts({ modelA:ref.id, modelB:'all' });
-        d({t:'UPD_RULES', u:updSingle});
-        if(!s.detecting){ d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
-          setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, Object.assign({},s.rules,updSingle))}); }, 20);
-        }
-        return 'Running: ' + ref.name + ' vs all others…';
+        return {_clashSetup:true, rules:updSingle, nameA:ref.name, nameB:'All models'};
       }
     }
 
@@ -7078,35 +7076,19 @@ function startApp() {
       var wv = parseFloat(withinMatch[1]), wu = withinMatch[2];
       var wmm = wu==='cm' ? Math.round(wv*10) : wu==='m' ? Math.round(wv*1000) : Math.round(wv);
       var updW = applyClashOpts({ modelA:'all', modelB:'all', clearance:wmm, soft:true, hard:true });
-      d({t:'UPD_RULES', u:updW});
-      if (!s.detecting){ d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
-        setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, Object.assign({},s.rules,updW))}); }, 20);
-      }
-      return 'Running: hard clashes + soft clashes within ' + wmm + 'mm…';
+      return {_clashSetup:true, rules:updW, nameA:'All models', nameB:'All models'};
     }
     if (/(?:find|check|detect|run|scan)\s+(?:for\s+)?(?:near[\s-]*miss|proximity|soft\s+clash|clearance\s+clash)/.test(text)) {
       if (!s.models.length) return 'No models loaded yet.';
       var updNM = applyClashOpts({ modelA:'all', modelB:'all', soft:true, hard:true });
-      d({t:'UPD_RULES', u:updNM});
-      if (!s.detecting){ d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
-        setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, Object.assign({},s.rules,updNM))}); }, 20);
-      }
-      return 'Running: hard + soft clashes (' + (updNM.clearance||s.rules.clearance||50) + 'mm clearance)…';
+      return {_clashSetup:true, rules:updNM, nameA:'All models', nameB:'All models'};
     }
 
     // ── "run clash …" generic fallback (no model/discipline found) ──
     if (/(?:run|start|do|execute|detect|find|check|scan|re-?run|again)\s+(?:the\s+)?(?:clash|detection|conflicts?|collisions?|scan|check|clashcontrol)/i.test(text)) {
       if (!s.models.length) return 'No models loaded yet.';
       var updRun = applyClashOpts({ modelA:'all', modelB:'all' });
-      d({t:'UPD_RULES', u:updRun});
-      if (s.detecting) return 'Rules updated — detection already running.';
-      d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
-      setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, Object.assign({},s.rules,updRun))}); }, 20);
-      var parts = [];
-      if (updRun.clearance) parts.push(updRun.clearance + 'mm clearance');
-      if (updRun.excludeSelf) parts.push('cross-model only');
-      if (updRun.soft) parts.push('soft+hard');
-      return 'Running clash detection' + (parts.length ? ' (' + parts.join(', ') + ')' : '') + '…';
+      return {_clashSetup:true, rules:updRun, nameA:'All models', nameB:'All models'};
     }
 
     // ── Individual rule settings (no run, just tweak) ────────────
@@ -7312,6 +7294,112 @@ function startApp() {
     return null;
   }
 
+  // ── Clash Setup Card (inline chat confirmation) ────────────────
+
+  function ClashSetupCard(props) {
+    var setup = props.setup, s = props.s, d = props.d, onRun = props.onRun, setMsgs = props.setMsgs, idx = props.idx;
+    var init = setup.rules;
+    var st = useState(Object.assign({hard:true,soft:false,clearance:s.rules.clearance||50,hardTolerance:s.rules.hardTolerance||0,duplicates:false,excludeSelf:false},init));
+    var rules = st[0], setRules = st[1];
+    var stRan = useState(false), ran = stRan[0], setRan = stRan[1];
+
+    // Build model/discipline options for dropdowns
+    var opts = [{id:'all',label:'All models'}];
+    DISC.forEach(function(dc){
+      if(s.models.some(function(m){return m.discipline===dc.id;}))
+        opts.push({id:'disc:'+dc.id, label:dc.label+' models'});
+    });
+    s.models.forEach(function(m){ opts.push({id:m.id, label:m.name}); });
+
+    function upd(k,v){ setRules(function(r){var n=Object.assign({},r);n[k]=v;return n;}); }
+
+    function run(){
+      setRan(true);
+      var nameA=opts.find(function(o){return o.id===rules.modelA;})||{label:'All'};
+      var nameB=opts.find(function(o){return o.id===rules.modelB;})||{label:'All'};
+      setMsgs(function(prev){
+        var next=prev.slice();
+        next[idx]={role:'assistant',text:'Running: '+nameA.label+' vs '+nameB.label
+          +(rules.hard?' | hard':'')+(rules.soft?' | soft '+rules.clearance+'mm':'')
+          +(rules.duplicates?' | duplicates':'')+(rules.excludeSelf?' | cross-model only':'')+'…',ran:true};
+        return next;
+      });
+      onRun(rules);
+    }
+
+    if(ran) return null;
+
+    var lblSt={fontSize:'.62rem',color:'var(--text-muted)',marginBottom:2};
+    var selSt={...S_INPUT,fontSize:'.68rem',padding:'.22rem .35rem',width:'100%',background:'var(--input-bg)',color:'var(--text-primary)',border:'1px solid var(--border)',borderRadius:5};
+    var chkRow={display:'flex',alignItems:'center',gap:'.3rem',fontSize:'.68rem',color:'var(--text-secondary)',cursor:'pointer'};
+    var numSt={...S_INPUT,fontSize:'.68rem',padding:'.2rem .3rem',width:60,background:'var(--input-bg)',color:'var(--text-primary)',border:'1px solid var(--border)',borderRadius:5,textAlign:'right'};
+
+    return html`<div style=${{maxWidth:'100%',background:'var(--card-bg)',border:'1px solid var(--border)',borderRadius:10,padding:'.65rem .75rem',fontSize:'.74rem'}}>
+      <div style=${{fontWeight:600,marginBottom:'.5rem',color:'var(--text-primary)',display:'flex',alignItems:'center',gap:'.3rem'}}>
+        <span style=${{fontSize:'.85rem'}}>⚡</span> Clash Detection Setup
+      </div>
+
+      <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.45rem .6rem'}}>
+        <div>
+          <div style=${lblSt}>Set A</div>
+          <select value=${rules.modelA} onChange=${function(e){upd('modelA',e.target.value)}} style=${selSt}>
+            ${opts.map(function(o){return html`<option key=${o.id} value=${o.id}>${o.label}</option>`;})}
+          </select>
+        </div>
+        <div>
+          <div style=${lblSt}>Set B</div>
+          <select value=${rules.modelB} onChange=${function(e){upd('modelB',e.target.value)}} style=${selSt}>
+            ${opts.map(function(o){return html`<option key=${o.id} value=${o.id}>${o.label}</option>`;})}
+          </select>
+        </div>
+      </div>
+
+      <div style=${{display:'flex',flexWrap:'wrap',gap:'.45rem .8rem',marginTop:'.5rem'}}>
+        <label style=${chkRow}>
+          <input type="checkbox" checked=${rules.hard} onChange=${function(e){upd('hard',e.target.checked)}} />
+          Hard clashes
+        </label>
+        <label style=${chkRow}>
+          <input type="checkbox" checked=${rules.soft} onChange=${function(e){upd('soft',e.target.checked)}} />
+          Soft clashes
+        </label>
+        <label style=${chkRow}>
+          <input type="checkbox" checked=${rules.duplicates} onChange=${function(e){upd('duplicates',e.target.checked)}} />
+          Duplicates
+        </label>
+        <label style=${chkRow}>
+          <input type="checkbox" checked=${rules.excludeSelf} onChange=${function(e){upd('excludeSelf',e.target.checked)}} />
+          Cross-model only
+        </label>
+      </div>
+
+      ${rules.soft && html`<div style=${{display:'flex',alignItems:'center',gap:'.4rem',marginTop:'.4rem'}}>
+        <span style=${{fontSize:'.65rem',color:'var(--text-muted)'}}>Clearance</span>
+        <input type="number" min="1" max="9999" value=${rules.clearance}
+          onChange=${function(e){upd('clearance',Math.max(1,parseInt(e.target.value)||50))}}
+          style=${numSt} />
+        <span style=${{fontSize:'.62rem',color:'var(--text-faint)'}}>mm</span>
+      </div>`}
+
+      ${rules.hard && html`<div style=${{display:'flex',alignItems:'center',gap:'.4rem',marginTop:'.3rem'}}>
+        <span style=${{fontSize:'.65rem',color:'var(--text-muted)'}}>Tolerance</span>
+        <input type="number" min="0" max="999" value=${rules.hardTolerance}
+          onChange=${function(e){upd('hardTolerance',Math.max(0,parseInt(e.target.value)||0))}}
+          style=${numSt} />
+        <span style=${{fontSize:'.62rem',color:'var(--text-faint)'}}>mm</span>
+      </div>`}
+
+      <div style=${{display:'flex',gap:'.4rem',marginTop:'.55rem',justifyContent:'flex-end'}}>
+        <button onClick=${function(){setMsgs(function(prev){var n=prev.slice();n[idx]={role:'assistant',text:'Setup cancelled.'};return n;});}}
+          style=${{...S_BTN,padding:'.25rem .6rem',fontSize:'.68rem',background:'none',color:'var(--text-muted)',border:'1px solid var(--border)'}}>Cancel</button>
+        <button onClick=${run} disabled=${!rules.hard&&!rules.soft&&!rules.duplicates}
+          style=${{...S_BTN,padding:'.25rem .8rem',fontSize:'.68rem',background:'var(--accent)',color:'#fff',fontWeight:600,opacity:(!rules.hard&&!rules.soft&&!rules.duplicates)?0.4:1}}>
+          Run Detection
+        </button>
+      </div>
+    </div>`;
+  }
+
   // ── Natural Language Command Panel ─────────────────────────────
 
   function NLCommandPanel(props) {
@@ -7412,6 +7500,13 @@ function startApp() {
       if (bottomRef.current) bottomRef.current.scrollIntoView({behavior:'smooth'});
     }, [msgs]);
 
+    function executeDetection(rules) {
+      d({t:'UPD_RULES', u:rules});
+      if (s.detecting) return;
+      d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
+      setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, Object.assign({},s.rules,rules))}); }, 20);
+    }
+
     function send() {
       var text = input.trim();
       if (!text) return;
@@ -7419,9 +7514,13 @@ function startApp() {
       setInput('');
       setLoading(true);
       processNLCommandWithLLM(text, s, d).then(function(result) {
-        var reply = result !== null ? result
-          : 'Not sure what you mean. Try: "check structural vs MEP", "check clashes within 100mm", "find near misses", "how many clashes?", or "help".';
-        setMsgs(function(m){ return m.concat([{role:'assistant', text:reply}]); });
+        if (result && result._clashSetup) {
+          setMsgs(function(m){ return m.concat([{role:'assistant', setup:result}]); });
+        } else {
+          var reply = result !== null ? result
+            : 'Not sure what you mean. Try: "check structural vs MEP", "check clashes within 100mm", "find near misses", "how many clashes?", or "help".';
+          setMsgs(function(m){ return m.concat([{role:'assistant', text:reply}]); });
+        }
         setLoading(false);
       });
     }
@@ -7527,6 +7626,7 @@ function startApp() {
       }}>
         ${msgs.map(function(m, i) {
           var isUser = m.role === 'user';
+          if (m.setup) return html`<${ClashSetupCard} key=${i} setup=${m.setup} s=${s} d=${d} onRun=${executeDetection} setMsgs=${setMsgs} idx=${i} />`;
           return html`<div key=${i} style=${{display:'flex', justifyContent: isUser?'flex-end':'flex-start'}}>
             <div style=${{
               maxWidth:'85%', padding:'.45rem .7rem',

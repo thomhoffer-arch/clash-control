@@ -1,5 +1,8 @@
 # Changelog
 
+## v1.2.60 (2026-03-24)
+- Add logo/version tooltips and quick start guide
+
 ## v1.2.59 (2026-03-24)
 - Add comprehensive NL commands for full app control via chat
 
