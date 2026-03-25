@@ -1,7 +1,7 @@
 // ClashControl Service Worker — offline caching
 // Updates automatically when index.html changes (cache name includes version)
 
-var CACHE = 'clashcontrol-v2.11.4';
+var CACHE = 'clashcontrol-v2.11.5';
 
 var PRECACHE = [
   './',
@@ -33,6 +33,11 @@ self.addEventListener('activate', function(e) {
       return self.clients.claim();
     })
   );
+});
+
+// Allow the page to force-activate a waiting service worker
+self.addEventListener('message', function(e) {
+  if (e.data && e.data.type === 'SKIP_WAITING') self.skipWaiting();
 });
 
 self.addEventListener('fetch', function(e) {
