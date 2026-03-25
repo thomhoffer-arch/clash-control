@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.1.4 (2026-03-25)
+- Make training pill a toggle with separate dropdown chevron
+
 ## v2.1.3 (2026-03-25)
 - Switch navigation cube from perspective to orthographic camera
 
