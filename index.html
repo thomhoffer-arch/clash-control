@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.1.1',hash:'36b1d93',date:'2026-03-25T07:58:58Z'};
+  var CC_VERSION = {v:'2.1.2',hash:'52b0848',date:'2026-03-25T07:59:53Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -4834,7 +4834,8 @@ function startApp() {
       // Camera along +Z axis so cube rotation directly maps to main viewport orientation.
       // This ensures FRONT face points toward camera when main camera is at +Z (front view),
       // aligning the nav cube with the grid axes at origin.
-      var camera = new THREE.PerspectiveCamera(28, 1, 0.1, 20);
+      var orthoHalf = 0.95;
+      var camera = new THREE.OrthographicCamera(-orthoHalf, orthoHalf, orthoHalf, -orthoHalf, 0.1, 20);
       camera.position.set(0, 0, 4);
       camera.lookAt(0, 0, 0);
 

@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.1.2 (2026-03-25)
+- Remove colored axis lines from navigation cube
+
 ## v2.0.47 (2026-03-25)
 - Hide training mode pill when TrainingOverlay is active
 
