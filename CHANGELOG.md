@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.7.4 (2026-03-25)
+- Change verdict row labels to + - × symbols
+
 ## v2.7.3 (2026-03-25)
 - Replace thumbs up/down with Real clash / Acceptable / False positive
 
