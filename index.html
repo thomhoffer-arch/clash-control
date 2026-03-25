@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.11.1',hash:'2d0850d',date:'2026-03-25T17:56:21Z'};
+  var CC_VERSION = {v:'2.11.2',hash:'21ff158',date:'2026-03-25T20:34:46Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -7836,7 +7836,6 @@ function startApp() {
     var clashCount = useState(function(){return _getClashTrainCount();}), clashN=clashCount[0], setClashN=clashCount[1];
     var confirmClearNL = useState(false), showClearNL=confirmClearNL[0], setClearNL=confirmClearNL[1];
     var confirmClearClash = useState(false), showClearClash=confirmClearClash[0], setClearClash=confirmClearClash[1];
-    var nlShareSt = useState({status:null}), nlShare=nlShareSt[0], setNlShare=nlShareSt[1];
     var TLBL={fontSize:'.78rem',color:'var(--text-primary)'};
     var TSUB={fontSize:'.65rem',color:'var(--text-muted)',marginTop:'.1rem',lineHeight:1.4};
     var TROW={display:'flex',justifyContent:'space-between',alignItems:'center',padding:'.5rem 0',gap:'1rem',borderBottom:'1px solid var(--border-subtle)'};
@@ -7848,9 +7847,6 @@ function startApp() {
           <div style=${TSUB}>User commands paired with resolved actions</div>
         </div>
         <div style=${{display:'flex',gap:'.25rem',flexShrink:0}}>
-          <button onClick=${function(){_shareNLTrainingData(models,function(st){setNlShare({status:st});if(st==='ok'){_clearNLTrainStore();setNlN(0);setTimeout(function(){setNlShare({status:null});},3000);}});}}
-            disabled=${!nlN||nlShare.status==='sending'}
-            style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .4rem',background:nlN&&nlShare.status!=='sending'?'#7c3aed':'var(--bg-secondary)',color:nlN&&nlShare.status!=='sending'?'#fff':'var(--text-faint)'}}>${nlShare.status==='sending'?'Sending\u2026':'Send'}</button>
           <button onClick=${function(){_exportNLTrainingJSONL();}}
             disabled=${!nlN}
             style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .4rem',background:nlN?'var(--accent)':'var(--bg-secondary)',color:nlN?'#fff':'var(--text-faint)'}}>Export</button>
@@ -7863,8 +7859,6 @@ function startApp() {
             style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .4rem',background:'none',color:'var(--text-muted)',border:'1px solid var(--border)'}}>Cancel</button>`}
         </div>
       </div>
-      ${nlShare.status==='ok' && html`<div style=${{fontSize:'.55rem',color:'#22c55e',padding:'.2rem 0'}}>NL data sent, thank you!</div>`}
-      ${nlShare.status==='error' && html`<div style=${{fontSize:'.55rem',color:'#ef4444',padding:'.2rem 0'}}>Send failed — use Export instead.</div>`}
       <div style=${TROW}>
         <div style=${{flex:1}}>
           <div style=${TLBL}>Clash feedback records: ${clashN}</div>
@@ -7884,7 +7878,7 @@ function startApp() {
         </div>
       </div>
       <div style=${{fontSize:'.6rem',color:'var(--text-faint)',marginTop:'.4rem',lineHeight:1.5}}>
-        Data is stored locally in this browser. Send shares it anonymously to improve ClashControl — NL commands are sanitised (model names, file paths, and emails are stripped). Export downloads the raw file for your own use.
+        Data is stored locally in this browser. When sharing is enabled, data is sent automatically at end of session. NL commands are sanitised (model names, file paths, and emails are stripped). Export downloads the raw file for your own use.
       </div>
     </div>`;
   }
@@ -10364,7 +10358,6 @@ function startApp() {
   function TrainingPill(props) {
     var s = props.s, d = props.d;
     var clashes = s.clashes;
-    var ss = useState({status:null,msg:null}), shareState=ss[0], setShareState=ss[1];
     var stExpanded = useState(false), isExpanded=stExpanded[0], setExpanded=stExpanded[1];
     var stWarn = useState(false), showWarn=stWarn[0], setShowWarn=stWarn[1];
     var stDelConfirm = useState(false), showDelConfirm=stDelConfirm[0], setShowDelConfirm=stDelConfirm[1];
@@ -10375,6 +10368,13 @@ function startApp() {
       if(!s.trainingMode) setExpanded(false);
       prevTraining.current = s.trainingMode;
     },[s.trainingMode]);
+    // Sync toggle when consent popup or other tab changes cc_data_consent
+    useEffect(function(){
+      function sync(){try{setDataConsent(localStorage.getItem('cc_data_consent')==='granted');}catch(e){}}
+      window.addEventListener('cc-consent-change', sync);
+      window.addEventListener('storage', function(e){if(e.key==='cc_data_consent') sync();});
+      return function(){window.removeEventListener('cc-consent-change', sync);};
+    },[]);
 
     var confirmedFromClash = s.issues.filter(function(i){return i.source==='clash';});
     var allTrainable = clashes.concat(confirmedFromClash);
@@ -10388,17 +10388,7 @@ function startApp() {
       d({t:'TRAINING_MODE'});
     };
 
-    function doSend() {
-      shareAITrainingData(clashes, s.detectionSettings, s.models, function(status, msg) {
-        setShareState({status:status, msg:msg});
-        if (status==='ok') {
-          d({t:'CLEAR_TRAINING_DATA'});
-          setTimeout(function(){ setShareState({status:null,msg:null}); }, 4000);
-        }
-      }, s.prefs.defaultTolerances, s.issues);
-    }
     function doDelete() { d({t:'CLEAR_TRAINING_DATA'}); }
-    var isSending = shareState.status==='sending';
     var hasData = feedbackCount > 0;
 
     return html`<div style=${{position:'absolute',top:'2.6rem',left:'50%',transform:'translateX(-50%)',
@@ -10447,30 +10437,14 @@ function startApp() {
         <div style=${{width:'100%',height:4,background:'var(--bg-secondary)',borderRadius:2,marginBottom:'.4rem'}}>
           <div style=${{width:(hasData?Math.max(feedbackCount,reviewedCount)/Math.max(totalCount,1)*100:0)+'%',height:'100%',background:'#7c3aed',borderRadius:2}}></div>
         </div>
+        ${dataConsent && html`<div style=${{fontSize:'.5rem',color:'#a78bfa',marginBottom:'.3rem'}}>Sharing enabled \u2014 data sent automatically at end of session.</div>`}
+        ${!dataConsent && html`<div style=${{fontSize:'.5rem',color:'var(--text-faint)',marginBottom:'.3rem'}}>Sharing disabled \u2014 data stays local. Export or delete in Settings.</div>`}
         <div style=${{display:'flex',gap:'.25rem',flexWrap:'wrap',marginBottom:'.2rem'}}>
-          <button onClick=${doSend} disabled=${isSending || !hasData}
-            style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',
-              background:isSending||!hasData?'var(--bg-secondary)':'#7c3aed',
-              color:isSending||!hasData?'var(--text-faint)':'#fff',
-              border:'1px solid '+(isSending||!hasData?'var(--border)':'#7c3aed'),
-              opacity:isSending?0.6:1,flex:1}}>${isSending?'Sending\u2026':'Send'}</button>
-          <button onClick=${function(){exportAITrainingData(clashes, s.detectionSettings, s.models, s.prefs.defaultTolerances, s.issues);}} disabled=${!hasData}
-            style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:'var(--bg-secondary)',color:hasData?'var(--text-secondary)':'var(--text-faint)',border:'1px solid var(--border)',flex:1}}>Export</button>
           ${!showDelConfirm && html`<button onClick=${function(){if(hasData)setShowDelConfirm(true);}} disabled=${!hasData}
             style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:'var(--bg-secondary)',color:hasData?'var(--text-secondary)':'var(--text-faint)',border:'1px solid var(--border)',flex:1}}>Delete</button>`}
           ${showDelConfirm && html`<button onClick=${function(){doDelete();setShowDelConfirm(false);}}
             style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',flex:1}}>Confirm?</button>`}
         </div>
-        ${shareState.status==='ok' && html`<div style=${{fontSize:'.55rem',color:'#22c55e'}}>Submitted, thank you!</div>`}
-        ${shareState.status==='error' && html`<div style=${{fontSize:'.55rem',color:'#ef4444'}}>Submission blocked by browser extension. <span onClick=${function(){
-          var payload=_buildAITrainingPayload(clashes, s.detectionSettings, s.models, s.prefs.defaultTolerances, s.issues);
-          if(!payload) return;
-          var json=JSON.stringify(payload);
-          var subj=encodeURIComponent('ClashControl Training Data');
-          var body=encodeURIComponent('Hi,\n\nPlease find my ClashControl training data below.\n\n---\n'+json+'\n---');
-          window.open('mailto:training@clashcontrol.com?subject='+subj+'&body='+body,'_self');
-        }} style=${{textDecoration:'underline',cursor:'pointer',color:'#93c5fd'}}>Send via email</span> or <span onClick=${function(){exportAITrainingData(clashes, s.detectionSettings, s.models, s.prefs.defaultTolerances, s.issues);}} style=${{textDecoration:'underline',cursor:'pointer',color:'#93c5fd'}}>export file</span></div>`}
-
       </div>`}
       ${showWarn && html`<div style=${{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:2000,
         background:'rgba(0,0,0,.6)',display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'3rem 0'}}
@@ -10483,11 +10457,9 @@ function startApp() {
             <span style=${{fontSize:'.85rem',fontWeight:700,color:'var(--text-primary)'}}>Unsent Training Data</span>
           </div>
           <p style=${{fontSize:'.72rem',color:'var(--text-secondary)',lineHeight:1.55,marginBottom:'.8rem'}}>
-            You have <strong style=${{color:'#a78bfa'}}>${feedbackCount} labelled</strong> clash${feedbackCount!==1?'es':''} that ${feedbackCount!==1?'have':'has'}n't been shared or exported yet. Turning off Training Mode won't delete your labels, but you may forget to submit them.
+            You have <strong style=${{color:'#a78bfa'}}>${feedbackCount} labelled</strong> clash${feedbackCount!==1?'es':''}.${dataConsent?' Data will be shared automatically at end of session.':' Data sharing is off — labels are stored locally only.'}
           </p>
           <div style=${{display:'flex',gap:'.35rem',flexDirection:'column'}}>
-            <button onClick=${function(){setShowWarn(false);doSend();}}
-              style=${{...S_BTN,padding:'.4rem',fontSize:'.7rem',fontWeight:600,background:'#7c3aed',color:'#fff',border:'none',borderRadius:6}}>Send Now</button>
             <button onClick=${function(){setShowWarn(false);d({t:'TRAINING_MODE'});}}
               style=${{...S_BTN,padding:'.4rem',fontSize:'.7rem',fontWeight:600,background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',borderRadius:6}}>Turn Off (keep data)</button>
             ${!showDelConfirm && html`<button onClick=${function(){setShowDelConfirm(true);}}
@@ -10508,7 +10480,7 @@ function startApp() {
     });
     var show=stShow[0], setShow=stShow[1];
     if(!show) return null;
-    function decide(v){ try{localStorage.setItem('cc_data_consent',v);}catch(e){} setShow(false); }
+    function decide(v){ try{localStorage.setItem('cc_data_consent',v);}catch(e){} setShow(false); window.dispatchEvent(new Event('cc-consent-change')); }
     var EQ_BTN={cursor:'pointer',padding:'.55rem 1.2rem',fontSize:'.8rem',fontWeight:600,
       borderRadius:6,border:'1px solid var(--border)',background:'var(--bg-secondary)',color:'var(--text-primary)',flex:1};
     return html`<div style=${{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:2100,
