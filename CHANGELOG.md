@@ -1,5 +1,14 @@
 # Changelog
 
+## v2.6.9 (2026-03-25)
+- Include confirmed clashes in training data count and export
+
+## v2.6.8 (2026-03-25)
+- Distinguish detected vs confirmed clash type in training feedback
+
+## v2.6.7 (2026-03-25)
+- Fix training feedback counter to include all annotation types
+
 ## v2.6.6 (2026-03-25)
 - Fix element properties in issues, add assignee field, add reason
 

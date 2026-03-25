@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.6.6',hash:'d62e473',date:'2026-03-25T10:32:23Z'};
+  var CC_VERSION = {v:'2.6.9',hash:'b27fd19',date:'2026-03-25T10:44:29Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -2500,10 +2500,13 @@ function startApp() {
   // user identifiers are included. See the AI Layer Implementation Guide
   // for the full GDPR rationale.
 
-  var _AI_VERDICT_MAP = {open:'unreviewed', in_progress:'true_clash', resolved:'acceptable', closed:'false_positive'};
+  var _AI_VERDICT_MAP = {open:'unreviewed', confirmed:'true_clash', in_progress:'true_clash', resolved:'acceptable', closed:'false_positive'};
 
-  function _buildAITrainingPayload(clashes, detectionSettings, models, defaultTolerances) {
-    var reviewed = clashes.filter(function(c){ return c.status!=='open'; });
+  function _buildAITrainingPayload(clashes, detectionSettings, models, defaultTolerances, issues) {
+    // Include confirmed clashes that moved to issues
+    var allClashData = clashes.slice();
+    if(issues) issues.forEach(function(i){if(i.source==='clash') allClashData.push(i);});
+    var reviewed = allClashData.filter(function(c){ return c.status!=='open'; });
     if (reviewed.length===0) return null;
     var tols = defaultTolerances || {};
     var records = reviewed.map(function(c) {
@@ -2555,8 +2558,8 @@ function startApp() {
     };
   }
 
-  function exportAITrainingData(clashes, detectionSettings, models, defaultTolerances) {
-    var payload = _buildAITrainingPayload(clashes, detectionSettings, models, defaultTolerances);
+  function exportAITrainingData(clashes, detectionSettings, models, defaultTolerances, issues) {
+    var payload = _buildAITrainingPayload(clashes, detectionSettings, models, defaultTolerances, issues);
     if (!payload) return;
     var json = JSON.stringify(payload, null, 2);
     var blob = new Blob([json], {type:'application/json'});
@@ -2567,8 +2570,8 @@ function startApp() {
     URL.revokeObjectURL(url);
   }
 
-  function shareAITrainingData(clashes, detectionSettings, models, onStatus, defaultTolerances) {
-    var payload = _buildAITrainingPayload(clashes, detectionSettings, models, defaultTolerances);
+  function shareAITrainingData(clashes, detectionSettings, models, onStatus, defaultTolerances, issues) {
+    var payload = _buildAITrainingPayload(clashes, detectionSettings, models, defaultTolerances, issues);
     if (!payload) { onStatus('error','No reviewed clashes to share.'); return; }
     var json = JSON.stringify(payload);
     onStatus('sending', null);
@@ -7363,9 +7366,13 @@ function startApp() {
             </div>
             <div style=${{fontSize:'.55rem',fontWeight:600,color:'var(--text-muted)',marginBottom:'.15rem'}}>Clash type</div>
             <div style=${{display:'flex',gap:'.25rem',marginBottom:'.3rem',flexWrap:'wrap'}}>
-              ${CTYPES.map(function(ct){var sel=curCT===ct.k;return html`<button key=${ct.k}
+              ${CTYPES.map(function(ct){var confirmed=it.clashTypeConfirmed!=null;var sel=curCT===ct.k;var isDefault=!confirmed&&it.type===ct.k;return html`<button key=${ct.k}
                 onClick=${function(e){e.stopPropagation();d({t:'UPD_CLASH',id:it.id,u:{clashTypeConfirmed:ct.k}});}}
-                style=${{...S_BTN,fontSize:'.55rem',padding:'.1rem .35rem',background:sel?'#1e3a5f':'var(--bg-secondary)',color:sel?'#93c5fd':'var(--text-faint)',border:'1px solid '+(sel?'#3b82f6':'var(--border)')}}>${ct.l}</button>`})}
+                style=${{...S_BTN,fontSize:'.55rem',padding:'.1rem .35rem',
+                  background:sel&&confirmed?'#1e3a5f':isDefault?'var(--bg-primary)':'var(--bg-secondary)',
+                  color:sel&&confirmed?'#93c5fd':isDefault?'var(--text-muted)':'var(--text-faint)',
+                  border:'1px solid '+(sel&&confirmed?'#3b82f6':isDefault?'var(--border)':'var(--border)'),
+                  opacity:isDefault&&!confirmed?0.7:1}}>${ct.l}${isDefault&&!confirmed?' (detected)':''}</button>`})}
             </div>
             <div style=${{fontSize:'.55rem',fontWeight:600,color:'var(--text-muted)',marginBottom:'.15rem'}}>Reason</div>
             <div style=${{display:'flex',gap:'.2rem',marginBottom:'.3rem',flexWrap:'wrap'}}>
@@ -9437,6 +9444,12 @@ function startApp() {
       return 'Switched to ' + (wantLight?'light':'dark') + ' mode.';
     }
 
+    // ── Reload ─────────────────────────────────────────────────
+    if (/^\/reload|^reload\s*page|^refresh\s*page|^reload$/.test(text)) {
+      setTimeout(function(){window.location.reload();},300);
+      return 'Reloading page\u2026';
+    }
+
     // ── File Loading ─────────────────────────────────────────────
     if (/(?:load|open|import|add)\s+(?:an?\s+)?ifc|ifc\s+(?:file|model)/.test(text)) {
       if(window._ccOpenIFC) window._ccOpenIFC();
@@ -10160,9 +10173,11 @@ function startApp() {
       prevTraining.current = s.trainingMode;
     },[s.trainingMode]);
 
-    var reviewedCount = clashes.filter(function(c){return c.status!=='open';}).length;
-    var feedbackCount = clashes.filter(function(c){return c.aiFeedback||c.clashTypeConfirmed||(c.aiReasons&&c.aiReasons.length)||c.aiResolution||c.aiNote;}).length;
-    var totalCount = clashes.length;
+    var confirmedFromClash = s.issues.filter(function(i){return i.source==='clash';});
+    var allTrainable = clashes.concat(confirmedFromClash);
+    var reviewedCount = allTrainable.filter(function(c){return c.status!=='open';}).length;
+    var feedbackCount = allTrainable.filter(function(c){return c.aiFeedback||c.clashTypeConfirmed||(c.aiReasons&&c.aiReasons.length)||c.aiResolution||c.aiNote||c.source==='clash';}).length;
+    var totalCount = allTrainable.length;
 
     // Global guard: warn before turning off if unsent data exists
     window._ccToggleTraining = function(){
@@ -10174,7 +10189,7 @@ function startApp() {
       shareAITrainingData(clashes, s.detectionSettings, s.models, function(status, msg) {
         setShareState({status:status, msg:msg});
         if (status==='ok') setTimeout(function(){ setShareState({status:null,msg:null}); }, 4000);
-      }, s.prefs.defaultTolerances);
+      }, s.prefs.defaultTolerances, s.issues);
     }
     function doDelete() { d({t:'CLEAR_TRAINING_DATA'}); }
     var isSending = shareState.status==='sending';
@@ -10238,7 +10253,7 @@ function startApp() {
             style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',flex:1}}>Confirm?</button>`}
         </div>
         ${shareState.status==='ok' && html`<div style=${{fontSize:'.55rem',color:'#22c55e'}}>Submitted, thank you!</div>`}
-        ${shareState.status==='error' && shareState.msg && html`<div style=${{fontSize:'.55rem',color:'#ef4444'}}>${shareState.msg} <span onClick=${function(){exportAITrainingData(clashes, s.detectionSettings, s.models, s.prefs.defaultTolerances);}} style=${{textDecoration:'underline',cursor:'pointer',color:'#93c5fd'}}>Export file</span></div>`}
+        ${shareState.status==='error' && shareState.msg && html`<div style=${{fontSize:'.55rem',color:'#ef4444'}}>${shareState.msg} <span onClick=${function(){exportAITrainingData(clashes, s.detectionSettings, s.models, s.prefs.defaultTolerances, s.issues);}} style=${{textDecoration:'underline',cursor:'pointer',color:'#93c5fd'}}>Export file</span></div>`}
 
       </div>`}
       ${showWarn && html`<div style=${{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:2000,
