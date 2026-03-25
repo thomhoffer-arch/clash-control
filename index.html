@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.11.3',hash:'55b0f57',date:'2026-03-25T20:46:00Z'};
+  var CC_VERSION = {v:'2.11.4',hash:'911e06d',date:'2026-03-25T20:51:19Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -10700,10 +10700,18 @@ function startApp() {
       try { return !sessionStorage.getItem('cc_session_seen'); } catch(e){ return true; }
     });
     var show = stShow[0], setShow = stShow[1];
+    // Check if data consent still needs to be decided
+    var needsConsent = useState(function(){
+      try { var v=localStorage.getItem('cc_data_consent'); return v!=='granted'&&v!=='denied'; } catch(e){ return true; }
+    })[0];
     // Animate in
     var stVisible = useState(false), vis = stVisible[0], setVis = stVisible[1];
     useEffect(function(){ if(show) requestAnimationFrame(function(){ setVis(true); }); },[show]);
-    function dismiss() {
+    function dismiss(consentVal, enableTraining) {
+      // If consent decision provided, store it
+      if(consentVal) { try{localStorage.setItem('cc_data_consent',consentVal);}catch(e){} window.dispatchEvent(new Event('cc-consent-change')); }
+      // Mark training info as seen so TrainingModePopup won't also show
+      if(enableTraining) { try{localStorage.setItem('cc_training_informed','1');}catch(e){} }
       setVis(false);
       setTimeout(function(){
         try { sessionStorage.setItem('cc_session_seen','1'); } catch(e){}
@@ -10712,7 +10720,7 @@ function startApp() {
     }
     useEffect(function(){
       if(!show) return;
-      function onKey(e){if(e.key==='Escape') dismiss();}
+      function onKey(e){if(e.key==='Escape') dismiss(needsConsent?'denied':null);}
       window.addEventListener('keydown', onKey);
       return function(){window.removeEventListener('keydown', onKey);};
     },[show]);
@@ -10802,14 +10810,28 @@ function startApp() {
           </div>
 
           <!-- Footer actions -->
-          <div style=${{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
-            <button onClick=${dismiss} style=${{border:'1px solid var(--border)',cursor:'pointer',fontFamily:'inherit',fontSize:'.7rem',borderRadius:8,padding:'.5rem 1rem',background:'none',color:'var(--text-secondary)',transition:'background .15s'}}>
-              Skip for now
+          ${needsConsent ? html`
+          <div style=${{fontSize:'.63rem',color:'var(--text-muted)',lineHeight:1.5,marginBottom:'.6rem',textAlign:'center'}}>
+            Help improve ClashControl by sharing anonymous training data?
+          </div>
+          <div style=${{display:'flex',gap:'.5rem'}}>
+            <button onClick=${function(){dismiss('denied');}} style=${{flex:1,border:'1px solid var(--border)',cursor:'pointer',fontFamily:'inherit',fontSize:'.7rem',borderRadius:8,padding:'.5rem 1rem',background:'none',color:'var(--text-secondary)',transition:'background .15s'}}>
+              No thanks
             </button>
-            <button onClick=${function(){dismiss();setTimeout(function(){d({t:'TRAINING_MODE'});},250);}} style=${{border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:8,padding:'.5rem 1.4rem',background:'#7c3aed',color:'#fff',fontWeight:600,boxShadow:'0 2px 8px rgba(124,58,237,.3)',transition:'background .15s'}}>
+            <button onClick=${function(){dismiss('granted',true);setTimeout(function(){d({t:'TRAINING_MODE'});},250);}} style=${{flex:1,border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:8,padding:'.5rem 1.4rem',background:'#7c3aed',color:'#fff',fontWeight:600,boxShadow:'0 2px 8px rgba(124,58,237,.3)',transition:'background .15s'}}>
               Enable Training Mode
             </button>
           </div>
+          ` : html`
+          <div style=${{display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+            <button onClick=${function(){dismiss();}} style=${{border:'1px solid var(--border)',cursor:'pointer',fontFamily:'inherit',fontSize:'.7rem',borderRadius:8,padding:'.5rem 1rem',background:'none',color:'var(--text-secondary)',transition:'background .15s'}}>
+              Skip for now
+            </button>
+            <button onClick=${function(){dismiss(null,true);setTimeout(function(){d({t:'TRAINING_MODE'});},250);}} style=${{border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:8,padding:'.5rem 1.4rem',background:'#7c3aed',color:'#fff',fontWeight:600,boxShadow:'0 2px 8px rgba(124,58,237,.3)',transition:'background .15s'}}>
+              Enable Training Mode
+            </button>
+          </div>
+          `}
         </div>
       </div>
     </div>`;
@@ -11256,7 +11278,6 @@ function startApp() {
       <${MobileNav} s=${s} d=${d} />
       <${WelcomePopup} d=${d} theme=${s.prefs.theme} />
       <${TrainingModePopup} d=${d} active=${s.trainingMode} />
-      <${DataConsentPopup} />
     </div>`;
   }
 
