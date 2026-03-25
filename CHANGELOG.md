@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.1.3 (2026-03-25)
+- Switch navigation cube from perspective to orthographic camera
+
 ## v2.1.2 (2026-03-25)
 - Remove colored axis lines from navigation cube
 
