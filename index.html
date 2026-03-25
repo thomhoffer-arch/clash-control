@@ -229,8 +229,25 @@ window.addEventListener('unhandledrejection', function(e) {
 
 // Service worker registration (PWA offline support)
 if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.register('./sw.js').catch(function(e) {
+  navigator.serviceWorker.register('./sw.js').then(function(reg) {
+    // Check for updates on page load
+    reg.update();
+    // When a new SW is installed and activates, reload to get fresh content
+    if (reg.waiting) { reg.waiting.postMessage({type:'SKIP_WAITING'}); }
+    reg.addEventListener('updatefound', function() {
+      var newSW = reg.installing;
+      if (newSW) newSW.addEventListener('statechange', function() {
+        if (newSW.state === 'activated' && navigator.serviceWorker.controller) {
+          window.location.reload();
+        }
+      });
+    });
+  }).catch(function(e) {
     console.warn('[ClashControl] SW registration failed:', e);
+  });
+  // Reload when a new service worker takes control
+  navigator.serviceWorker.addEventListener('controllerchange', function() {
+    window.location.reload();
   });
 }
 
@@ -245,7 +262,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.11.4',hash:'911e06d',date:'2026-03-25T20:51:19Z'};
+  var CC_VERSION = {v:'2.11.5',hash:'b45b4db',date:'2026-03-25T20:59:51Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -10818,7 +10835,7 @@ function startApp() {
             <button onClick=${function(){dismiss('denied');}} style=${{flex:1,border:'1px solid var(--border)',cursor:'pointer',fontFamily:'inherit',fontSize:'.7rem',borderRadius:8,padding:'.5rem 1rem',background:'none',color:'var(--text-secondary)',transition:'background .15s'}}>
               No thanks
             </button>
-            <button onClick=${function(){dismiss('granted',true);setTimeout(function(){d({t:'TRAINING_MODE'});},250);}} style=${{flex:1,border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:8,padding:'.5rem 1.4rem',background:'#7c3aed',color:'#fff',fontWeight:600,boxShadow:'0 2px 8px rgba(124,58,237,.3)',transition:'background .15s'}}>
+            <button onClick=${function(){dismiss('granted',true);setTimeout(function(){if(window._ccDispatch)window._ccDispatch({t:'TRAINING_MODE'});},300);}} style=${{flex:1,border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:8,padding:'.5rem 1.4rem',background:'#7c3aed',color:'#fff',fontWeight:600,boxShadow:'0 2px 8px rgba(124,58,237,.3)',transition:'background .15s'}}>
               Enable Training Mode
             </button>
           </div>
@@ -10827,7 +10844,7 @@ function startApp() {
             <button onClick=${function(){dismiss();}} style=${{border:'1px solid var(--border)',cursor:'pointer',fontFamily:'inherit',fontSize:'.7rem',borderRadius:8,padding:'.5rem 1rem',background:'none',color:'var(--text-secondary)',transition:'background .15s'}}>
               Skip for now
             </button>
-            <button onClick=${function(){dismiss(null,true);setTimeout(function(){d({t:'TRAINING_MODE'});},250);}} style=${{border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:8,padding:'.5rem 1.4rem',background:'#7c3aed',color:'#fff',fontWeight:600,boxShadow:'0 2px 8px rgba(124,58,237,.3)',transition:'background .15s'}}>
+            <button onClick=${function(){dismiss(null,true);setTimeout(function(){if(window._ccDispatch)window._ccDispatch({t:'TRAINING_MODE'});},300);}} style=${{border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'.75rem',borderRadius:8,padding:'.5rem 1.4rem',background:'#7c3aed',color:'#fff',fontWeight:600,boxShadow:'0 2px 8px rgba(124,58,237,.3)',transition:'background .15s'}}>
               Enable Training Mode
             </button>
           </div>
