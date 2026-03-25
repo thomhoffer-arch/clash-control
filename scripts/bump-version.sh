@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
-# Auto-increment patch version and inject into index.html, README, CHANGELOG
+# Auto-increment version based on change severity and inject into index.html, README, CHANGELOG
 # Called by pre-commit hook — pure bash, no Python dependency
+#
+# Severity detection:
+#   MAJOR — breaking changes: CDN/dependency swaps, reducer shape changes, removed public APIs
+#   MINOR — new features: new components, new reducer cases, new UI sections
+#   PATCH — everything else: bug fixes, style tweaks, refactors
+#
+# Override: set BUMP=major|minor|patch before committing to force a level
 
 set -e
 
@@ -26,8 +33,62 @@ MINOR=$(grep -o '"minor"[[:space:]]*:[[:space:]]*[0-9]*' "$VERSION_FILE" | grep 
 PATCH=$(grep -o '"patch"[[:space:]]*:[[:space:]]*[0-9]*' "$VERSION_FILE" | grep -o '[0-9]*$')
 LABEL=$(grep -o '"label"[[:space:]]*:[[:space:]]*"[^"]*"' "$VERSION_FILE" | sed 's/.*: *"//;s/"$//')
 
-# Increment patch
-PATCH=$((PATCH + 1))
+# ── Determine bump level from staged diff ──
+DIFF=$(git diff --cached -- "$INDEX_FILE")
+
+if [ -n "$BUMP" ]; then
+  # Manual override via environment variable
+  LEVEL="$BUMP"
+  echo "  Version bump forced to: $LEVEL"
+else
+  LEVEL="patch"
+
+  # MAJOR signals: CDN/dependency changes, INIT state shape changes, removed exports
+  if echo "$DIFF" | grep -qE '^\+.*<script.*(src=|cdn)'; then
+    LEVEL="major"
+  elif echo "$DIFF" | grep -qE '^\-.*<script.*(src=|cdn)'; then
+    LEVEL="major"
+  elif echo "$DIFF" | grep -qE '^\+.*var INIT\s*='; then
+    LEVEL="major"
+  elif echo "$DIFF" | grep -qE '^\-.*window\._cc[A-Z]'; then
+    LEVEL="major"
+  fi
+
+  # MINOR signals (only upgrade if still patch): new functions, new reducer cases, new components
+  if [ "$LEVEL" = "patch" ]; then
+    ADDED_LINES=$(echo "$DIFF" | grep -c '^\+' 2>/dev/null || echo 0)
+    REMOVED_LINES=$(echo "$DIFF" | grep -c '^\-' 2>/dev/null || echo 0)
+    NET_LINES=$((ADDED_LINES - REMOVED_LINES))
+
+    if echo "$DIFF" | grep -qE "^\+\s*case '[A-Z_]+'"; then
+      LEVEL="minor"
+    elif echo "$DIFF" | grep -qE '^\+\s*function [A-Z][a-zA-Z]+\('; then
+      LEVEL="minor"
+    elif echo "$DIFF" | grep -qE '^\+.*var (STAT|INIT_FILTERS)\['; then
+      LEVEL="minor"
+    elif [ "$NET_LINES" -gt 150 ]; then
+      LEVEL="minor"
+    fi
+  fi
+
+  echo "  Auto-detected bump level: $LEVEL (from staged diff)"
+fi
+
+# Apply bump
+case "$LEVEL" in
+  major)
+    MAJOR=$((MAJOR + 1))
+    MINOR=0
+    PATCH=0
+    ;;
+  minor)
+    MINOR=$((MINOR + 1))
+    PATCH=0
+    ;;
+  *)
+    PATCH=$((PATCH + 1))
+    ;;
+esac
 
 # Get git short hash and date
 GIT_HASH=$(git rev-parse --short HEAD 2>/dev/null || echo "dev")
