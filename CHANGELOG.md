@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.44 (2026-03-25)
+- Fix useCallback crash and add tappable logo version popover
+
 ## v2.0.42 (2026-03-25)
 - Add edge lines to nav cube and improve theme contrast
 
