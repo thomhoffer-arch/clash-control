@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.41',hash:'be8db5e',date:'2026-03-25T05:16:09Z'};
+  var CC_VERSION = {v:'2.0.42',hash:'28ad848',date:'2026-03-25T06:01:51Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -305,7 +305,7 @@ function startApp() {
     models:[], clashes:[], issues:[], activeId:null, showModal:false, showSettings:false, modalElement:null, tab:null,
     rules:{ modelA:'all', modelB:'all', hard:true, maxGap:50, duplicates:false, changeAware:false, excludeSelf:true, excludeTypes:[], minOverlapVolM3:1e-5, toleranceByTypePair:{}, useSemanticFilter:true },
     detectionSettings:null, // Captured at detection run time: {clearance_mm, discipline_filters}
-    trainingMode:false, // When true, shows Training tab for AI data annotation
+    trainingMode:false, // When true, overlays feedback UI on clash rows
     clashGroupBy:'none', clashSortBy:'none',
     issueGroupBy:'none', issueSortBy:'none',
     detecting:false, switchingProject:false, sectionAxis:null, sectionPos:0.5, sectionCustom:null,
@@ -360,9 +360,41 @@ function startApp() {
       case 'SET_CLASHES': var newSt={clashes:a.v, detecting:false, activeId:null, floors:deriveFloors(a.v)}; if(a.detectionSettings) newSt.detectionSettings=a.detectionSettings; if(s.prefs.resetFiltersOnRun!==false) newSt.filters=Object.assign({},INIT_FILTERS); return Object.assign({},s,newSt);
       case 'DETECTING':   return Object.assign({},s,{detecting:true});
       case 'SWITCHING_PROJECT': return Object.assign({},s,{switchingProject:!!a.v});
-      case 'ADD_ISSUE':   return Object.assign({},s,{issues:s.issues.concat([a.v])});
+      case 'ADD_ISSUE':
+        // Strong positive signal: issue created from a clash
+        var aiClashes=s.clashes;
+        if(a.v&&a.v.clashId){
+          aiClashes=s.clashes.map(function(c){
+            if(c.id!==a.v.clashId) return c;
+            var sigs=(c.aiSignals||[]).slice();
+            sigs.push({type:'strong_positive',source:'issue_created',value:a.v.id,ts:Date.now()});
+            return Object.assign({},c,{aiSignals:sigs});
+          });
+        }
+        return Object.assign({},s,{issues:s.issues.concat([a.v]),clashes:aiClashes});
       case 'UPD_ISSUE':   return Object.assign({},s,{issues:s.issues.map(function(i){return i.id===a.id?Object.assign({},i,a.u):i})});
-      case 'UPD_CLASH':   return Object.assign({},s,{clashes:s.clashes.map(function(c){return c.id===a.id?Object.assign({},c,a.u):c})});
+      case 'AI_FEEDBACK': return Object.assign({},s,{clashes:s.clashes.map(function(c){
+        if(c.id!==a.id) return c;
+        var upd2 = {aiFeedback:a.v};
+        if(a.v) {
+          var sigs=(c.aiSignals||[]).slice();
+          sigs.push({type:a.v==='up'?'strong_positive':'strong_negative',source:'explicit_feedback',value:a.v,ts:Date.now()});
+          upd2.aiSignals=sigs;
+        }
+        return Object.assign({},c,upd2);
+      })});
+      case 'UPD_CLASH':   return Object.assign({},s,{clashes:s.clashes.map(function(c){
+        if(c.id!==a.id) return c;
+        var upd=Object.assign({},c,a.u);
+        // Implicit training signal when status changes
+        if(a.u&&a.u.status&&a.u.status!==c.status){
+          var sigs=(c.aiSignals||[]).slice();
+          if(a.u.status==='resolved'||a.u.status==='in_progress') sigs.push({type:'weak_positive',source:'status_change',value:a.u.status,ts:Date.now()});
+          else if(a.u.status==='closed') sigs.push({type:'weak_negative',source:'status_change',value:'closed',ts:Date.now()});
+          upd.aiSignals=sigs;
+        }
+        return upd;
+      })});
       case 'ACTIVE':      return Object.assign({},s,{activeId:a.id});
       case 'MODAL':       return Object.assign({},s,{showModal:a.v, modalElement:a.el||null});
       case 'UPD_RULES':   return Object.assign({},s,{rules:Object.assign({},s.rules,a.u)});
@@ -372,7 +404,7 @@ function startApp() {
       case 'SECTION_CUSTOM': return Object.assign({},s,{sectionAxis:null, sectionCustom:a.v, sectionPos:a.pos!=null?a.pos:0.5});
       case 'TAB':         var tabUpd={tab:a.v}; if(a.v!==s.tab&&(a.v==='clashes'||a.v==='issues'||s.tab==='clashes'||s.tab==='issues'))tabUpd.activeId=null; return Object.assign({},s,tabUpd);
       case 'SETTINGS':    return Object.assign({},s,{showSettings:a.v});
-      case 'TRAINING_MODE': var tmOn=!s.trainingMode; return Object.assign({},s,{trainingMode:tmOn, tab:tmOn?'training':s.tab==='training'?null:s.tab});
+      case 'TRAINING_MODE': return Object.assign({},s,{trainingMode:!s.trainingMode});
       case 'UPD_PREFS':   return Object.assign({},s,{prefs:Object.assign({},s.prefs,a.u)});
       case 'MEASURE_MODE': return Object.assign({},s,{measureMode:a.v});
       case 'ADD_MEASUREMENT': return Object.assign({},s,{measurements:s.measurements.concat([a.v])});
@@ -412,7 +444,17 @@ function startApp() {
       case 'SELECT_ALL':     var sa={}; (a.ids||[]).forEach(function(id){sa[id]=true;}); return Object.assign({},s,{selected:sa});
       case 'SELECT_NONE':    return Object.assign({},s,{selected:{}});
       case 'SELECT_MODE':    return Object.assign({},s,{selectMode:a.v,selected:a.v?s.selected:{}});
-      case 'BATCH_UPD_CLASH':  return Object.assign({},s,{clashes:s.clashes.map(function(c){return s.selected[c.id]?Object.assign({},c,a.u):c;}),selected:{}});
+      case 'BATCH_UPD_CLASH':  return Object.assign({},s,{clashes:s.clashes.map(function(c){
+        if(!s.selected[c.id]) return c;
+        var upd=Object.assign({},c,a.u);
+        if(a.u&&a.u.status&&a.u.status!==c.status){
+          var sigs=(c.aiSignals||[]).slice();
+          if(a.u.status==='resolved'||a.u.status==='in_progress') sigs.push({type:'weak_positive',source:'status_change',value:a.u.status,ts:Date.now()});
+          else if(a.u.status==='closed') sigs.push({type:'weak_negative',source:'status_change',value:'closed',ts:Date.now()});
+          upd.aiSignals=sigs;
+        }
+        return upd;
+      }),selected:{}});
       case 'BATCH_UPD_ISSUE':  return Object.assign({},s,{issues:s.issues.map(function(i){return s.selected[i.id]?Object.assign({},i,a.u):i;}),selected:{}});
       // Revit Bridge
       case 'UPD_BRIDGE':      return Object.assign({},s,{revitBridge:Object.assign({},s.revitBridge,a.u)});
@@ -1816,6 +1858,24 @@ function startApp() {
         if (_modelRelPairs[mA.id][_rpKey]) _semanticSkipHard = true;
       }
       var hardPt=false, isSoft=false, geoDist=Infinity;
+      // Write semantic filter suppression as synthetic negative label
+      if (_semanticSkipHard && rules.hard) {
+        try {
+          var _sfPA=eA.props||{}, _sfPB=eB.props||{};
+          var _sfTA=_sfPA.ifcType||'Element', _sfTB=_sfPB.ifcType||'Element';
+          var _sfSzA=bA.getSize(_tmpSizeA), _sfSzB=bB.getSize(_tmpSizeB);
+          var _sfOvx=Math.max(0,Math.min(bA.max.x,bB.max.x)-Math.max(bA.min.x,bB.min.x));
+          var _sfOvy=Math.max(0,Math.min(bA.max.y,bB.max.y)-Math.max(bA.min.y,bB.min.y));
+          var _sfOvz=Math.max(0,Math.min(bA.max.z,bB.max.z)-Math.max(bA.min.z,bB.min.z));
+          var _sfFV={type_pair:[_sfTA,_sfTB].sort().join(':'),disc_pair:[mA.discipline,mB.discipline].sort().join(':'),
+            same_storey:(_sfPA.storey||'')===(_sfPB.storey||'')&&!!(_sfPA.storey||_sfPB.storey),same_model:sameModel,
+            overlap_vol_m3:_sfOvx*_sfOvy*_sfOvz,pen_depth_mm:0,clearance_mm:null,
+            bbox_a:{dx:Math.round(_sfSzA.x*1000*10)/10,dy:Math.round(_sfSzA.y*1000*10)/10,dz:Math.round(_sfSzA.z*1000*10)/10},
+            bbox_b:{dx:Math.round(_sfSzB.x*1000*10)/10,dy:Math.round(_sfSzB.y*1000*10)/10,dz:Math.round(_sfSzB.z*1000*10)/10},
+            mat_a:_sfPA.material||'',mat_b:_sfPB.material||'',storey:_sfPA.storey||_sfPB.storey||'',max_gap_mm:Math.round(maxGapM*1000)};
+          _saveClashTrainRecord('sem_'+eA.expressId+'_'+eB.expressId+'_'+mA.id, _sfFV, 0.0, 'semantic_filter', true);
+        } catch(e) {}
+      }
       if (rules.hard && !_semanticSkipHard) hardPt = _meshesIntersect(eA, eB);
       // Overlap volume gate: reject hard clashes with trivial AABB overlap (surface contact noise)
       if (hardPt && rules.minOverlapVolM3 > 0) {
@@ -1885,7 +1945,23 @@ function startApp() {
           overlapVolM3:_ovx*_ovy*_ovz,
           bboxA:{dx:Math.round(_szA.x*1000*10)/10,dy:Math.round(_szA.y*1000*10)/10,dz:Math.round(_szA.z*1000*10)/10},
           bboxB:{dx:Math.round(_szB.x*1000*10)/10,dy:Math.round(_szB.y*1000*10)/10,dz:Math.round(_szB.z*1000*10)/10},
-          clearanceMm:isSoft?Math.round(geoDist*1000):null
+          clearanceMm:isSoft?Math.round(geoDist*1000):null,
+          // Feature vector for ML training (non-displayed, carried with clash)
+          _trainFV:{
+            type_pair:[tA,tB].sort().join(':'),
+            disc_pair:[mA.discipline,mB.discipline].sort().join(':'),
+            same_storey:(pA.storey||'')===(pB.storey||'')&&!!(pA.storey||pB.storey),
+            same_model:sameModel,
+            overlap_vol_m3:_ovx*_ovy*_ovz,
+            pen_depth_mm:hardPt?(dist<0?Math.abs(dist):0):0,
+            clearance_mm:isSoft?Math.round(geoDist*1000):null,
+            bbox_a:{dx:Math.round(_szA.x*1000*10)/10,dy:Math.round(_szA.y*1000*10)/10,dz:Math.round(_szA.z*1000*10)/10},
+            bbox_b:{dx:Math.round(_szB.x*1000*10)/10,dy:Math.round(_szB.y*1000*10)/10,dz:Math.round(_szB.z*1000*10)/10},
+            mat_a:pA.material||'',
+            mat_b:pB.material||'',
+            storey:pA.storey||pB.storey||'',
+            max_gap_mm:Math.round(maxGapM*1000)
+          }
         });
       }
     });
@@ -2146,6 +2222,112 @@ function startApp() {
   }
 
   // ── AI Training Data Export ─────────────────────────────────
+  // ── Clash Training Data (localStorage) ─────────────────────────
+  // Keyed by clash ID; each entry holds the feature vector and latest label.
+  // Cap at 5,000 records. Wrapped in try/catch — never interrupts main flow.
+  var _CLASH_TRAIN_CAP = 5000;
+  function _getClashTrainStore() {
+    try { return JSON.parse(localStorage.getItem('cc_clash_training_data')||'{}'); } catch(e) { return {}; }
+  }
+  function _saveClashTrainRecord(id, fv, label, labelSource, synthetic) {
+    try {
+      var store = _getClashTrainStore();
+      var existing = store[id];
+      // Keep strongest label (higher wins, except explicit feedback always wins)
+      if (existing && existing.label != null && label != null) {
+        var srcPri = {explicit_feedback:3, issue_created:2, status_change:1, semantic_filter:0};
+        if ((srcPri[labelSource]||0) < (srcPri[existing.label_source]||0)) return;
+        if ((srcPri[labelSource]||0) === (srcPri[existing.label_source]||0) && label <= existing.label) return;
+      }
+      store[id] = {fv:fv, label:label, label_source:labelSource, synthetic:!!synthetic, ts:Date.now()};
+      // Cap: remove oldest if over limit
+      var keys = Object.keys(store);
+      if (keys.length > _CLASH_TRAIN_CAP) {
+        keys.sort(function(a,b){return (store[a].ts||0)-(store[b].ts||0);});
+        while(keys.length > _CLASH_TRAIN_CAP) { delete store[keys.shift()]; }
+      }
+      localStorage.setItem('cc_clash_training_data', JSON.stringify(store));
+    } catch(e) {}
+  }
+  function _clearClashTrainStore() {
+    try { localStorage.removeItem('cc_clash_training_data'); } catch(e) {}
+  }
+  function _getClashTrainCount() {
+    try { var s = localStorage.getItem('cc_clash_training_data'); return s ? Object.keys(JSON.parse(s)).length : 0; } catch(e) { return 0; }
+  }
+
+  // ── NL Training Data (localStorage) ───────────────────────────
+  var _NL_TRAIN_CAP = 2000;
+  function _getNLTrainStore() {
+    try { return JSON.parse(localStorage.getItem('cc_nl_training_data')||'[]'); } catch(e) { return []; }
+  }
+  function _saveNLTrainRecord(input, output, meta) {
+    try {
+      if (!input || !output) return;
+      if (input.trim().split(/\s+/).length < 2) return; // skip single-word
+      var store = _getNLTrainStore();
+      store.push({input:input, output:output, meta:meta});
+      while (store.length > _NL_TRAIN_CAP) store.shift();
+      localStorage.setItem('cc_nl_training_data', JSON.stringify(store));
+    } catch(e) {}
+  }
+  function _clearNLTrainStore() {
+    try { localStorage.removeItem('cc_nl_training_data'); } catch(e) {}
+  }
+  function _getNLTrainCount() {
+    try { var s = localStorage.getItem('cc_nl_training_data'); return s ? JSON.parse(s).length : 0; } catch(e) { return 0; }
+  }
+
+  // ── Export Training Data (JSONL) ──────────────────────────────
+  function _exportClashTrainingJSONL() {
+    var store = _getClashTrainStore();
+    var keys = Object.keys(store);
+    // Only export labelled records
+    var labelled = keys.filter(function(k){return store[k].label != null;});
+    if (!labelled.length) return;
+    var header = '# type_pair,disc_pair,same_storey,same_model,overlap_vol_m3,pen_depth_mm,clearance_mm,bbox_a_dx,bbox_a_dy,bbox_a_dz,bbox_b_dx,bbox_b_dy,bbox_b_dz,mat_a,mat_b,storey,max_gap_mm,label,label_source,synthetic\n';
+    var lines = labelled.map(function(k){
+      var r = store[k], fv = r.fv || {};
+      return JSON.stringify({
+        type_pair:fv.type_pair||'',disc_pair:fv.disc_pair||'',same_storey:!!fv.same_storey,same_model:!!fv.same_model,
+        overlap_vol_m3:fv.overlap_vol_m3||0,pen_depth_mm:fv.pen_depth_mm||0,clearance_mm:fv.clearance_mm,
+        bbox_a:fv.bbox_a||{},bbox_b:fv.bbox_b||{},mat_a:fv.mat_a||'',mat_b:fv.mat_b||'',
+        storey:fv.storey||'',max_gap_mm:fv.max_gap_mm||0,
+        label:r.label,label_source:r.label_source||'',synthetic:!!r.synthetic
+      });
+    });
+    var blob = new Blob([header + lines.join('\n') + '\n'], {type:'application/jsonl'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    var d = new Date().toISOString().slice(0,10);
+    a.href = url; a.download = 'clashcontrol-clash-training-'+d+'.jsonl';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
+  function _exportNLTrainingJSONL() {
+    var store = _getNLTrainStore();
+    if (!store.length) return;
+    var sysMsg = 'You are ClashControl\'s command parser. Given a user command about IFC clash detection, output a JSON action object or a plain text response. Valid intents: run_detection, set_max_gap, filter_status, reset_filters, group_by, sort_by, export_bcf, import_bcf, query, help, theme, settings, open_tab, training_mode, measure, viewpoint, section, floor_plan.';
+    var lines = store.map(function(r){
+      var outStr = typeof r.output === 'object' ? JSON.stringify(r.output) : String(r.output);
+      return JSON.stringify({
+        messages:[
+          {role:'system',content:sysMsg},
+          {role:'user',content:r.input},
+          {role:'assistant',content:outStr}
+        ]
+      });
+    });
+    var blob = new Blob([lines.join('\n') + '\n'], {type:'application/jsonl'});
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    var d = new Date().toISOString().slice(0,10);
+    a.href = url; a.download = 'clashcontrol-nl-training-'+d+'.jsonl';
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  }
+
   // Exports anonymous clash metadata for training the ClashControl AI model.
   // GDPR note: This output intentionally excludes all personal data and
   // project-identifying information. It contains only IFC type metadata,
@@ -4205,6 +4387,7 @@ function startApp() {
           <span style=${{color:'var(--text-muted)'}}>${CC_VERSION.v} (${CC_VERSION.hash})</span>
         </div>
       </div>`}
+      ${s.trainingMode && html`<${TrainingOverlay} s=${s} d=${d} />`}
       ${s.clashes.length>0 && html`<div class="cc-overlay-top" style=${{position:'absolute',top:'.75rem',left:'50%',transform:'translateX(-50%)',display:'flex',gap:'.3rem',pointerEvents:'auto'}}>
         <button onClick=${function(){if(_fitToClashes)_fitToClashes(s.clashes);}}
           style=${{...S_BTN,background:'var(--overlay-bg)',color:'#93c5fd',border:'1px solid var(--border)',fontSize:'.65rem',padding:'.25rem .5rem'}}>
@@ -6378,7 +6561,7 @@ function startApp() {
       }()}
       ${!isExplorerTab && items.length>0 && html`<${BulkActionBar} s=${s} d=${d} items=${items} isClash=${isClashTab} />`}
 
-      ${!isExplorerTab && html`<${VirtualList} items=${items} activeId=${s.activeId} d=${d} isClash=${isClashTab} prefs=${s.prefs} models=${s.models} groupBy=${isClashTab?s.clashGroupBy:s.issueGroupBy} sortBy=${isClashTab?s.clashSortBy:s.issueSortBy} selectMode=${s.selectMode} selected=${s.selected} />`}
+      ${!isExplorerTab && html`<${VirtualList} items=${items} activeId=${s.activeId} d=${d} isClash=${isClashTab} prefs=${s.prefs} models=${s.models} groupBy=${isClashTab?s.clashGroupBy:s.issueGroupBy} sortBy=${isClashTab?s.clashSortBy:s.issueSortBy} selectMode=${s.selectMode} selected=${s.selected} trainingMode=${s.trainingMode} />`}
     </div>`;
   }
 
@@ -6516,6 +6699,7 @@ function startApp() {
     var groupBy = props.groupBy || 'none';
     var sortBy = props.sortBy || 'none';
     var selectMode=props.selectMode, selected=props.selected||{};
+    var trainingMode=props.trainingMode;
     var scrollRef = useRef(null);
     var _st = useState(0), scrollTop=_st[0], setScrollTop=_st[1];
     var coll = useState({}), collapsed=coll[0], setCollapsed=coll[1];
@@ -6696,7 +6880,7 @@ function startApp() {
               <span style=${{fontSize:'.65rem',fontWeight:600,color:'var(--text-primary)',flex:1}}>${g.label}</span>
               <span style=${{fontSize:'.6rem',color:'var(--text-faint)',background:'var(--bg-secondary)',padding:'.1rem .35rem',borderRadius:10}}>${g.items.length}</span>
             </div>
-            ${isOpen && visibleItems.map(function(it){return html`<${IssueRow} key=${it.id} item=${it} active=${activeId===it.id} d=${d} isClash=${isClash} prefs=${prefs} models=${models} selectMode=${selectMode} isSelected=${!!selected[it.id]} />`})}
+            ${isOpen && visibleItems.map(function(it){return html`<${IssueRow} key=${it.id} item=${it} active=${activeId===it.id} d=${d} isClash=${isClash} prefs=${prefs} models=${models} selectMode=${selectMode} isSelected=${!!selected[it.id]} trainingMode=${trainingMode} />`})}
             ${isOpen && hasMore && html`<button onClick=${function(e){e.stopPropagation();showMore(g.label);}}
               style=${{...S_BTN,width:'100%',padding:'.4rem',background:'var(--bg-tertiary)',color:'var(--accent)',fontSize:'.65rem',borderTop:'1px solid var(--border-subtle)',borderRadius:0}}>
               Show more (${limit} of ${g.items.length})…
@@ -6707,7 +6891,7 @@ function startApp() {
     }
     // For small lists, render all (no virtualization overhead)
     if(items.length <= 50) return html`<div ref=${scrollRef} style=${{flex:1,overflowY:'auto'}}>
-      ${items.map(function(it){return html`<${IssueRow} key=${it.id} item=${it} active=${activeId===it.id} d=${d} isClash=${isClash} prefs=${prefs} models=${models} selectMode=${selectMode} isSelected=${!!selected[it.id]} />`})}
+      ${items.map(function(it){return html`<${IssueRow} key=${it.id} item=${it} active=${activeId===it.id} d=${d} isClash=${isClash} prefs=${prefs} models=${models} selectMode=${selectMode} isSelected=${!!selected[it.id]} trainingMode=${trainingMode} />`})}
     </div>`;
     // Virtualized rendering for large lists
     var totalHeight = items.length * ROW_HEIGHT;
@@ -6719,7 +6903,7 @@ function startApp() {
     return html`<div ref=${scrollRef} onScroll=${function(e){setScrollTop(e.target.scrollTop);}} style=${{flex:1,overflowY:'auto'}}>
       <div style=${{height:totalHeight,position:'relative'}}>
         <div style=${{position:'absolute',top:startIdx*ROW_HEIGHT,left:0,right:0}}>
-          ${visible.map(function(it){return html`<${IssueRow} key=${it.id} item=${it} active=${activeId===it.id} d=${d} isClash=${isClash} prefs=${prefs} models=${models} selectMode=${selectMode} isSelected=${!!selected[it.id]} />`})}
+          ${visible.map(function(it){return html`<${IssueRow} key=${it.id} item=${it} active=${activeId===it.id} d=${d} isClash=${isClash} prefs=${prefs} models=${models} selectMode=${selectMode} isSelected=${!!selected[it.id]} trainingMode=${trainingMode} />`})}
         </div>
       </div>
     </div>`;
@@ -6728,6 +6912,7 @@ function startApp() {
   function IssueRow(props) {
     var it=props.item, active=props.active, d=props.d, isClash=props.isClash, pr=props.prefs||{}; pr._models=props.models||[];
     var selectMode=props.selectMode, isSelected=props.isSelected;
+    var trainingMode=props.trainingMode;
     var icon = it.type==='hard'?'🔴':it.type==='soft'?'🟡':it.source==='element'?'🏗':'📌';
     var stBg = (STAT[it.status]||STAT.open).bg;
     // Clash type colours
@@ -6796,6 +6981,15 @@ function startApp() {
             ${isClash && typeLabel && html`<span style=${{fontSize:'.55rem',padding:'.1rem .3rem',borderRadius:3,background:typeBg,color:typeCol,fontWeight:700,flexShrink:0}}>${typeLabel}</span>`}
             <span style=${{color:'var(--text-primary)',fontSize:'.7rem',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',flex:1}}>${it.title}</span>
             <span style=${{fontSize:'.55rem',padding:'.1rem .35rem',borderRadius:4,background:stBg+'22',color:stBg,fontWeight:600,flexShrink:0,whiteSpace:'nowrap'}}>${(STAT[it.status]||STAT.open).label}</span>
+            ${isClash && trainingMode && function(){
+              var fb=it.aiFeedback;
+              return html`<span style=${{display:'inline-flex',gap:'1px',marginLeft:'.15rem',flexShrink:0}}>
+                <button onClick=${function(e){e.stopPropagation();d({t:'AI_FEEDBACK',id:it.id,v:fb==='up'?null:'up'});}}
+                  title="Real clash" style=${{background:fb==='up'?'#166534':'transparent',color:fb==='up'?'#4ade80':'var(--text-faint)',border:'none',cursor:'pointer',fontSize:'.7rem',padding:'1px 3px',borderRadius:3,lineHeight:1}}>▲</button>
+                <button onClick=${function(e){e.stopPropagation();d({t:'AI_FEEDBACK',id:it.id,v:fb==='down'?null:'down'});}}
+                  title="False positive" style=${{background:fb==='down'?'#7f1d1d':'transparent',color:fb==='down'?'#fca5a5':'var(--text-faint)',border:'none',cursor:'pointer',fontSize:'.7rem',padding:'1px 3px',borderRadius:3,lineHeight:1}}>▼</button>
+              </span>`;
+            }()}
           </div>
           <p style=${{color:'var(--text-faint)',fontSize:'.65rem',marginTop:'.1rem'}} class="lc2">${it.description}</p>
           ${isClash && html`<div style=${{display:'flex',gap:'.3rem',marginTop:'.2rem',flexWrap:'wrap',alignItems:'center'}}>
@@ -6820,6 +7014,36 @@ function startApp() {
             title="Collapse" style=${{...S_BTN,marginLeft:'auto',padding:'0 4px',background:'none',color:'var(--text-faint)',fontSize:'.7rem',flexShrink:0}}>▲</button>
         </div>
         ${html`<${ClashProps} item=${it} models=${pr._models||[]} isClash=${isClash} />`}
+        ${isClash && trainingMode && function(){
+          var CTYPES=[{k:'hard',l:'Hard'},{k:'soft',l:'Soft'},{k:'no_clash',l:'None'}];
+          var REASONS=['Installation tolerance','Already coordinated','Different levels','Sleeve / opening present','Insulation overlap','Modelling error','Rule exception'];
+          var curCT=it.clashTypeConfirmed!=null?it.clashTypeConfirmed:it.type;
+          var curReasons=it.aiReasons||[];
+          var curNote=it.aiNote||'';
+          return html`<div style=${{marginTop:'.4rem',paddingTop:'.4rem',borderTop:'1px solid var(--border-subtle)',background:'rgba(124,58,237,.04)',borderRadius:6,padding:'.4rem'}}>
+            <div style=${{fontSize:'.55rem',fontWeight:600,color:'#a78bfa',marginBottom:'.3rem',textTransform:'uppercase',letterSpacing:'.04em'}}>AI Training Feedback</div>
+            <div style=${{fontSize:'.55rem',fontWeight:600,color:'var(--text-muted)',marginBottom:'.15rem'}}>Clash type</div>
+            <div style=${{display:'flex',gap:'.25rem',marginBottom:'.3rem',flexWrap:'wrap'}}>
+              ${CTYPES.map(function(ct){var sel=curCT===ct.k;return html`<button key=${ct.k}
+                onClick=${function(e){e.stopPropagation();d({t:'UPD_CLASH',id:it.id,u:{clashTypeConfirmed:ct.k}});}}
+                style=${{...S_BTN,fontSize:'.55rem',padding:'.1rem .35rem',background:sel?'#1e3a5f':'var(--bg-secondary)',color:sel?'#93c5fd':'var(--text-faint)',border:'1px solid '+(sel?'#3b82f6':'var(--border)')}}>${ct.l}</button>`})}
+            </div>
+            <div style=${{fontSize:'.55rem',fontWeight:600,color:'var(--text-muted)',marginBottom:'.15rem'}}>Reason</div>
+            <div style=${{display:'flex',gap:'.2rem',marginBottom:'.3rem',flexWrap:'wrap'}}>
+              ${REASONS.map(function(r){var sel=curReasons.indexOf(r)>=0;return html`<span key=${r}
+                onClick=${function(e){e.stopPropagation();var nr=sel?curReasons.filter(function(x){return x!==r}):curReasons.concat([r]);d({t:'UPD_CLASH',id:it.id,u:{aiReasons:nr}});}}
+                style=${{fontSize:'.55rem',padding:'.1rem .35rem',borderRadius:10,cursor:'pointer',whiteSpace:'nowrap',
+                  border:'1px solid '+(sel?'#3b82f6':'var(--border)'),
+                  background:sel?'#1e3a5f':'var(--bg-secondary)',
+                  color:sel?'#93c5fd':'var(--text-muted)'}}>${r}</span>`})}
+            </div>
+            <input type="text" value=${curNote} maxLength="140" placeholder="Optional note \u2014 no project names or locations"
+              onClick=${function(e){e.stopPropagation();}}
+              onInput=${function(e){d({t:'UPD_CLASH',id:it.id,u:{aiNote:e.target.value}});}}
+              style=${{width:'100%',fontSize:'.55rem',padding:'.2rem .3rem',background:'var(--bg-secondary)',
+                border:'1px solid var(--border)',borderRadius:3,color:'var(--text-primary)',boxSizing:'border-box'}} />
+          </div>`;
+        }()}
         ${!isClash && it.assignee && html`<div style=${{fontSize:'.55rem',color:'var(--text-secondary)',marginTop:'.2rem'}}>Assigned: ${it.assignee}</div>`}
         ${!isClash && it.dueDate && html`<div style=${{fontSize:'.55rem',color:'var(--text-secondary)'}}>Due: ${it.dueDate}</div>`}
         ${!isClash && it.category && html`<div style=${{fontSize:'.55rem',color:'var(--text-muted)'}}>Category: ${it.category}</div>`}
@@ -6833,6 +7057,7 @@ function startApp() {
 
   function NewIssueModal(props) {
     var d=props.d, el=props.el, pr=props.prefs||{};
+    var clashes=props.clashes||[], activeId=props.activeId;
     var ep = el ? el.props||{} : null;
     var hasEl = !!el;
     var defaultTitle = hasEl ? ('Issue: '+(ep.ifcType||'Element')+' '+(ep.name||'#'+el.expressId)) : '';
@@ -6862,6 +7087,11 @@ function startApp() {
         issue.storey = ep.storey||'';
         issue.material = ep.material||'';
         issue.elementProps = ep;
+        // Link to active clash for training signal
+        if (activeId) {
+          var linkedClash = clashes.find(function(c){return c.id===activeId && (c.elemA===el.expressId || c.elemB===el.expressId);});
+          if (linkedClash) issue.clashId = linkedClash.id;
+        }
       }
       d({t:'ADD_ISSUE',v:issue});
       d({t:'MODAL',v:false}); d({t:'TAB',v:'issues'});
@@ -7011,8 +7241,62 @@ function startApp() {
               <option value="design">Design</option><option value="coordination">Coordination</option><option value="constructability">Constructability</option><option value="safety">Safety</option><option value="code_compliance">Code Compliance</option><option value="other">Other</option>
             </select></div>
         </div>
+        <div style=${SEC}>Developer / Fine-Tuning</div>
+        <${DevTrainingSection} />
       </div>
     </div></div>`;
+  }
+
+  function DevTrainingSection() {
+    var nlCount = useState(function(){return _getNLTrainCount();}), nlN=nlCount[0], setNlN=nlCount[1];
+    var clashCount = useState(function(){return _getClashTrainCount();}), clashN=clashCount[0], setClashN=clashCount[1];
+    var confirmClearNL = useState(false), showClearNL=confirmClearNL[0], setClearNL=confirmClearNL[1];
+    var confirmClearClash = useState(false), showClearClash=confirmClearClash[0], setClearClash=confirmClearClash[1];
+    var TLBL={fontSize:'.78rem',color:'var(--text-primary)'};
+    var TSUB={fontSize:'.65rem',color:'var(--text-muted)',marginTop:'.1rem',lineHeight:1.4};
+    var TROW={display:'flex',justifyContent:'space-between',alignItems:'center',padding:'.5rem 0',gap:'1rem',borderBottom:'1px solid var(--border-subtle)'};
+
+    return html`<div>
+      <div style=${TROW}>
+        <div style=${{flex:1}}>
+          <div style=${TLBL}>NL commands recorded: ${nlN}</div>
+          <div style=${TSUB}>User commands paired with resolved actions</div>
+        </div>
+        <div style=${{display:'flex',gap:'.25rem',flexShrink:0}}>
+          <button onClick=${function(){_exportNLTrainingJSONL();}}
+            disabled=${!nlN}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .4rem',background:nlN?'var(--accent)':'var(--bg-secondary)',color:nlN?'#fff':'var(--text-faint)'}}>Export</button>
+          ${!showClearNL ? html`<button onClick=${function(){setClearNL(true);}}
+            disabled=${!nlN}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .4rem',background:'none',color:nlN?'var(--text-muted)':'var(--text-faint)',border:'1px solid var(--border)'}}>Clear</button>`
+          : html`<button onClick=${function(){_clearNLTrainStore();setNlN(0);setClearNL(false);}}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .4rem',background:'#ef4444',color:'#fff'}}>Confirm</button>
+          <button onClick=${function(){setClearNL(false);}}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .4rem',background:'none',color:'var(--text-muted)',border:'1px solid var(--border)'}}>Cancel</button>`}
+        </div>
+      </div>
+      <div style=${TROW}>
+        <div style=${{flex:1}}>
+          <div style=${TLBL}>Clash feedback records: ${clashN}</div>
+          <div style=${TSUB}>Feature vectors with user labels for classifier training</div>
+        </div>
+        <div style=${{display:'flex',gap:'.25rem',flexShrink:0}}>
+          <button onClick=${function(){_exportClashTrainingJSONL();}}
+            disabled=${!clashN}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .4rem',background:clashN?'var(--accent)':'var(--bg-secondary)',color:clashN?'#fff':'var(--text-faint)'}}>Export</button>
+          ${!showClearClash ? html`<button onClick=${function(){setClearClash(true);}}
+            disabled=${!clashN}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .4rem',background:'none',color:clashN?'var(--text-muted)':'var(--text-faint)',border:'1px solid var(--border)'}}>Clear</button>`
+          : html`<button onClick=${function(){_clearClashTrainStore();setClashN(0);setClearClash(false);}}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .4rem',background:'#ef4444',color:'#fff'}}>Confirm</button>
+          <button onClick=${function(){setClearClash(false);}}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .4rem',background:'none',color:'var(--text-muted)',border:'1px solid var(--border)'}}>Cancel</button>`}
+        </div>
+      </div>
+      <div style=${{fontSize:'.6rem',color:'var(--text-faint)',marginTop:'.4rem',lineHeight:1.5}}>
+        Data is stored locally in this browser and never sent anywhere. Export it to fine-tune AI models for command parsing and clash classification.
+      </div>
+    </div>`;
   }
 
   // ── Revit Bridge (AI-powered MCP integration) ─────────────────
@@ -8253,9 +8537,19 @@ function startApp() {
 
   // ── Async NL handler: regex fast-path → Ollama/browser LLM fallback ──
   function processNLCommandWithLLM(raw, s, d) {
+    // Capture hook: write successful results to NL training store
+    function _captureNL(result, path) {
+      if (result == null) return result;
+      try {
+        var output = typeof result === 'object' ? result : String(result);
+        _saveNLTrainRecord(raw, output, {ts:Date.now(), path:path, v:CC_VERSION.v});
+      } catch(e) {}
+      return result;
+    }
+
     // 1. Try regex (instant, no LLM needed)
     var regexResult = processNLCommand(raw, s, d);
-    if (regexResult !== null) return Promise.resolve(regexResult);
+    if (regexResult !== null) return Promise.resolve(_captureNL(regexResult, 'regex'));
 
     // 2. Build prompt context
     var modelList = s.models.length ? s.models.map(function(m){ return m.name; }).join(', ') : 'none';
@@ -8270,7 +8564,7 @@ function startApp() {
     if (_ollamaAvailable) {
       _resetIdleTimer();
       return callOllama(prompt, raw)
-        .then(function(text) { return text ? dispatchLLMAction(text, s, d) : null; })
+        .then(function(text) { return _captureNL(text ? dispatchLLMAction(text, s, d) : null, 'ollama'); })
         .catch(function() { return null; });
     }
 
@@ -8283,7 +8577,7 @@ function startApp() {
     ).then(function(out) {
       var text = out[0].generated_text;
       if (Array.isArray(text)) text = text[text.length - 1].content;
-      return dispatchLLMAction(text, s, d);
+      return _captureNL(dispatchLLMAction(text, s, d), 'browser-llm');
     }).catch(function() { return null; });
   }
 
@@ -8630,8 +8924,7 @@ function startApp() {
     // ── Training Mode ─────────────────────────────────────────────
     if (/training\s*mode|(?:enable|start|activate|turn\s+on)\s+training|(?:open|show)\s+(?:the\s+)?training/.test(text)) {
       if(!s.trainingMode) d({t:'TRAINING_MODE'});
-      else d({t:'TAB',v:'training'});
-      return s.trainingMode ? 'Training tab opened.' : 'Training Mode enabled. Open the Training tab on the right to annotate clashes.';
+      return s.trainingMode ? 'Training Mode is already active. Use thumbs up/down on clash rows to label data.' : 'Training Mode enabled. Use the thumbs up/down buttons on each clash to label true/false positives.';
     }
     if (/(?:disable|stop|deactivate|turn\s+off|exit)\s+training/.test(text)) {
       if(s.trainingMode) d({t:'TRAINING_MODE'});
@@ -9317,15 +9610,16 @@ function startApp() {
     </div>`;
   }
 
-  // ── Training Panel (AI data annotation + export/share) ──────
-  // Shown in SidePanel when trainingMode is on and 'training' tab is active.
-  // Contains all clashes with annotation controls, plus export/share buttons.
-  function TrainingPanel(props) {
+  // ── Training Overlay (floating, replaces old Training tab) ──────
+  // Shown in 3D viewport when trainingMode is on. Contains progress and export controls.
+  function TrainingOverlay(props) {
     var s = props.s, d = props.d;
     var clashes = s.clashes;
     var ss = useState({status:null,msg:null}), shareState=ss[0], setShareState=ss[1];
-    var stExpanded = useState(null), expandedId=stExpanded[0], setExpanded=stExpanded[1];
+    var stCollapsed = useState(false), isCollapsed=stCollapsed[0], setCollapsed=stCollapsed[1];
+
     var reviewedCount = clashes.filter(function(c){return c.status!=='open';}).length;
+    var feedbackCount = clashes.filter(function(c){return c.aiFeedback;}).length;
     var totalCount = clashes.length;
 
     function doExport() { exportAITrainingData(clashes, s.detectionSettings, s.models); }
@@ -9336,91 +9630,47 @@ function startApp() {
       });
     }
     var isSending = shareState.status==='sending';
+    var hasData = reviewedCount > 0 || feedbackCount > 0;
 
-    var CTYPES = [{k:'hard',l:'Hard'},{k:'soft',l:'Soft'},{k:'no_clash',l:'None'}];
-    var REASONS = ['Installation tolerance','Already coordinated','Different levels','Sleeve / opening present','Insulation overlap','Modelling error','Rule exception'];
-
-    if (totalCount===0) return html`<div style=${{padding:'1.5rem',textAlign:'center',color:'var(--text-muted)',fontSize:'.7rem'}}>
-      Run clash detection first to annotate training data.
-    </div>`;
-
-    return html`<div style=${{display:'flex',flexDirection:'column',height:'100%',overflow:'hidden'}}>
-      <div style=${{padding:'.5rem .6rem',borderBottom:'1px solid var(--border-subtle)',flexShrink:0}}>
-        <div style=${{fontSize:'.6rem',color:'var(--text-muted)',marginBottom:'.3rem',lineHeight:1.4}}>
-          Help improve ClashControl by reviewing clashes and sharing anonymous metadata. No element names, coordinates, or project information is included.
-        </div>
-        <div style=${{display:'flex',gap:'.3rem',alignItems:'center',flexWrap:'wrap',marginBottom:'.3rem'}}>
-          <button onClick=${doExport}
-            style=${{...S_BTN,fontSize:'.6rem',padding:'.25rem .5rem',background:'var(--bg-secondary)',color:'var(--text-muted)',border:'1px solid var(--border)'}}>Export AI training data</button>
-          <button onClick=${doShare} disabled=${isSending || reviewedCount===0}
-            style=${{...S_BTN,fontSize:'.6rem',padding:'.25rem .5rem',
-              background:isSending||reviewedCount===0?'var(--bg-secondary)':'#7c3aed',
-              color:isSending||reviewedCount===0?'var(--text-faint)':'#fff',
-              border:'1px solid '+(isSending||reviewedCount===0?'var(--border)':'#7c3aed'),
-              opacity:isSending?0.6:1}}>${isSending?'Sending\u2026':'Share training data'}</button>
-        </div>
-        ${shareState.status==='ok' && html`<div style=${{fontSize:'.6rem',color:'#22c55e',marginBottom:'.2rem'}}>Submitted, thank you!</div>`}
-        ${shareState.status==='error' && shareState.msg && html`<div style=${{fontSize:'.6rem',color:'#ef4444',marginBottom:'.2rem'}}>${shareState.msg}</div>`}
-        <div style=${{fontSize:'.55rem',color:'var(--text-faint)'}}>
-          ${reviewedCount} / ${totalCount} clashes reviewed
-          <span style=${{display:'inline-block',width:60,height:4,background:'var(--bg-secondary)',borderRadius:2,marginLeft:'.3rem',verticalAlign:'middle'}}>
-            <span style=${{display:'block',width:(reviewedCount/Math.max(totalCount,1)*100)+'%',height:'100%',background:'#7c3aed',borderRadius:2}}></span>
-          </span>
-        </div>
+    return html`<div style=${{position:'absolute',top:'2.2rem',left:'.75rem',zIndex:30,pointerEvents:'auto',
+      background:'var(--overlay-bg-strong)',border:'1px solid rgba(124,58,237,.4)',borderRadius:10,
+      boxShadow:'0 4px 16px rgba(0,0,0,.3)',minWidth:isCollapsed?'auto':220,maxWidth:280}}>
+      <div onClick=${function(){setCollapsed(!isCollapsed);}}
+        style=${{display:'flex',alignItems:'center',gap:'.3rem',padding:'.35rem .5rem',cursor:'pointer',
+          borderBottom:isCollapsed?'none':'1px solid rgba(124,58,237,.2)'}}>
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93V12h3.5a2.25 2.25 0 0 1 0 4.5h-3.5v1.25A3.25 3.25 0 0 1 9.5 21 3.25 3.25 0 0 1 6.25 17.75V14.5h-1A2.25 2.25 0 0 1 3 12.25 2.25 2.25 0 0 1 5.25 10h3.5V9.93A4 4 0 0 1 12 2z"/>
+        </svg>
+        <span style=${{fontSize:'.62rem',fontWeight:600,color:'#c4b5fd',flex:1}}>Training Mode</span>
+        <span style=${{fontSize:'.5rem',color:'var(--text-faint)'}}>${isCollapsed?'▼':'▲'}</span>
       </div>
-      <div style=${{flex:1,overflowY:'auto'}}>
-        ${clashes.map(function(c) {
-          var isExp = expandedId===c.id;
-          var typeBg = c.type==='hard'?'#7f1d1d':c.type==='soft'?'#78350f':'#1e3a5f';
-          var typeCol = c.type==='hard'?'#fca5a5':c.type==='soft'?'#fcd34d':'#93c5fd';
-          var stBg = (STAT[c.status]||STAT.open).bg;
-          var curCT = c.clashTypeConfirmed != null ? c.clashTypeConfirmed : c.type;
-          var curReasons = c.aiReasons || [];
-          var curNote = c.aiNote || '';
-          return html`<div key=${c.id} style=${{borderBottom:'1px solid var(--border-subtle)'}}>
-            <div onClick=${function(){setExpanded(isExp?null:c.id);}}
-              style=${{padding:'.45rem .6rem',cursor:'pointer',background:isExp?'var(--bg-secondary)':'transparent',
-                borderLeft:isExp?'2px solid #7c3aed':'2px solid transparent'}}>
-              <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
-                <span style=${{fontSize:'.5rem',padding:'.1rem .25rem',borderRadius:3,background:typeBg,color:typeCol,fontWeight:700}}>${c.type==='hard'?'Hard':c.type==='soft'?'Soft':'Dup'}</span>
-                <span style=${{flex:1,fontSize:'.65rem',color:'var(--text-primary)',overflow:'hidden',whiteSpace:'nowrap',textOverflow:'ellipsis'}}>${c.elemAType} vs ${c.elemBType}</span>
-                <span style=${{fontSize:'.5rem',padding:'.1rem .25rem',borderRadius:4,background:stBg+'22',color:stBg,fontWeight:600}}>${(STAT[c.status]||STAT.open).label}</span>
-                ${c.clashTypeConfirmed && html`<span style=${{fontSize:'.5rem',color:'#a78bfa'}}>✓</span>`}
-              </div>
-              ${c.distance!=null && html`<div style=${{fontSize:'.55rem',color:'var(--text-faint)',marginTop:'.1rem'}}>
-                ${c.distance<0?Math.abs(c.distance)+'mm penetration':c.distance===0?'Touching':c.distance+'mm gap'}
-                ${c.disciplines?' \u2022 '+c.disciplines.join(' \u2194 '):''}
-              </div>`}
-            </div>
-            ${isExp && html`<div style=${{padding:'.4rem .6rem',background:'var(--bg-primary)',borderTop:'1px solid var(--border-subtle)'}}>
-              <div style=${{display:'flex',gap:'.25rem',marginBottom:'.35rem',flexWrap:'wrap'}}>
-                ${Object.keys(STAT).map(function(k){return html`<button key=${k}
-                  onClick=${function(){d({t:'UPD_CLASH',id:c.id,u:{status:k}});}}
-                  style=${{...S_BTN,fontSize:'.55rem',padding:'.15rem .35rem',background:c.status===k?STAT[k].bg:'var(--bg-secondary)',color:c.status===k?'#fff':'var(--text-faint)'}}>${STAT[k].label}</button>`})}
-              </div>
-              <div style=${{fontSize:'.55rem',fontWeight:600,color:'var(--text-muted)',marginBottom:'.15rem'}}>Clash type</div>
-              <div style=${{display:'flex',gap:'.25rem',marginBottom:'.3rem',flexWrap:'wrap'}}>
-                ${CTYPES.map(function(ct){var sel=curCT===ct.k;return html`<button key=${ct.k}
-                  onClick=${function(){d({t:'UPD_CLASH',id:c.id,u:{clashTypeConfirmed:ct.k}});}}
-                  style=${{...S_BTN,fontSize:'.55rem',padding:'.1rem .35rem',background:sel?'#1e3a5f':'var(--bg-secondary)',color:sel?'#93c5fd':'var(--text-faint)',border:'1px solid '+(sel?'#3b82f6':'var(--border)')}}>${ct.l}</button>`})}
-              </div>
-              <div style=${{fontSize:'.55rem',fontWeight:600,color:'var(--text-muted)',marginBottom:'.15rem'}}>Reason</div>
-              <div style=${{display:'flex',gap:'.2rem',marginBottom:'.3rem',flexWrap:'wrap'}}>
-                ${REASONS.map(function(r){var sel=curReasons.indexOf(r)>=0;return html`<span key=${r}
-                  onClick=${function(){var nr=sel?curReasons.filter(function(x){return x!==r}):curReasons.concat([r]);d({t:'UPD_CLASH',id:c.id,u:{aiReasons:nr}});}}
-                  style=${{fontSize:'.55rem',padding:'.1rem .35rem',borderRadius:10,cursor:'pointer',whiteSpace:'nowrap',
-                    border:'1px solid '+(sel?'#3b82f6':'var(--border)'),
-                    background:sel?'#1e3a5f':'var(--bg-secondary)',
-                    color:sel?'#93c5fd':'var(--text-muted)'}}>${r}</span>`})}
-              </div>
-              <input type="text" value=${curNote} maxLength="140" placeholder="Optional note \u2014 do not include project names or locations"
-                onInput=${function(e){d({t:'UPD_CLASH',id:c.id,u:{aiNote:e.target.value}});}}
-                style=${{width:'100%',fontSize:'.55rem',padding:'.2rem .3rem',background:'var(--bg-secondary)',
-                  border:'1px solid var(--border)',borderRadius:3,color:'var(--text-primary)',boxSizing:'border-box'}} />
-            </div>`}
-          </div>`;
-        })}
-      </div>
+      ${!isCollapsed && html`<div style=${{padding:'.4rem .5rem'}}>
+        <div style=${{fontSize:'.55rem',color:'var(--text-muted)',marginBottom:'.3rem',lineHeight:1.4}}>
+          Use ▲▼ on each clash to label true/false positives. Annotations appear when you expand a clash row.
+        </div>
+        <div style=${{display:'flex',gap:'.15rem',marginBottom:'.3rem',fontSize:'.55rem',color:'var(--text-faint)'}}>
+          <span>${feedbackCount} labelled</span>
+          <span>\u2022</span>
+          <span>${reviewedCount}/${totalCount} reviewed</span>
+        </div>
+        <div style=${{width:'100%',height:4,background:'var(--bg-secondary)',borderRadius:2,marginBottom:'.4rem'}}>
+          <div style=${{width:(hasData?Math.max(feedbackCount,reviewedCount)/Math.max(totalCount,1)*100:0)+'%',height:'100%',background:'#7c3aed',borderRadius:2}}></div>
+        </div>
+        <div style=${{display:'flex',gap:'.25rem',flexWrap:'wrap',marginBottom:'.2rem'}}>
+          <button onClick=${doExport} disabled=${!hasData}
+            style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:'var(--bg-secondary)',color:hasData?'var(--text-secondary)':'var(--text-faint)',border:'1px solid var(--border)',flex:1}}>Export JSON</button>
+          <button onClick=${doShare} disabled=${isSending || !hasData}
+            style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',
+              background:isSending||!hasData?'var(--bg-secondary)':'#7c3aed',
+              color:isSending||!hasData?'var(--text-faint)':'#fff',
+              border:'1px solid '+(isSending||!hasData?'var(--border)':'#7c3aed'),
+              opacity:isSending?0.6:1,flex:1}}>${isSending?'Sending\u2026':'Share'}</button>
+        </div>
+        ${shareState.status==='ok' && html`<div style=${{fontSize:'.55rem',color:'#22c55e'}}>Submitted, thank you!</div>`}
+        ${shareState.status==='error' && shareState.msg && html`<div style=${{fontSize:'.55rem',color:'#ef4444'}}>${shareState.msg}</div>`}
+        <button onClick=${function(){d({t:'TRAINING_MODE'});}}
+          style=${{...S_BTN,width:'100%',fontSize:'.55rem',padding:'.2rem',marginTop:'.2rem',background:'none',color:'var(--text-faint)',border:'1px solid var(--border)'}}>Exit Training Mode</button>
+      </div>`}
     </div>`;
   }
 
@@ -9451,13 +9701,13 @@ function startApp() {
           <span style=${{fontSize:'.95rem',fontWeight:700,color:'var(--text-primary)'}}>AI Training Mode</span>
         </div>
         <p style=${{fontSize:'.75rem',color:'var(--text-secondary)',lineHeight:1.6,marginBottom:'.6rem'}}>
-          You are helping improve ClashControl's future AI clash classifier. In Training Mode, you can review detected clashes and label them with verdicts, clash types, and reasons.
+          You are helping improve ClashControl's AI clash classifier. Thumbs up/down buttons (▲▼) now appear on each clash row in the Clashes panel. Expand a clash to annotate its type, reasons, and notes. Your normal workflow \u2014 changing status, creating issues \u2014 also generates training signals automatically.
         </p>
         <p style=${{fontSize:'.75rem',color:'var(--text-secondary)',lineHeight:1.6,marginBottom:'.6rem'}}>
-          When you're done, you can export or share the anonymous training data. The data contains <strong style=${{color:'var(--text-primary)'}}>only IFC type metadata and geometric metrics</strong> \u2014 no element names, coordinates, project names, or personal information.
+          Training data contains <strong style=${{color:'var(--text-primary)'}}>only IFC type metadata and geometric metrics</strong> \u2014 no element names, coordinates, project names, or personal information. Export or share data from the floating overlay or Settings \u2192 Developer / Fine-Tuning.
         </p>
         <p style=${{fontSize:'.7rem',color:'var(--text-muted)',lineHeight:1.5,marginBottom:'1rem'}}>
-          Sharing is completely optional and manual. Nothing is sent without your explicit action. You can turn off Training Mode at any time to return to normal use.
+          Sharing is completely optional. Nothing is sent without your explicit action. Turn off Training Mode at any time.
         </p>
         <button onClick=${dismiss}
           style=${{...S_BTN,width:'100%',padding:'.5rem',fontSize:'.8rem',fontWeight:600,
@@ -9501,12 +9751,6 @@ function startApp() {
       ${tabBtn('clashes', SVG_CLASHES, 'Clashes',  clashN)}
       ${tabBtn('issues',  SVG_ISSUES,  'Issues',   issueN)}
       ${tabBtn('explorer',SVG_EXPLORE, 'Explorer', 0)}
-      ${s.trainingMode && function(){
-        var SVG_TRAIN = '<path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93V12h3.5a2.25 2.25 0 0 1 0 4.5h-3.5v1.25A3.25 3.25 0 0 1 9.5 21 3.25 3.25 0 0 1 6.25 17.75V14.5h-1A2.25 2.25 0 0 1 3 12.25 2.25 2.25 0 0 1 5.25 10h3.5V9.93A4 4 0 0 1 12 2z"/>';
-        return html`<div style=${{marginTop:'.3rem',borderTop:'1px solid var(--border-subtle)',paddingTop:'.3rem'}}>
-          ${tabBtn('training', SVG_TRAIN, 'Training', 0)}
-        </div>`;
-      }()}
     </div>`;
   }
 
@@ -9521,7 +9765,7 @@ function startApp() {
     if (!tab) return null;
     var projects=s.projectList||[];
     var activeProj=projects.find(function(p){return p.id===s.activeProject;})||projects[0]||{name:'Default'};
-    var TITLES={models:'Models',clashes:'Clashes',issues:'Issues',explorer:'Explorer',training:'Training'};
+    var TITLES={models:'Models',clashes:'Clashes',issues:'Issues',explorer:'Explorer'};
     function onResizeDown(e){
       e.preventDefault();
       dragRef.current={startX:e.clientX,startW:panelW};
@@ -9553,7 +9797,6 @@ function startApp() {
       ${tab==='clashes'  && html`<${IssuePanel} key="clashes" s=${s} d=${d} hideTabBar=${true} />`}
       ${tab==='issues'   && html`<${IssuePanel} key="issues" s=${s} d=${d} hideTabBar=${true} />`}
       ${tab==='explorer' && html`<${IssuePanel} key="explorer" s=${s} d=${d} hideTabBar=${true} />`}
-      ${tab==='training' && html`<${TrainingPanel} s=${s} d=${d} />`}
     </div>`;
   }
 
@@ -9626,7 +9869,7 @@ function startApp() {
               <div style=${{flex:1,minWidth:0}}>
                 <div style=${{fontSize:'.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.15rem'}}>How it works</div>
                 <div style=${{fontSize:'.63rem',color:'var(--text-secondary)',lineHeight:1.6}}>
-                  Enable <strong style=${{color:'#a78bfa'}}>Training Mode</strong> from the chat bar at the bottom or the button above the 3D view. Review clashes, confirm their type (hard/soft), select reasons, and add notes. This teaches the AI to think like you do.
+                  Enable <strong style=${{color:'#a78bfa'}}>Training Mode</strong> from the button above the 3D view. Thumbs up/down buttons appear on each clash row. Expand a clash to set type, reasons, and notes. Your normal workflow \u2014 changing status, creating issues \u2014 also generates training signals automatically.
                 </div>
               </div>
             </div>
@@ -9656,7 +9899,7 @@ function startApp() {
               <div style=${{flex:1,minWidth:0}}>
                 <div style=${{fontSize:'.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.15rem'}}>Sharing is manual & optional</div>
                 <div style=${{fontSize:'.63rem',color:'var(--text-secondary)',lineHeight:1.6}}>
-                  Nothing is sent automatically. When you're ready, open the <strong style=${{color:'var(--text-primary)'}}>Training</strong> tab in the side panel and click <em>Export</em> to download a JSON file or <em>Share</em> to submit anonymously. You decide when and if.
+                  Nothing is sent automatically. Use the floating overlay in the 3D view to <em>Export</em> or <em>Share</em> training data, or go to Settings \u2192 Developer / Fine-Tuning to export detailed JSONL files. You decide when and if.
                 </div>
               </div>
             </div>
@@ -9713,7 +9956,37 @@ function startApp() {
   // ── App ────────────────────────────────────────────────────────
 
   function App() {
-    var st = useReducer(reducer, INIT), s=st[0], d=st[1];
+    var st = useReducer(reducer, INIT), s=st[0], _rawD=st[1];
+    // Wrap dispatch to capture training signals as side-effects
+    var d = useCallback(function(a) {
+      _rawD(a);
+      // Write clash training labels to localStorage
+      try {
+        if (a.t==='UPD_CLASH' && a.u && a.u.status) {
+          var c = s.clashes.find(function(c){return c.id===a.id;});
+          if (c && c._trainFV && a.u.status !== c.status) {
+            var labelMap = {in_progress:0.8, resolved:0.7, closed:0.2};
+            if (labelMap[a.u.status] != null) _saveClashTrainRecord(c.id, c._trainFV, labelMap[a.u.status], 'status_change', false);
+          }
+        }
+        if (a.t==='AI_FEEDBACK' && a.v) {
+          var c2 = s.clashes.find(function(c){return c.id===a.id;});
+          if (c2 && c2._trainFV) _saveClashTrainRecord(c2.id, c2._trainFV, a.v==='up'?1.0:0.0, 'explicit_feedback', false);
+        }
+        if (a.t==='ADD_ISSUE' && a.v && a.v.clashId) {
+          var c3 = s.clashes.find(function(c){return c.id===a.v.clashId;});
+          if (c3 && c3._trainFV) _saveClashTrainRecord(c3.id, c3._trainFV, 1.0, 'issue_created', false);
+        }
+        if (a.t==='BATCH_UPD_CLASH' && a.u && a.u.status) {
+          var labelMap2 = {in_progress:0.8, resolved:0.7, closed:0.2};
+          if (labelMap2[a.u.status] != null) {
+            s.clashes.forEach(function(c){
+              if (s.selected[c.id] && c._trainFV && c.status !== a.u.status) _saveClashTrainRecord(c.id, c._trainFV, labelMap2[a.u.status], 'status_change', false);
+            });
+          }
+        }
+      } catch(e) {}
+    }, [s.clashes, s.selected]);
     window._ccDispatch = d;
     // Apply theme to document and persist to localStorage
     useEffect(function(){
@@ -9964,7 +10237,7 @@ function startApp() {
       </div>
       <${SidePanel} s=${s} d=${d} />
       <${RightRail} s=${s} d=${d} />
-      ${s.showModal && html`<${NewIssueModal} d=${d} el=${s.modalElement} prefs=${s.prefs} />`}
+      ${s.showModal && html`<${NewIssueModal} d=${d} el=${s.modalElement} prefs=${s.prefs} clashes=${s.clashes} activeId=${s.activeId} />`}
       ${s.showSettings && html`<${SettingsModal} d=${d} prefs=${s.prefs} />`}
       ${s.showRevitBridge && html`<${RevitBridgePanel} s=${s} d=${d} />`}
       <${NLCommandPanel} s=${s} d=${d} />

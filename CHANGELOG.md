@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.42 (2026-03-25)
+- Add edge lines to nav cube and improve theme contrast
+
 ## v2.0.41 (2026-03-25)
 - Make all overflow-prone UI elements scrollable on any screen size
 
