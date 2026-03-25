@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.7.4',hash:'f3ea845',date:'2026-03-25T12:55:51Z'};
+  var CC_VERSION = {v:'2.7.6',hash:'b4ccc1c',date:'2026-03-25T15:25:03Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -422,6 +422,19 @@ function startApp() {
               modelAName:cClash.modelAName, modelBName:cClash.modelBName,
               point:cClash.point, distance:cClash.distance,
               assignee:cClash.assignee||'',
+              // Carry over training feedback
+              aiFeedback:cClash.aiFeedback||null,
+              aiReasons:cClash.aiReasons||[],
+              aiResolution:cClash.aiResolution||[],
+              aiNote:cClash.aiNote||'',
+              aiSignals:cClash.aiSignals||[],
+              clashTypeConfirmed:cClash.clashTypeConfirmed||null,
+              // Carry over detection metadata
+              overlapVolM3:cClash.overlapVolM3,
+              clearanceMm:cClash.clearanceMm,
+              bboxA:cClash.bboxA, bboxB:cClash.bboxB,
+              disciplines:cClash.disciplines,
+              objectTypeA:cClash.objectTypeA, objectTypeB:cClash.objectTypeB,
               created:Date.now()
             };
             // Find next clash in remaining list
@@ -2586,13 +2599,32 @@ function startApp() {
       }
       // Penetration depth: distance is negative for hard clashes (in mm)
       var penDepth = c.type==='hard' && c.distance<0 ? Math.round(Math.abs(c.distance)*10)/10 : 0;
+      // Sanitize predefined types: extract only the generic shape/category, strip project-specific identifiers
+      function _sanitizePT(pt){
+        if(!pt) return null;
+        // Extract just dimensions pattern if present (e.g. "260x6-300x25" → keep as geometric info)
+        var dims = pt.match(/\d+x\d+(?:[x-]\d+)*/g);
+        // Extract generic type keywords
+        var keywords = pt.match(/\b(?:HEA|HEB|HEM|IPE|UNP|UPE|CHS|RHS|SHS|THQ|INP|pipe|duct|cable|tray|beam|column|wall|slab|plate)\b/gi);
+        var parts = [];
+        if(keywords) parts.push(keywords.join(' '));
+        if(dims) parts.push(dims.join(' '));
+        return parts.length ? parts.join(' ') : null;
+      }
+      // Sanitize note: strip anything that looks like names, codes, or identifiers
+      function _sanitizeNote(n){
+        if(!n) return '';
+        return n.replace(/[A-Z]{2,}[-_]\d{2,}[A-Za-z0-9_-]*/g,'[id]')
+          .replace(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,'[email]')
+          .replace(/[A-Za-z]:\\[^\s]+/g,'[path]');
+      }
       return {
         ifc_type_a: c.elemAType || '',
         ifc_type_b: c.elemBType || '',
         discipline_a: discA,
         discipline_b: discB,
-        predefined_type_a: ptA || null,
-        predefined_type_b: ptB || null,
+        predefined_type_a: _sanitizePT(ptA),
+        predefined_type_b: _sanitizePT(ptB),
         clash_type: c.type === 'duplicate' ? 'hard' : c.type,
         clash_type_confirmed: c.clashTypeConfirmed || null,
         penetration_depth_mm: penDepth,
@@ -2609,7 +2641,7 @@ function startApp() {
           var k1=tA<tB?tA+':'+tB:tB+':'+tA;
           return tols[k1]!==undefined?tols[k1]:null;
         }(),
-        note: c.aiNote || '',
+        note: _sanitizeNote(c.aiNote || ''),
         app_version: CC_VERSION.v
       };
     });
@@ -7743,7 +7775,7 @@ function startApp() {
           <div style=${TSUB}>User commands paired with resolved actions</div>
         </div>
         <div style=${{display:'flex',gap:'.25rem',flexShrink:0}}>
-          <button onClick=${function(){_shareNLTrainingData(models,function(st){setNlShare({status:st});if(st==='ok')setTimeout(function(){setNlShare({status:null});},3000);});}}
+          <button onClick=${function(){_shareNLTrainingData(models,function(st){setNlShare({status:st});if(st==='ok'){_clearNLTrainStore();setNlN(0);setTimeout(function(){setNlShare({status:null});},3000);}});}}
             disabled=${!nlN||nlShare.status==='sending'}
             style=${{...S_BTN,fontSize:'.6rem',padding:'.2rem .4rem',background:nlN&&nlShare.status!=='sending'?'#7c3aed':'var(--bg-secondary)',color:nlN&&nlShare.status!=='sending'?'#fff':'var(--text-faint)'}}>${nlShare.status==='sending'?'Sending\u2026':'Send'}</button>
           <button onClick=${function(){_exportNLTrainingJSONL();}}
@@ -10287,7 +10319,10 @@ function startApp() {
     function doSend() {
       shareAITrainingData(clashes, s.detectionSettings, s.models, function(status, msg) {
         setShareState({status:status, msg:msg});
-        if (status==='ok') setTimeout(function(){ setShareState({status:null,msg:null}); }, 4000);
+        if (status==='ok') {
+          d({t:'CLEAR_TRAINING_DATA'});
+          setTimeout(function(){ setShareState({status:null,msg:null}); }, 4000);
+        }
       }, s.prefs.defaultTolerances, s.issues);
     }
     function doDelete() { d({t:'CLEAR_TRAINING_DATA'}); }
