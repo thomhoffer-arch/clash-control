@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.11.4 (2026-03-25)
+- Fix stale popup on mobile: service worker cache-first → network-first for HTML, fix text spacing in WelcomePopup
+
 ## v2.11.2 (2026-03-25)
 - Add automatic sendBeacon for NL chatbox training data
 
