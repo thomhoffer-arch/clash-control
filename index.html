@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.44',hash:'bbe8f1f',date:'2026-03-25T06:36:00Z'};
+  var CC_VERSION = {v:'2.0.45',hash:'48bb1a3',date:'2026-03-25T07:04:30Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -5126,7 +5126,11 @@ function startApp() {
     // Load project data (modelMeta, clashes, etc.) FIRST so that modelMeta
     // is in state before any ADD_MODEL fires — otherwise visibility is lost.
     idbGetProjectData(pid).then(function(data){
-      if(data) d({t:'LOAD_PROJECT_STATE', data:data});
+      if(data) {
+        // Strip stale delta pills — _delta is only valid within the session that produced it
+        if(data.clashes) data.clashes = data.clashes.map(function(c){ return c._delta ? Object.assign({},c,{_delta:null}) : c; });
+        d({t:'LOAD_PROJECT_STATE', data:data});
+      }
     }).then(function(){
       return idbGetProjectFiles(pid);
     }).then(function(stored){
@@ -7249,9 +7253,9 @@ function startApp() {
     var LBL={fontSize:'.7rem',color:'var(--text-muted)',display:'block',marginBottom:'.2rem'};
     var ROW={display:'flex',justifyContent:'space-between',padding:'.1rem 0'};
     var LS={fontSize:'.6rem',color:'var(--text-muted)'}; var VS={fontSize:'.6rem',color:'var(--text-primary)'};
-    return html`<div style=${MS} role="dialog" aria-label=${hasEl?'New Element Issue':'New Issue'}><div style=${MX}>
+    return html`<div style=${MS} role="dialog" aria-label=${fromClash?'New Issue from Clash':hasEl?'New Element Issue':'New Issue'}><div style=${MX}>
       <div style=${{display:'flex',justifyContent:'space-between',padding:'.8rem 1rem',borderBottom:'1px solid var(--border)'}}>
-        <span style=${{fontWeight:600,fontSize:'.875rem'}}>${hasEl?'New Element Issue':'New Issue'}</span>
+        <span style=${{fontWeight:600,fontSize:'.875rem'}}>${fromClash?'New Issue from Clash':hasEl?'New Element Issue':'New Issue'}</span>
         <button onClick=${function(){d({t:'MODAL',v:false})}} style=${{...S_BTN,background:'none',color:'var(--text-muted)',fontSize:'1.1rem',padding:0}} aria-label="Close modal">✕</button>
       </div>
       ${fromClash && html`<div style=${{padding:'.6rem 1rem',borderBottom:'1px solid var(--border)',background:'var(--bg-primary)'}}>

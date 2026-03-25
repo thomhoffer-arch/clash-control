@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.0.45 (2026-03-25)
+- Add clash persistence, delta detection, and Create Issue from Clash
+
 ## v2.0.44 (2026-03-25)
 - Fix useCallback crash and add tappable logo version popover
 
