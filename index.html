@@ -9,7 +9,7 @@
 
   <!-- CSP: restrict resource loading to known CDN origins -->
   <!-- 'unsafe-eval' required by pdf.js v3 for custom font rendering (CFF/Type1 font programs) -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://huggingface.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.huggingface.co http://localhost:11434 https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com http://localhost:* ws://localhost:* blob:; worker-src blob:; img-src 'self' blob: data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://huggingface.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.huggingface.co http://localhost:11434 https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://docs.google.com http://localhost:* ws://localhost:* blob:; frame-src https://docs.google.com; worker-src blob:; img-src 'self' blob: data:;">
 
   <!-- CDN deps: React, Three.js, JSZip — all UMD, all cdnjs -->
   <!-- SRI hashes: regenerate with `node scripts/generate-sri.js` if you change versions -->
@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.7.0',hash:'c30ca48',date:'2026-03-25T12:10:48Z'};
+  var CC_VERSION = {v:'2.7.4',hash:'f3ea845',date:'2026-03-25T12:55:51Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -386,7 +386,8 @@ function startApp() {
         var upd2 = {aiFeedback:a.v};
         if(a.v) {
           var sigs=(c.aiSignals||[]).slice();
-          sigs.push({type:a.v==='up'?'strong_positive':'strong_negative',source:'explicit_feedback',value:a.v,ts:Date.now()});
+          var sigType=a.v==='real_clash'?'strong_positive':a.v==='false_positive'?'strong_negative':'weak_positive';
+          sigs.push({type:sigType,source:'explicit_feedback',value:a.v,ts:Date.now()});
           upd2.aiSignals=sigs;
         }
         return Object.assign({},c,upd2);
@@ -2599,7 +2600,7 @@ function startApp() {
         clearance_mm: c.clearanceMm != null ? c.clearanceMm : null,
         bbox_a: c.bboxA || {dx:0,dy:0,dz:0},
         bbox_b: c.bboxB || {dx:0,dy:0,dz:0},
-        verdict: _AI_VERDICT_MAP[c.status] || 'unreviewed',
+        verdict: c.aiFeedback || _AI_VERDICT_MAP[c.status] || 'unreviewed',
         reasons: c.aiReasons || [],
         resolution: c.aiResolution || [],
         type_pair_tolerance_mm: function(){
@@ -7389,7 +7390,9 @@ function startApp() {
             ${isClash && trainingMode && function(){
               var fb=it.aiFeedback;
               return html`<span style=${{display:'inline-flex',alignItems:'center',gap:'2px',marginLeft:'.15rem',flexShrink:0}}>
-                ${fb && html`<span style=${{fontSize:'.55rem',lineHeight:1}}>${fb==='up'?'👍':'👎'}</span>`}
+                ${fb && html`<span style=${{fontSize:'.55rem',padding:'.02rem .2rem',borderRadius:3,lineHeight:1,fontWeight:700,
+                  background:fb==='real_clash'?'#166534':fb==='acceptable'?'#1e3a5f':'#7f1d1d',
+                  color:fb==='real_clash'?'#4ade80':fb==='acceptable'?'#93c5fd':'#fca5a5'}}>${fb==='real_clash'?'+':fb==='acceptable'?'-':'×'}</span>`}
                 ${!active && html`<button onClick=${function(e){e.stopPropagation();d({t:'ACTIVE',id:it.id});}}
                   title="Expand training feedback" style=${{background:'transparent',color:'#a78bfa',border:'none',cursor:'pointer',fontSize:'.6rem',padding:'1px 4px',borderRadius:3,lineHeight:1}}>▼</button>`}
               </span>`;
@@ -7433,21 +7436,24 @@ function startApp() {
             style=${{...S_INPUT,fontSize:'.55rem',padding:'.15rem .3rem',flex:1}} />
         </div>
         ${isClash && trainingMode && function(){
-          var CTYPES=[{k:'hard',l:'Hard'},{k:'soft',l:'Soft'},{k:'no_clash',l:'None'}];
+          var CTYPES=[{k:'hard',l:'Hard'},{k:'soft',l:'Soft'},{k:'duplicate',l:'Duplicate'},{k:'no_clash',l:'None'}];
           var REASONS=['Design error','Within tolerance','Needs more tolerance','Already resolved','Modelling error','Missing opening','Shared space allowed','Duplicate geometry','Not relevant'];
           var curCT=it.clashTypeConfirmed!=null?it.clashTypeConfirmed:it.type;
           var curReasons=it.aiReasons||[];
           var curNote=it.aiNote||'';
           var fb=it.aiFeedback;
+          var VERDICTS=[{k:'real_clash',l:'Real clash',bg:'#166534',col:'#4ade80',brd:'#22c55e44'},
+            {k:'acceptable',l:'Acceptable',bg:'#1e3a5f',col:'#93c5fd',brd:'#3b82f644'},
+            {k:'false_positive',l:'False positive',bg:'#7f1d1d',col:'#fca5a5',brd:'#ef444444'}];
           return html`<div style=${{marginTop:'.4rem',paddingTop:'.4rem',borderTop:'1px solid var(--border-subtle)',background:'rgba(124,58,237,.04)',borderRadius:6,padding:'.4rem'}}>
-            <div style=${{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'.3rem'}}>
-              <div style=${{fontSize:'.55rem',fontWeight:600,color:'#a78bfa',textTransform:'uppercase',letterSpacing:'.04em'}}>AI Training Feedback</div>
-              <span style=${{display:'inline-flex',gap:'2px'}}>
-                <button onClick=${function(e){e.stopPropagation();d({t:'AI_FEEDBACK',id:it.id,v:fb==='up'?null:'up'});}}
-                  title="Real clash" style=${{background:fb==='up'?'#166534':'var(--bg-secondary)',color:fb==='up'?'#4ade80':'var(--text-faint)',border:'1px solid '+(fb==='up'?'#22c55e44':'var(--border)'),cursor:'pointer',fontSize:'.65rem',padding:'.1rem .35rem',borderRadius:4,lineHeight:1}}>👍</button>
-                <button onClick=${function(e){e.stopPropagation();d({t:'AI_FEEDBACK',id:it.id,v:fb==='down'?null:'down'});}}
-                  title="False positive" style=${{background:fb==='down'?'#7f1d1d':'var(--bg-secondary)',color:fb==='down'?'#fca5a5':'var(--text-faint)',border:'1px solid '+(fb==='down'?'#ef444444':'var(--border)'),cursor:'pointer',fontSize:'.65rem',padding:'.1rem .35rem',borderRadius:4,lineHeight:1}}>👎</button>
-              </span>
+            <div style=${{fontSize:'.55rem',fontWeight:600,color:'#a78bfa',marginBottom:'.3rem',textTransform:'uppercase',letterSpacing:'.04em'}}>AI Training Feedback</div>
+            <div style=${{fontSize:'.55rem',fontWeight:600,color:'var(--text-muted)',marginBottom:'.15rem'}}>Verdict</div>
+            <div style=${{display:'flex',gap:'.25rem',marginBottom:'.3rem',flexWrap:'wrap'}}>
+              ${VERDICTS.map(function(v){var sel=fb===v.k;return html`<button key=${v.k}
+                onClick=${function(e){e.stopPropagation();d({t:'AI_FEEDBACK',id:it.id,v:sel?null:v.k});}}
+                style=${{...S_BTN,fontSize:'.55rem',padding:'.1rem .4rem',
+                  background:sel?v.bg:'var(--bg-secondary)',color:sel?v.col:'var(--text-faint)',
+                  border:'1px solid '+(sel?v.brd:'var(--border)')}}>${v.l}</button>`})}
             </div>
             <div style=${{fontSize:'.55rem',fontWeight:600,color:'var(--text-muted)',marginBottom:'.15rem'}}>Clash type</div>
             <div style=${{display:'flex',gap:'.25rem',marginBottom:'.3rem',flexWrap:'wrap'}}>

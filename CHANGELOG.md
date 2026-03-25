@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.7.4 (2026-03-25)
+- Change verdict row labels to + - × symbols
+
+## v2.7.3 (2026-03-25)
+- Replace thumbs up/down with Real clash / Acceptable / False positive
+
+## v2.7.2 (2026-03-25)
+- Add Duplicate option to clash type confirmation in training feedback
+
+## v2.7.1 (2026-03-25)
+- Add NL training data sharing, mailto fallback for blocked sends
+
 ## v2.7.0 (2026-03-25)
 - Add iframe fallback for Send, copy-to-clipboard on failure
 
