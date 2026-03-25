@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.5.0 (2026-03-25)
+- Add resolution feedback (Move A/B), neutral status label in clashes
+
 ## v2.4.1 (2026-03-25)
 - Move confirmed clashes from Clashes tab to Issues tab
 

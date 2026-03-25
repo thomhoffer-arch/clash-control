@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.4.1',hash:'c60a044',date:'2026-03-25T08:57:21Z'};
+  var CC_VERSION = {v:'2.5.0',hash:'6ac5a38',date:'2026-03-25T09:04:51Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -303,6 +303,7 @@ function startApp() {
     showMarkers:false, hoverHighlight:true, outlineSelected:true,
     defaultPriority:'normal', defaultCategory:'design', defaultStatus:'open',
     defaultMaxGap:50, resetFiltersOnRun:true,
+    defaultTolerances:(function(){try{return JSON.parse(localStorage.getItem('cc_defaultTolerances'))||{};}catch(e){return {};}}()),
     theme:(function(){ try { return localStorage.getItem('cc_theme')||'dark'; } catch(e){ return 'dark'; } })(),
     renderStyle:'standard' // 'standard','shaded','rendered','wireframe'
   };
@@ -444,7 +445,9 @@ function startApp() {
       case 'TAB':         var tabUpd={tab:a.v}; if(a.v!==s.tab&&(a.v==='clashes'||a.v==='issues'||s.tab==='clashes'||s.tab==='issues'))tabUpd.activeId=null; return Object.assign({},s,tabUpd);
       case 'SETTINGS':    return Object.assign({},s,{showSettings:a.v});
       case 'TRAINING_MODE': return Object.assign({},s,{trainingMode:!s.trainingMode});
-      case 'UPD_PREFS':   return Object.assign({},s,{prefs:Object.assign({},s.prefs,a.u)});
+      case 'UPD_PREFS':
+        if(a.u&&a.u.defaultTolerances!==undefined){try{localStorage.setItem('cc_defaultTolerances',JSON.stringify(a.u.defaultTolerances));}catch(e){}}
+        return Object.assign({},s,{prefs:Object.assign({},s.prefs,a.u)});
       case 'MEASURE_MODE': return Object.assign({},s,{measureMode:a.v});
       case 'ADD_MEASUREMENT': return Object.assign({},s,{measurements:s.measurements.concat([a.v])});
       case 'DEL_MEASUREMENT': return Object.assign({},s,{measurements:s.measurements.filter(function(m){return m.id!==a.id})});
@@ -2481,9 +2484,10 @@ function startApp() {
 
   var _AI_VERDICT_MAP = {open:'unreviewed', in_progress:'true_clash', resolved:'acceptable', closed:'false_positive'};
 
-  function _buildAITrainingPayload(clashes, detectionSettings, models) {
+  function _buildAITrainingPayload(clashes, detectionSettings, models, defaultTolerances) {
     var reviewed = clashes.filter(function(c){ return c.status!=='open'; });
     if (reviewed.length===0) return null;
+    var tols = defaultTolerances || {};
     var records = reviewed.map(function(c) {
       var discA = '', discB = '';
       if (c.disciplines) { discA = c.disciplines[0]||''; discB = c.disciplines[1]||''; }
@@ -2514,6 +2518,12 @@ function startApp() {
         verdict: _AI_VERDICT_MAP[c.status] || 'unreviewed',
         reasons: c.aiReasons || [],
         resolution: c.aiResolution || null,
+        type_pair_tolerance_mm: function(){
+          var tA=c.elemAType||'',tB=c.elemBType||'';
+          if(!tA||!tB) return null;
+          var k1=tA<tB?tA+':'+tB:tB+':'+tA;
+          return tols[k1]!==undefined?tols[k1]:null;
+        }(),
         note: c.aiNote || '',
         app_version: CC_VERSION.v
       };
@@ -2527,8 +2537,8 @@ function startApp() {
     };
   }
 
-  function exportAITrainingData(clashes, detectionSettings, models) {
-    var payload = _buildAITrainingPayload(clashes, detectionSettings, models);
+  function exportAITrainingData(clashes, detectionSettings, models, defaultTolerances) {
+    var payload = _buildAITrainingPayload(clashes, detectionSettings, models, defaultTolerances);
     if (!payload) return;
     var json = JSON.stringify(payload, null, 2);
     var blob = new Blob([json], {type:'application/json'});
@@ -2539,8 +2549,8 @@ function startApp() {
     URL.revokeObjectURL(url);
   }
 
-  function shareAITrainingData(clashes, detectionSettings, models, onStatus) {
-    var payload = _buildAITrainingPayload(clashes, detectionSettings, models);
+  function shareAITrainingData(clashes, detectionSettings, models, onStatus, defaultTolerances) {
+    var payload = _buildAITrainingPayload(clashes, detectionSettings, models, defaultTolerances);
     if (!payload) { onStatus('error','No reviewed clashes to share.'); return; }
     var json = JSON.stringify(payload);
     onStatus('sending', null);
@@ -7485,7 +7495,8 @@ function startApp() {
   // ── Settings Modal ───────────────────────────────────────────
 
   function SettingsModal(props) {
-    var d=props.d, p=props.prefs;
+    var d=props.d, p=props.prefs, models=props.models||[], rules=props.rules||{};
+    var stTab = useState('general'), settingsTab=stTab[0], setSettingsTab=stTab[1];
     useEffect(function(){
       function onKey(e){if(e.key==='Escape')d({t:'SETTINGS',v:false});}
       window.addEventListener('keydown',onKey);
@@ -7507,12 +7518,20 @@ function startApp() {
         <div style=${{width:18,height:18,borderRadius:9,background:'#fff',position:'absolute',top:2,left:on?18:2,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,.2)'}}></div>
       </div>`;
     }
+    var TAB_BTN=function(id,label){return html`<button onClick=${function(){setSettingsTab(id);}}
+      style=${{...S_BTN,padding:'.4rem .8rem',fontSize:'.72rem',fontWeight:settingsTab===id?600:400,
+        background:settingsTab===id?'var(--accent)':'none',color:settingsTab===id?'#fff':'var(--text-muted)',
+        border:'none',borderRadius:6,cursor:'pointer'}}>${label}</button>`;};
     return html`<div style=${MS} role="dialog" aria-label="Settings"><div style=${MX}>
       <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'1rem 1.2rem',borderBottom:'1px solid var(--border)'}}>
         <span style=${{fontWeight:600,fontSize:'.9rem'}}>Settings</span>
         <button onClick=${function(){d({t:'SETTINGS',v:false})}} style=${{...S_BTN,background:'none',color:'var(--text-muted)',fontSize:'1.1rem',padding:0}} aria-label="Close settings">✕</button>
       </div>
-      <div style=${{padding:'.2rem 1.2rem 1rem 1.2rem'}}>
+      <div style=${{display:'flex',gap:'.3rem',padding:'.6rem 1.2rem',borderBottom:'1px solid var(--border-subtle)',background:'var(--bg-primary)'}}>
+        ${TAB_BTN('general','General')}
+        ${TAB_BTN('advanced','Advanced')}
+      </div>
+      ${settingsTab==='general' && html`<div style=${{padding:'.2rem 1.2rem 1rem 1.2rem'}}>
         <div style=${SEC}>Viewer</div>
         <div style=${TROW}>
           <div><div style=${TLBL}>Auto fly-to on click</div><div style=${TSUB}>Camera moves to element when selecting a clash or issue</div></div>
@@ -7572,7 +7591,8 @@ function startApp() {
         </div>
         <div style=${SEC}>Developer / Fine-Tuning</div>
         <${DevTrainingSection} />
-      </div>
+      </div>`}
+      ${settingsTab==='advanced' && html`<${AdvancedSettingsTab} d=${d} prefs=${p} models=${models} rules=${rules} SEC=${SEC} TROW=${TROW} TLBL=${TLBL} TSUB=${TSUB} LBL=${LBL} />`}
     </div></div>`;
   }
 
@@ -7624,6 +7644,123 @@ function startApp() {
       </div>
       <div style=${{fontSize:'.6rem',color:'var(--text-faint)',marginTop:'.4rem',lineHeight:1.5}}>
         Data is stored locally in this browser and never sent anywhere. Export it to fine-tune AI models for command parsing and clash classification.
+      </div>
+    </div>`;
+  }
+
+  // ── Advanced Settings Tab (tolerance matrix) ────────────────
+  var DEFAULT_IFC_TYPES=['IfcWall','IfcSlab','IfcBeam','IfcColumn','IfcDoor','IfcWindow',
+    'IfcPipeSegment','IfcDuctSegment','IfcCableCarrierSegment','IfcFlowTerminal',
+    'IfcBuildingElementProxy','IfcPlate','IfcMember','IfcRailing','IfcStair',
+    'IfcCovering','IfcFurnishingElement','IfcDistributionElement'];
+
+  function AdvancedSettingsTab(props) {
+    var d=props.d, p=props.prefs, models=props.models||[], rules=props.rules||{};
+    var SEC=props.SEC, TROW=props.TROW, TLBL=props.TLBL, TSUB=props.TSUB, LBL=props.LBL;
+
+    // Collect IFC types from loaded models + defaults
+    var ifcTypes = {};
+    DEFAULT_IFC_TYPES.forEach(function(t){ifcTypes[t]=true;});
+    models.forEach(function(m){(m.elements||[]).forEach(function(el){if(el.props&&el.props.ifcType)ifcTypes[el.props.ifcType]=true;});});
+    var typeList = Object.keys(ifcTypes).sort();
+
+    // Default tolerances stored in prefs, keyed as "TypeA:TypeB" → mm
+    var defaultTols = p.defaultTolerances||{};
+    var tolKeys = Object.keys(defaultTols).sort();
+
+    // Add pair state
+    var stAdd = useState({a:typeList[0]||'',b:typeList[1]||typeList[0]||'',mm:'50'});
+    var addState=stAdd[0], setAddState=stAdd[1];
+
+    function setTol(key, val) {
+      var u = Object.assign({}, defaultTols);
+      if(val===null||val===undefined) delete u[key]; else u[key]=val;
+      d({t:'UPD_PREFS',u:{defaultTolerances:u}});
+    }
+
+    function addPair() {
+      if(!addState.a||!addState.b) return;
+      var key = addState.a < addState.b ? addState.a+':'+addState.b : addState.b+':'+addState.a;
+      setTol(key, +addState.mm||0);
+    }
+
+    function applyToRules() {
+      d({t:'UPD_RULES',u:{toleranceByTypePair:Object.assign({},defaultTols)}});
+    }
+
+    // Short type name helper
+    function shortName(t){return t.replace(/^Ifc/,'');}
+
+    return html`<div style=${{padding:'.2rem 1.2rem 1rem 1.2rem'}}>
+      <div style=${SEC}>Default Type-Pair Tolerances</div>
+      <div style=${{fontSize:'.62rem',color:'var(--text-muted)',lineHeight:1.5,marginBottom:'.6rem'}}>
+        Set default spatial tolerances per IFC type pair. These are saved as your user defaults and can be applied to any detection run.
+      </div>
+
+      ${tolKeys.length>0 && html`<div style=${{marginBottom:'.5rem'}}>
+        <table style=${{width:'100%',borderCollapse:'collapse',fontSize:'.62rem'}}>
+          <thead><tr>
+            <th style=${{textAlign:'left',padding:'.25rem .4rem',color:'var(--text-muted)',borderBottom:'1px solid var(--border)',fontWeight:600}}>Type A</th>
+            <th style=${{textAlign:'left',padding:'.25rem .4rem',color:'var(--text-muted)',borderBottom:'1px solid var(--border)',fontWeight:600}}>Type B</th>
+            <th style=${{textAlign:'right',padding:'.25rem .4rem',color:'var(--text-muted)',borderBottom:'1px solid var(--border)',fontWeight:600}}>Tolerance</th>
+            <th style=${{width:24,borderBottom:'1px solid var(--border)'}}></th>
+          </tr></thead>
+          <tbody>
+            ${tolKeys.map(function(k){
+              var parts=k.split(':');
+              return html`<tr key=${k} style=${{borderBottom:'1px solid var(--border-subtle)'}}>
+                <td style=${{padding:'.25rem .4rem',color:'var(--text-secondary)'}}>${shortName(parts[0])}</td>
+                <td style=${{padding:'.25rem .4rem',color:'var(--text-secondary)'}}>${shortName(parts[1]||parts[0])}</td>
+                <td style=${{padding:'.25rem .4rem',textAlign:'right'}}>
+                  <input type="number" value=${defaultTols[k]} min="0" max="9999" step="5"
+                    onChange=${function(e){setTol(k,+e.target.value||0);}}
+                    style=${{...S_INPUT,width:50,textAlign:'center',fontSize:'.6rem',padding:'1px 3px'}} />
+                  <span style=${{color:'var(--text-faint)',marginLeft:2}}>mm</span>
+                </td>
+                <td style=${{padding:'.25rem .2rem',textAlign:'center'}}>
+                  <button onClick=${function(){setTol(k,null);}}
+                    style=${{...S_BTN,background:'none',color:'var(--text-faint)',fontSize:'.55rem',padding:'0 3px',border:'none'}}>✕</button>
+                </td>
+              </tr>`;
+            })}
+          </tbody>
+        </table>
+      </div>`}
+
+      ${tolKeys.length===0 && html`<div style=${{fontSize:'.62rem',color:'var(--text-faint)',padding:'.5rem',background:'var(--bg-primary)',borderRadius:6,marginBottom:'.5rem',textAlign:'center'}}>
+        No type-pair tolerances defined yet. Add one below.
+      </div>`}
+
+      <div style=${{display:'flex',gap:'.2rem',alignItems:'center',flexWrap:'wrap',marginBottom:'.5rem'}}>
+        <select value=${addState.a} onChange=${function(e){setAddState(Object.assign({},addState,{a:e.target.value}));}}
+          style=${{...S_INPUT,fontSize:'.6rem',padding:'2px 3px',flex:1,minWidth:80}}>
+          ${typeList.map(function(t){return html`<option key=${t} value=${t}>${shortName(t)}</option>`;})}
+        </select>
+        <span style=${{color:'var(--text-faint)',fontSize:'.6rem'}}>↔</span>
+        <select value=${addState.b} onChange=${function(e){setAddState(Object.assign({},addState,{b:e.target.value}));}}
+          style=${{...S_INPUT,fontSize:'.6rem',padding:'2px 3px',flex:1,minWidth:80}}>
+          ${typeList.map(function(t){return html`<option key=${t} value=${t}>${shortName(t)}</option>`;})}
+        </select>
+        <input type="number" value=${addState.mm} min="0" max="9999" step="5"
+          onInput=${function(e){setAddState(Object.assign({},addState,{mm:e.target.value}));}}
+          style=${{...S_INPUT,fontSize:'.6rem',padding:'2px 3px',width:45,textAlign:'center'}} />
+        <span style=${{color:'var(--text-faint)',fontSize:'.55rem'}}>mm</span>
+        <button onClick=${addPair}
+          style=${{...S_BTN,fontSize:'.6rem',padding:'.15rem .5rem',background:'var(--accent)',color:'#fff',border:'none'}}>Add</button>
+      </div>
+
+      <button onClick=${applyToRules}
+        disabled=${!tolKeys.length}
+        style=${{...S_BTN,width:'100%',padding:'.35rem',fontSize:'.68rem',fontWeight:600,
+          background:tolKeys.length?'var(--accent)':'var(--bg-primary)',
+          color:tolKeys.length?'#fff':'var(--text-faint)',
+          border:'1px solid '+(tolKeys.length?'var(--accent)':'var(--border)'),
+          borderRadius:6,marginBottom:'.6rem'}}>
+        Apply to Current Detection Rules
+      </button>
+
+      <div style=${{fontSize:'.58rem',color:'var(--text-faint)',lineHeight:1.5}}>
+        Tip: Set 0mm for hard-clash-only on a type pair. These defaults persist across sessions and can be applied to any detection run via the button above.
       </div>
     </div>`;
   }
@@ -9964,7 +10101,7 @@ function startApp() {
       shareAITrainingData(clashes, s.detectionSettings, s.models, function(status, msg) {
         setShareState({status:status, msg:msg});
         if (status==='ok') setTimeout(function(){ setShareState({status:null,msg:null}); }, 4000);
-      });
+      }, s.prefs.defaultTolerances);
     }
     function doDelete() { d({t:'CLEAR_TRAINING_DATA'}); }
     var isSending = shareState.status==='sending';
@@ -10028,7 +10165,8 @@ function startApp() {
             style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',flex:1}}>Confirm?</button>`}
         </div>
         ${shareState.status==='ok' && html`<div style=${{fontSize:'.55rem',color:'#22c55e'}}>Submitted, thank you!</div>`}
-        ${shareState.status==='error' && shareState.msg && html`<div style=${{fontSize:'.55rem',color:'#ef4444'}}>${shareState.msg} <span onClick=${function(){exportAITrainingData(clashes, s.detectionSettings, s.models);}} style=${{textDecoration:'underline',cursor:'pointer',color:'#93c5fd'}}>Export file</span></div>`}
+        ${shareState.status==='error' && shareState.msg && html`<div style=${{fontSize:'.55rem',color:'#ef4444'}}>${shareState.msg} <span onClick=${function(){exportAITrainingData(clashes, s.detectionSettings, s.models, s.prefs.defaultTolerances);}} style=${{textDecoration:'underline',cursor:'pointer',color:'#93c5fd'}}>Export file</span></div>`}
+
       </div>`}
       ${showWarn && html`<div style=${{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:2000,
         background:'rgba(0,0,0,.6)',display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'3rem 0'}}
@@ -10684,7 +10822,7 @@ function startApp() {
       <${SidePanel} s=${s} d=${d} />
       <${RightRail} s=${s} d=${d} />
       ${s.showModal && html`<${NewIssueModal} d=${d} el=${s.modalElement} prefs=${s.prefs} clashes=${s.clashes} activeId=${s.activeId} />`}
-      ${s.showSettings && html`<${SettingsModal} d=${d} prefs=${s.prefs} />`}
+      ${s.showSettings && html`<${SettingsModal} d=${d} prefs=${s.prefs} models=${s.models} rules=${s.rules} />`}
       ${s.showRevitBridge && html`<${RevitBridgePanel} s=${s} d=${d} />`}
       <${NLCommandPanel} s=${s} d=${d} />
       <${MobileNav} s=${s} d=${d} />
