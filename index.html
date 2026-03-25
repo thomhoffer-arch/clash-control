@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.3.1',hash:'260744a',date:'2026-03-25T08:52:13Z'};
+  var CC_VERSION = {v:'2.3.2',hash:'ab56112',date:'2026-03-25T08:54:13Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -7263,8 +7263,11 @@ function startApp() {
       </div>
       ${active && html`<div style=${{marginTop:'.4rem',paddingTop:'.4rem',borderTop:'1px solid var(--border)'}}>
         <div style=${{display:'flex',gap:'.25rem',marginBottom:'.4rem',flexWrap:'wrap',alignItems:'center'}}>
-          ${EDITABLE_STATUSES.map(function(k){return html`<button key=${k}
-            onClick=${function(e){e.stopPropagation();d({t:isClash?'UPD_CLASH':'UPD_ISSUE',id:it.id,u:{status:k}})}}
+          ${isClash && html`<span style=${{fontSize:'.55rem',padding:'.15rem .35rem',borderRadius:4,background:(STAT[it.status||'open']||STAT.open).bg+'22',color:(STAT[it.status||'open']||STAT.open).bg,fontWeight:600}}>${(STAT[it.status||'open']||STAT.open).label}</span>`}
+          ${isClash && it.status!=='confirmed' && html`<button onClick=${function(e){e.stopPropagation();d({t:'UPD_CLASH',id:it.id,u:{status:'confirmed'}});}}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.15rem .5rem',background:'#166534',color:'#4ade80',border:'1px solid #22c55e66',fontWeight:600}}>Confirmed</button>`}
+          ${!isClash && EDITABLE_STATUSES.map(function(k){return html`<button key=${k}
+            onClick=${function(e){e.stopPropagation();d({t:'UPD_ISSUE',id:it.id,u:{status:k}})}}
             style=${{...S_BTN,fontSize:'.6rem',padding:'.15rem .35rem',background:it.status===k?STAT[k].bg:'var(--bg-secondary)',color:it.status===k?'#fff':'var(--text-faint)'}}>${STAT[k].label}</button>`})}
           <button onClick=${function(e){e.stopPropagation();d({t:'ACTIVE',id:null});if(_unghostAll)_unghostAll();if(window._ccRemoveActiveClashMarker)window._ccRemoveActiveClashMarker();}}
             title="Collapse" style=${{...S_BTN,marginLeft:'auto',padding:'0 4px',background:'none',color:'var(--text-faint)',fontSize:'.7rem',flexShrink:0}}>▲</button>
