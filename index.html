@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.2.2',hash:'2734e84',date:'2026-03-25T08:24:42Z'};
+  var CC_VERSION = {v:'2.2.3',hash:'77e2b76',date:'2026-03-25T08:26:43Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -7282,7 +7282,7 @@ function startApp() {
         ${html`<${ClashProps} item=${it} models=${pr._models||[]} isClash=${isClash} />`}
         ${isClash && trainingMode && function(){
           var CTYPES=[{k:'hard',l:'Hard'},{k:'soft',l:'Soft'},{k:'no_clash',l:'None'}];
-          var REASONS=['Installation tolerance','Already coordinated','Different levels','Sleeve / opening present','Insulation overlap','Modelling error','Rule exception'];
+          var REASONS=['Within tolerance','Already resolved','Modelling error','Missing opening','Shared space allowed','Duplicate geometry','Not relevant'];
           var curCT=it.clashTypeConfirmed!=null?it.clashTypeConfirmed:it.type;
           var curReasons=it.aiReasons||[];
           var curNote=it.aiNote||'';

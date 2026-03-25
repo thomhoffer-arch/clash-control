@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.2.3 (2026-03-25)
+- Add data collection notice to training mode dropdown
+
 ## v2.2.1 (2026-03-25)
 - Add quick start guide with interactive walkthrough tour
 
