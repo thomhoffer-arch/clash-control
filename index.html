@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.42',hash:'28ad848',date:'2026-03-25T06:01:51Z'};
+  var CC_VERSION = {v:'2.0.43',hash:'b86d518',date:'2026-03-25T06:29:01Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -262,6 +262,7 @@ function startApp() {
   var useRef     = React.useRef;
   var useReducer = React.useReducer;
   var useMemo    = React.useMemo;
+  var useCallback = React.useCallback;
   var html       = htm.bind(h);
 
   // ── Constants ──────────────────────────────────────────────────
@@ -5096,6 +5097,13 @@ function startApp() {
     var po = useState(false), projOpen=po[0], setProjOpen=po[1];
     var rn = useState(false), renaming=rn[0], setRenaming=rn[1];
     var rnv = useState(''), renameVal=rnv[0], setRenameVal=rnv[1];
+    var sv = useState(false), showVer=sv[0], setShowVer=sv[1];
+    useEffect(function(){
+      if(!showVer) return;
+      function close(){setShowVer(false);}
+      document.addEventListener('click', close);
+      return function(){document.removeEventListener('click', close);};
+    }, [showVer]);
     var cf = useState(null), confirmDelete=cf[0], setConfirmDelete=cf[1];
     var tut = useState(false), showTutorial=tut[0], setShowTutorial=tut[1];
     var cr = useState(false), creating=cr[0], setCreating=cr[1];
@@ -5143,7 +5151,16 @@ function startApp() {
 
     return html`<header class="cc-header" style=${{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'.5rem 1rem',background:'var(--bg-primary)',borderBottom:'1px solid var(--border-subtle)',flexShrink:0}}>
       <div style=${{display:'flex',alignItems:'center',gap:'.75rem'}}>
-        <div style=${{width:32,height:32,background:'var(--accent)',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',cursor:'default'}} title="ClashControl — Free, open-source IFC clash detection for the browser. Load BIM models, detect geometric clashes, manage issues, and export to BCF."><span style=${{color:'#fff',fontWeight:900,fontSize:14}}>CC</span></div>
+        <div style=${{position:'relative'}}>
+          <div style=${{width:32,height:32,background:'var(--accent)',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer'}} title="ClashControl — tap for version info" onClick=${function(){setShowVer(!showVer);}}><span style=${{color:'#fff',fontWeight:900,fontSize:14}}>CC</span></div>
+          ${showVer && html`<div style=${{position:'absolute',top:38,left:0,background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:8,padding:'.6rem .8rem',zIndex:200,minWidth:200,boxShadow:'0 8px 24px rgba(0,0,0,.4)',fontSize:'.72rem',color:'var(--text-primary)',whiteSpace:'nowrap'}} onClick=${function(e){e.stopPropagation();}}>
+            <div style=${{fontWeight:700,marginBottom:'.3rem'}}>ClashControl</div>
+            <div style=${{color:'var(--text-muted)'}}>Version <strong>v${CC_VERSION.v}</strong></div>
+            <div style=${{color:'var(--text-faint)',marginTop:'.2rem'}}>Build: ${CC_VERSION.hash}</div>
+            <div style=${{color:'var(--text-faint)'}}>${new Date(CC_VERSION.date).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})}</div>
+            <div style=${{marginTop:'.4rem',borderTop:'1px solid var(--border-subtle)',paddingTop:'.3rem',color:'var(--text-faint)',fontSize:'.65rem'}}>Free, open-source IFC clash detection</div>
+          </div>`}
+        </div>
         <div>
           <span class="cc-header-brand-text" style=${{fontWeight:600,cursor:'default'}} title="ClashControl — Free, open-source IFC clash detection for the browser. Load BIM models, detect geometric clashes, manage issues, and export to BCF.">ClashControl</span>
           <span class="cc-header-version" style=${{color:'var(--text-muted)',fontSize:'.7rem',marginLeft:'.4rem',cursor:'default'}} title=${'v'+CC_VERSION.v+' — Latest features:\n• Natural language app control (theme, files, viewer, tools)\n• Revit Bridge: AI-powered sync with Autodesk Revit\n• Soft clash / proximity detection\n• Light & dark theme with full UI polish\n• BCF 2.1 & 3.0 import/export\n• Floor plans, section planes & measurements\n\nBuild: '+CC_VERSION.hash+' ('+new Date(CC_VERSION.date).toLocaleDateString('en-GB',{day:'numeric',month:'long',year:'numeric'})+')'}>v${CC_VERSION.v}</span>
