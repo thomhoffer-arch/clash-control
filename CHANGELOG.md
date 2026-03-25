@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.3.0 (2026-03-25)
+- Replace +Issue button with Confirmed status on clashes
+
+## v2.2.5 (2026-03-25)
+- Move thumbs up/down into expanded training feedback section
+
+## v2.2.4 (2026-03-25)
+- Improve training feedback reason presets
+
+## v2.2.3 (2026-03-25)
+- Add data collection notice to training mode dropdown
+
 ## v2.2.1 (2026-03-25)
 - Add quick start guide with interactive walkthrough tour
 
