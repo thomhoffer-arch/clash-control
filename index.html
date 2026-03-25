@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.2.4',hash:'4790f71',date:'2026-03-25T08:28:30Z'};
+  var CC_VERSION = {v:'2.2.5',hash:'edb1fc8',date:'2026-03-25T08:36:02Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -276,6 +276,7 @@ function startApp() {
   ];
   var STAT = {
     open:          { label:'Open',          bg:'#ef4444' },
+    confirmed:     { label:'Confirmed',     bg:'#3b82f6' },
     in_progress:   { label:'In progress',   bg:'#f59e0b' },
     resolved:      { label:'Resolved',      bg:'#22c55e' },
     auto_resolved: { label:'Auto-resolved', bg:'#475569' },
@@ -7270,11 +7271,6 @@ function startApp() {
           ${EDITABLE_STATUSES.map(function(k){return html`<button key=${k}
             onClick=${function(e){e.stopPropagation();d({t:isClash?'UPD_CLASH':'UPD_ISSUE',id:it.id,u:{status:k}})}}
             style=${{...S_BTN,fontSize:'.6rem',padding:'.15rem .35rem',background:it.status===k?STAT[k].bg:'var(--bg-secondary)',color:it.status===k?'#fff':'var(--text-faint)'}}>${STAT[k].label}</button>`})}
-          ${isClash && !it.linkedIssueId && html`<button
-            onClick=${function(e){e.stopPropagation();d({t:'MODAL',v:true,el:{expressId:it.elemA,point:it.point,modelName:it.modelAName||'',props:{ifcType:it.elemAType,name:it.elemAName,storey:it.elemAStorey,material:it.elemAMaterial},_fromClash:it}});}}
-            title="Create issue from this clash"
-            style=${{...S_BTN,fontSize:'.6rem',padding:'.15rem .35rem',background:'#1e3a5f',color:'#93c5fd',border:'1px solid #3b82f644',flexShrink:0}}>+ Issue</button>`}
-          ${isClash && it.linkedIssueId && html`<span style=${{fontSize:'.55rem',color:'#4ade80',padding:'.15rem .25rem',flexShrink:0}}>✓ Issue linked</span>`}
           <button onClick=${function(e){e.stopPropagation();d({t:'ACTIVE',id:null});if(_unghostAll)_unghostAll();if(window._ccRemoveActiveClashMarker)window._ccRemoveActiveClashMarker();}}
             title="Collapse" style=${{...S_BTN,marginLeft:'auto',padding:'0 4px',background:'none',color:'var(--text-faint)',fontSize:'.7rem',flexShrink:0}}>▲</button>
         </div>

@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.2.5 (2026-03-25)
+- Move thumbs up/down into expanded training feedback section
+
 ## v2.2.4 (2026-03-25)
 - Improve training feedback reason presets
 
