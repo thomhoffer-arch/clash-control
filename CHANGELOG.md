@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.6.13 (2026-03-25)
+- Persist data notice acceptance, add Export button, fix Send error msg
+
 ## v2.6.12 (2026-03-25)
 - Allow multiple resolution selections in training feedback
 

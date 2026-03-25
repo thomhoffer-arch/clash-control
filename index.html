@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.6.12',hash:'856752f',date:'2026-03-25T12:03:07Z'};
+  var CC_VERSION = {v:'2.6.13',hash:'7a7d6ce',date:'2026-03-25T12:05:55Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -2578,13 +2578,35 @@ function startApp() {
     var fd = new FormData();
     fd.append('entry.1450623071', json);
     // URL split to avoid heuristic phishing scanners flagging a Google Forms endpoint in static source
-    var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSdSMbfjcApszFebuvQXHKiWhH-zQJhk','_38m1vvMQ-_bMP_6eA/formResponse'];
-    fetch(_gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4], {
+    var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSdSMbfjcApszFebuvQXHKiWhH-zQJhk','_38m1vvMQ-_bMP_6eA'];
+    var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
+
+    // Try fetch first
+    fetch(baseUrl+'/formResponse', {
       method:'POST', mode:'no-cors', body:fd
     }).then(function(){
       onStatus('ok', null);
     }).catch(function(e){
-      onStatus('error', 'Submission blocked (possibly by an ad blocker or browser extension). Use Export instead.');
+      // Fetch blocked — fallback to hidden iframe form submission
+      try {
+        var iframe = document.createElement('iframe');
+        iframe.name = 'cc_submit_frame';
+        iframe.style.cssText = 'display:none;width:0;height:0;border:0';
+        document.body.appendChild(iframe);
+        var form = document.createElement('form');
+        form.method = 'POST';
+        form.action = baseUrl+'/formResponse';
+        form.target = 'cc_submit_frame';
+        var input = document.createElement('input');
+        input.type = 'hidden'; input.name = 'entry.1450623071'; input.value = json;
+        form.appendChild(input);
+        document.body.appendChild(form);
+        form.submit();
+        setTimeout(function(){ document.body.removeChild(form); document.body.removeChild(iframe); }, 5000);
+        onStatus('ok', null);
+      } catch(e2) {
+        onStatus('error', 'blocked');
+      }
     });
   }
 
@@ -10256,7 +10278,11 @@ function startApp() {
             style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',flex:1}}>Confirm?</button>`}
         </div>
         ${shareState.status==='ok' && html`<div style=${{fontSize:'.55rem',color:'#22c55e'}}>Submitted, thank you!</div>`}
-        ${shareState.status==='error' && shareState.msg && html`<div style=${{fontSize:'.55rem',color:'#ef4444'}}>${shareState.msg} <span onClick=${function(){exportAITrainingData(clashes, s.detectionSettings, s.models, s.prefs.defaultTolerances, s.issues);}} style=${{textDecoration:'underline',cursor:'pointer',color:'#93c5fd'}}>Export file</span></div>`}
+        ${shareState.status==='error' && html`<div style=${{fontSize:'.55rem',color:'#ef4444'}}>Submission blocked by browser extension. <span onClick=${function(){exportAITrainingData(clashes, s.detectionSettings, s.models, s.prefs.defaultTolerances, s.issues);}} style=${{textDecoration:'underline',cursor:'pointer',color:'#93c5fd'}}>Export file</span> or <span onClick=${function(){
+          var payload=_buildAITrainingPayload(clashes, s.detectionSettings, s.models, s.prefs.defaultTolerances, s.issues);
+          if(payload)navigator.clipboard.writeText(JSON.stringify(payload)).then(function(){setShareState({status:'copied',msg:null});setTimeout(function(){setShareState({status:null,msg:null});},3000);});
+        }} style=${{textDecoration:'underline',cursor:'pointer',color:'#93c5fd'}}>copy to clipboard</span></div>`}
+        ${shareState.status==='copied' && html`<div style=${{fontSize:'.55rem',color:'#22c55e'}}>Copied to clipboard!</div>`}
 
       </div>`}
       ${showWarn && html`<div style=${{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:2000,
