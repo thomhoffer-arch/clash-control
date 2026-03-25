@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.6.2 (2026-03-25)
+- Auto-advance to next clash after confirming
+
 ## v2.6.1 (2026-03-25)
 - Persist training mode on/off across page refreshes
 
