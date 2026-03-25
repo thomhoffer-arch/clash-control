@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.12.1 (2026-03-25)
+- Fix training mode toggle-off bug + add expandable GDPR data details to popup
+
 ## v2.12.0 (2026-03-25)
 - Fix training mode not activating from popup + force SW update on iOS
 

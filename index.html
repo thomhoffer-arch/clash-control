@@ -262,7 +262,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.12.0',hash:'09f0ab2',date:'2026-03-25T21:03:28Z'};
+  var CC_VERSION = {v:'2.12.1',hash:'9962da6',date:'2026-03-25T21:06:06Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -10723,6 +10723,7 @@ function startApp() {
     })[0];
     // Animate in
     var stVisible = useState(false), vis = stVisible[0], setVis = stVisible[1];
+    var stDetails = useState(false), showDetails = stDetails[0], setShowDetails = stDetails[1];
     useEffect(function(){ if(show) requestAnimationFrame(function(){ setVis(true); }); },[show]);
     function dismiss(consentVal, enableTraining) {
       // If consent decision provided, store it
@@ -10742,8 +10743,6 @@ function startApp() {
       return function(){window.removeEventListener('keydown', onKey);};
     },[show]);
     if (!show) return null;
-
-    var stDetails = useState(false), showDetails = stDetails[0], setShowDetails = stDetails[1];
     var cardBg = 'var(--card-bg)';
     var cardBorder = 'var(--card-border)';
     var CARD = {background:cardBg,border:'1px solid '+cardBorder,borderRadius:10,padding:'.65rem .75rem',display:'flex',gap:'.6rem',alignItems:'flex-start',cursor:'default'};
