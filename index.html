@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.1.0',hash:'69c7613',date:'2026-03-25T07:55:27Z'};
+  var CC_VERSION = {v:'2.1.1',hash:'36b1d93',date:'2026-03-25T07:58:58Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -4869,18 +4869,6 @@ function startApp() {
       var edgeMat = new THREE.LineBasicMaterial({color:edgeColor, transparent:true, opacity:0.6, depthTest:true});
       var edgeLines = new THREE.LineSegments(edgeGeo, edgeMat);
       cubeGroup.add(edgeLines);
-
-      // Axis indicators at cube corner — match the AxesHelper at the grid origin
-      // X=red, Y=green, Z=blue. Extends from the -X/-Y/-Z corner outward along each axis.
-      var axLen = 0.4;
-      [{d:[1,0,0],c:0xef4444},{d:[0,1,0],c:0x22c55e},{d:[0,0,1],c:0x3b82f6}].forEach(function(ax){
-        var p0 = new THREE.Vector3(-0.5,-0.5,-0.5);
-        var p1 = new THREE.Vector3(-0.5+ax.d[0]*axLen, -0.5+ax.d[1]*axLen, -0.5+ax.d[2]*axLen);
-        var geo = new THREE.BufferGeometry().setFromPoints([p0, p1]);
-        var line = new THREE.Line(geo, new THREE.LineBasicMaterial({color:ax.c, depthTest:false}));
-        line.renderOrder = 1;
-        cubeGroup.add(line);
-      });
 
       scene.add(cubeGroup);
 
