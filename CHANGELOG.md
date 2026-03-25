@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.6.7 (2026-03-25)
+- Fix training feedback counter to include all annotation types
+
 ## v2.6.6 (2026-03-25)
 - Fix element properties in issues, add assignee field, add reason
 
