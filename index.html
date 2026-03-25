@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.3.0',hash:'4f371ba',date:'2026-03-25T08:43:07Z'};
+  var CC_VERSION = {v:'2.3.1',hash:'260744a',date:'2026-03-25T08:52:13Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -2521,7 +2521,7 @@ function startApp() {
     }).then(function(){
       onStatus('ok', null);
     }).catch(function(){
-      onStatus('error', 'Submission failed \u2014 you can export the file and share it manually instead');
+      onStatus('error', 'Submission failed \u2014 try exporting instead.');
     });
   }
 
@@ -9978,12 +9978,12 @@ function startApp() {
               border:'1px solid '+(isSending||!hasData?'var(--border)':'#7c3aed'),
               opacity:isSending?0.6:1,flex:1}}>${isSending?'Sending\u2026':'Send'}</button>
           ${!showDelConfirm && html`<button onClick=${function(){if(hasData)setShowDelConfirm(true);}} disabled=${!hasData}
-            style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:hasData?'#7f1d1d':'var(--bg-secondary)',color:hasData?'#fca5a5':'var(--text-faint)',border:'1px solid '+(hasData?'#ef444444':'var(--border)'),flex:1}}>Delete</button>`}
+            style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:'var(--bg-secondary)',color:hasData?'var(--text-secondary)':'var(--text-faint)',border:'1px solid var(--border)',flex:1}}>Delete</button>`}
           ${showDelConfirm && html`<button onClick=${function(){doDelete();setShowDelConfirm(false);}}
-            style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:'#ef4444',color:'#fff',border:'1px solid #ef4444',flex:1,animation:'pulse .6s ease-in-out infinite alternate'}}>Confirm Delete?</button>`}
+            style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',flex:1}}>Confirm?</button>`}
         </div>
         ${shareState.status==='ok' && html`<div style=${{fontSize:'.55rem',color:'#22c55e'}}>Submitted, thank you!</div>`}
-        ${shareState.status==='error' && shareState.msg && html`<div style=${{fontSize:'.55rem',color:'#ef4444'}}>${shareState.msg}</div>`}
+        ${shareState.status==='error' && shareState.msg && html`<div style=${{fontSize:'.55rem',color:'#ef4444'}}>${shareState.msg} <span onClick=${function(){exportAITrainingData(clashes, s.detectionSettings, s.models);}} style=${{textDecoration:'underline',cursor:'pointer',color:'#93c5fd'}}>Export file</span></div>`}
       </div>`}
       ${showWarn && html`<div style=${{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:2000,
         background:'rgba(0,0,0,.6)',display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'3rem 0'}}

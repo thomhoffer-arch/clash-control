@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.3.1 (2026-03-25)
+- Add unsent data warning, merge marker buttons, simplify training actions
+
 ## v2.3.0 (2026-03-25)
 - Replace +Issue button with Confirmed status on clashes
 
