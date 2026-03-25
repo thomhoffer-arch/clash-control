@@ -1,5 +1,17 @@
 # Changelog
 
+## v2.4.1 (2026-03-25)
+- Move confirmed clashes from Clashes tab to Issues tab
+
+## v2.4.0 (2026-03-25)
+- Simplify clash row to status label + green Confirmed button
+
+## v2.3.2 (2026-03-25)
+- Style Delete button neutral, improve error fallback
+
+## v2.3.1 (2026-03-25)
+- Add unsent data warning, merge marker buttons, simplify training actions
+
 ## v2.3.0 (2026-03-25)
 - Replace +Issue button with Confirmed status on clashes
 

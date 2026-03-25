@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.3.0',hash:'4f371ba',date:'2026-03-25T08:43:07Z'};
+  var CC_VERSION = {v:'2.4.1',hash:'c60a044',date:'2026-03-25T08:57:21Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -391,9 +391,38 @@ function startApp() {
         return Object.assign({},c,upd2);
       })});
       case 'CLEAR_TRAINING_DATA': return Object.assign({},s,{clashes:s.clashes.map(function(c){
-        return Object.assign({},c,{aiFeedback:null,aiReasons:[],aiNote:'',aiSignals:[],clashTypeConfirmed:null});
+        return Object.assign({},c,{aiFeedback:null,aiReasons:[],aiResolution:null,aiNote:'',aiSignals:[],clashTypeConfirmed:null});
       })});
-      case 'UPD_CLASH':   return Object.assign({},s,{clashes:s.clashes.map(function(c){
+      case 'UPD_CLASH':
+        // When confirmed, move clash to issues tab
+        if(a.u&&a.u.status==='confirmed'){
+          var cClash=null;
+          var remainClashes=s.clashes.filter(function(c){
+            if(c.id===a.id){cClash=c;return false;}
+            return true;
+          });
+          if(cClash){
+            var newIssue={
+              id:'iss_'+Date.now()+'_'+Math.random().toString(36).substr(2,6),
+              title:cClash.title,
+              description:cClash.description,
+              status:'confirmed',
+              priority:cClash.priority||'normal',
+              source:'clash',
+              clashId:cClash.id,
+              type:cClash.type,
+              elemA:cClash.elemA, elemB:cClash.elemB,
+              elemAType:cClash.elemAType, elemBType:cClash.elemBType,
+              elemAName:cClash.elemAName, elemBName:cClash.elemBName,
+              elemAStorey:cClash.elemAStorey, elemBStorey:cClash.elemBStorey,
+              modelAName:cClash.modelAName, modelBName:cClash.modelBName,
+              point:cClash.point, distance:cClash.distance,
+              created:Date.now()
+            };
+            return Object.assign({},s,{clashes:remainClashes,issues:s.issues.concat([newIssue]),activeId:null,tab:'issues'});
+          }
+        }
+        return Object.assign({},s,{clashes:s.clashes.map(function(c){
         if(c.id!==a.id) return c;
         var upd=Object.assign({},c,a.u);
         // Implicit training signal when status changes
@@ -2484,6 +2513,7 @@ function startApp() {
         bbox_b: c.bboxB || {dx:0,dy:0,dz:0},
         verdict: _AI_VERDICT_MAP[c.status] || 'unreviewed',
         reasons: c.aiReasons || [],
+        resolution: c.aiResolution || null,
         note: c.aiNote || '',
         app_version: CC_VERSION.v
       };
@@ -2521,7 +2551,7 @@ function startApp() {
     }).then(function(){
       onStatus('ok', null);
     }).catch(function(){
-      onStatus('error', 'Submission failed \u2014 you can export the file and share it manually instead');
+      onStatus('error', 'Submission failed \u2014 try exporting instead.');
     });
   }
 
@@ -7263,8 +7293,11 @@ function startApp() {
       </div>
       ${active && html`<div style=${{marginTop:'.4rem',paddingTop:'.4rem',borderTop:'1px solid var(--border)'}}>
         <div style=${{display:'flex',gap:'.25rem',marginBottom:'.4rem',flexWrap:'wrap',alignItems:'center'}}>
-          ${EDITABLE_STATUSES.map(function(k){return html`<button key=${k}
-            onClick=${function(e){e.stopPropagation();d({t:isClash?'UPD_CLASH':'UPD_ISSUE',id:it.id,u:{status:k}})}}
+          ${isClash && html`<span style=${{fontSize:'.55rem',padding:'.15rem .35rem',borderRadius:4,background:'var(--bg-secondary)',color:'var(--text-muted)',fontWeight:600}}>${(STAT[it.status||'open']||STAT.open).label}</span>`}
+          ${isClash && it.status!=='confirmed' && html`<button onClick=${function(e){e.stopPropagation();d({t:'UPD_CLASH',id:it.id,u:{status:'confirmed'}});}}
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.15rem .5rem',background:'#166534',color:'#4ade80',border:'1px solid #22c55e66',fontWeight:600}}>Confirmed</button>`}
+          ${!isClash && EDITABLE_STATUSES.map(function(k){return html`<button key=${k}
+            onClick=${function(e){e.stopPropagation();d({t:'UPD_ISSUE',id:it.id,u:{status:k}})}}
             style=${{...S_BTN,fontSize:'.6rem',padding:'.15rem .35rem',background:it.status===k?STAT[k].bg:'var(--bg-secondary)',color:it.status===k?'#fff':'var(--text-faint)'}}>${STAT[k].label}</button>`})}
           <button onClick=${function(e){e.stopPropagation();d({t:'ACTIVE',id:null});if(_unghostAll)_unghostAll();if(window._ccRemoveActiveClashMarker)window._ccRemoveActiveClashMarker();}}
             title="Collapse" style=${{...S_BTN,marginLeft:'auto',padding:'0 4px',background:'none',color:'var(--text-faint)',fontSize:'.7rem',flexShrink:0}}>▲</button>
@@ -7301,6 +7334,18 @@ function startApp() {
                   border:'1px solid '+(sel?'#3b82f6':'var(--border)'),
                   background:sel?'#1e3a5f':'var(--bg-secondary)',
                   color:sel?'#93c5fd':'var(--text-muted)'}}>${r}</span>`})}
+            </div>
+            <div style=${{fontSize:'.55rem',fontWeight:600,color:'var(--text-muted)',marginBottom:'.15rem'}}>Resolution</div>
+            <div style=${{display:'flex',gap:'.2rem',marginBottom:'.3rem',flexWrap:'wrap'}}>
+              ${[{k:'move_a',l:'Move A'},{k:'move_b',l:'Move B'},{k:'redesign',l:'Redesign'},{k:'accept',l:'Accept'}].map(function(r){
+                var sel=(it.aiResolution||null)===r.k;
+                return html`<span key=${r.k}
+                  onClick=${function(e){e.stopPropagation();d({t:'UPD_CLASH',id:it.id,u:{aiResolution:sel?null:r.k}});}}
+                  style=${{fontSize:'.55rem',padding:'.1rem .35rem',borderRadius:10,cursor:'pointer',whiteSpace:'nowrap',
+                    border:'1px solid '+(sel?'#3b82f6':'var(--border)'),
+                    background:sel?'#1e3a5f':'var(--bg-secondary)',
+                    color:sel?'#93c5fd':'var(--text-muted)'}}>${r.l}</span>`;
+              })}
             </div>
             <input type="text" value=${curNote} maxLength="140" placeholder="Optional note \u2014 no project names or locations"
               onClick=${function(e){e.stopPropagation();}}
@@ -9978,12 +10023,12 @@ function startApp() {
               border:'1px solid '+(isSending||!hasData?'var(--border)':'#7c3aed'),
               opacity:isSending?0.6:1,flex:1}}>${isSending?'Sending\u2026':'Send'}</button>
           ${!showDelConfirm && html`<button onClick=${function(){if(hasData)setShowDelConfirm(true);}} disabled=${!hasData}
-            style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:hasData?'#7f1d1d':'var(--bg-secondary)',color:hasData?'#fca5a5':'var(--text-faint)',border:'1px solid '+(hasData?'#ef444444':'var(--border)'),flex:1}}>Delete</button>`}
+            style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:'var(--bg-secondary)',color:hasData?'var(--text-secondary)':'var(--text-faint)',border:'1px solid var(--border)',flex:1}}>Delete</button>`}
           ${showDelConfirm && html`<button onClick=${function(){doDelete();setShowDelConfirm(false);}}
-            style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:'#ef4444',color:'#fff',border:'1px solid #ef4444',flex:1,animation:'pulse .6s ease-in-out infinite alternate'}}>Confirm Delete?</button>`}
+            style=${{...S_BTN,fontSize:'.55rem',padding:'.2rem .4rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',flex:1}}>Confirm?</button>`}
         </div>
         ${shareState.status==='ok' && html`<div style=${{fontSize:'.55rem',color:'#22c55e'}}>Submitted, thank you!</div>`}
-        ${shareState.status==='error' && shareState.msg && html`<div style=${{fontSize:'.55rem',color:'#ef4444'}}>${shareState.msg}</div>`}
+        ${shareState.status==='error' && shareState.msg && html`<div style=${{fontSize:'.55rem',color:'#ef4444'}}>${shareState.msg} <span onClick=${function(){exportAITrainingData(clashes, s.detectionSettings, s.models);}} style=${{textDecoration:'underline',cursor:'pointer',color:'#93c5fd'}}>Export file</span></div>`}
       </div>`}
       ${showWarn && html`<div style=${{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:2000,
         background:'rgba(0,0,0,.6)',display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'3rem 0'}}
