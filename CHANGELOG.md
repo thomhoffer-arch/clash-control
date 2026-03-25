@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.11.2 (2026-03-25)
+- Add automatic sendBeacon for NL chatbox training data
+
 ## v2.11.1 (2026-03-25)
 - Add Phase 0.5: GDPR consent popup and automatic sendBeacon data sharing
 
