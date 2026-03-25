@@ -245,7 +245,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.0.43',hash:'b86d518',date:'2026-03-25T06:29:01Z'};
+  var CC_VERSION = {v:'2.0.45',hash:'48bb1a3',date:'2026-03-25T07:04:30Z'};
 
   // Check CDN deps loaded
   var need = [];
@@ -275,9 +275,10 @@ function startApp() {
     { id:'other',         label:'Other',         c:'#f59e0b', accent:'#d97706' },
   ];
   var STAT = {
-    open:        { label:'Open',        bg:'#ef4444' },
-    in_progress: { label:'In progress', bg:'#f59e0b' },
-    resolved:    { label:'Resolved',    bg:'#22c55e' },
+    open:          { label:'Open',          bg:'#ef4444' },
+    in_progress:   { label:'In progress',   bg:'#f59e0b' },
+    resolved:      { label:'Resolved',      bg:'#22c55e' },
+    auto_resolved: { label:'Auto-resolved', bg:'#475569' },
     closed:      { label:'Closed',      bg:'#64748b' },
   };
 
@@ -291,6 +292,7 @@ function startApp() {
     search:'', status:'all', type:'all', discipline:'all',
     floor:'all', distMin:0, distMax:9999, elementId:'', selfClash:'all',
     ifcType:'all', storey:'all', material:'all', excludedTypes:[], excludedStoreys:[], excludedMaterials:[],
+    deltaState:'all', // 'all','new','persisting','auto_resolved'
     // Issue-specific filters
     priority:'all', category:'all', assignee:'all', issueElementType:'all', issueStorey:'all'
   };
@@ -349,7 +351,8 @@ function startApp() {
       lastSync:null,
       log:[]             // [{ts,type:'push'|'pull'|'info'|'error',text}]
     },
-    showRevitBridge:false
+    showRevitBridge:false,
+    lastDeltaSummary: null // {new, persisting, autoResolved, ts} — set after each merge run
   };
   function reducer(s,a) {
     switch(a.t) {
@@ -358,7 +361,8 @@ function startApp() {
       case 'UPD_MODEL':   return Object.assign({},s,{models:s.models.map(function(m){return m.id===a.id?Object.assign({},m,a.u):m})});
       case 'TOGGLE_STOREY': return Object.assign({},s,{models:s.models.map(function(m){if(m.id!==a.id)return m;var hs=Object.assign({},m.hiddenStoreys||{});if(hs[a.storey])delete hs[a.storey];else hs[a.storey]=true;return Object.assign({},m,{hiddenStoreys:hs});})});
       case 'TOGGLE_ALL_STOREYS': return Object.assign({},s,{models:s.models.map(function(m){if(m.id!==a.id)return m;return Object.assign({},m,{hiddenStoreys:a.hide?a.storeys.reduce(function(o,st){o[st]=true;return o;},{}):{}}); })});
-      case 'SET_CLASHES': var newSt={clashes:a.v, detecting:false, activeId:null, floors:deriveFloors(a.v)}; if(a.detectionSettings) newSt.detectionSettings=a.detectionSettings; if(s.prefs.resetFiltersOnRun!==false) newSt.filters=Object.assign({},INIT_FILTERS); return Object.assign({},s,newSt);
+      case 'SET_CLASHES': var newSt={clashes:a.v, detecting:false, activeId:null, floors:deriveFloors(a.v), lastDeltaSummary:null}; if(a.detectionSettings) newSt.detectionSettings=a.detectionSettings; if(s.prefs.resetFiltersOnRun!==false) newSt.filters=Object.assign({},INIT_FILTERS); return Object.assign({},s,newSt);
+      case 'MERGE_CLASHES': var _mc=mergeDetectionResults(a.v, s.clashes); var _nw=0,_pe=0,_ar=0; _mc.forEach(function(c){if(c._delta==='new')_nw++;else if(c._delta==='persisting')_pe++;else if(c._delta==='auto_resolved')_ar++;}); var mSt={clashes:_mc,detecting:false,activeId:null,floors:deriveFloors(_mc),lastDeltaSummary:{newCount:_nw,persisting:_pe,autoResolved:_ar,ts:Date.now()}}; if(a.detectionSettings)mSt.detectionSettings=a.detectionSettings; if(s.prefs.resetFiltersOnRun!==false)mSt.filters=Object.assign({},INIT_FILTERS); return Object.assign({},s,mSt);
       case 'DETECTING':   return Object.assign({},s,{detecting:true});
       case 'SWITCHING_PROJECT': return Object.assign({},s,{switchingProject:!!a.v});
       case 'ADD_ISSUE':
@@ -2065,6 +2069,96 @@ function startApp() {
     });
   }
 
+  // ── Clash Identity & Delta Merge ──────────────────────────────
+
+  function computeClashIdentityKey(clash) {
+    // Prefer GlobalIDs (stable across re-exports), fall back to expressID
+    var idA = (clash.globalIdA && clash.globalIdA !== '') ? clash.globalIdA : ('eid:'+clash.elemA);
+    var idB = (clash.globalIdB && clash.globalIdB !== '') ? clash.globalIdB : ('eid:'+clash.elemB);
+    // Sort pair so A/B labelling order doesn't matter
+    var pair = idA < idB ? idA+'|'+idB : idB+'|'+idA;
+    // Quantise contact point to 500mm grid cell
+    var p = clash.point || [0,0,0];
+    var gx = Math.round(p[0] / 0.5);
+    var gy = Math.round(p[1] / 0.5);
+    var gz = Math.round(p[2] / 0.5);
+    return pair + '@' + gx + ',' + gy + ',' + gz;
+  }
+
+  function mergeDetectionResults(newClashes, prevClashes) {
+    if (!prevClashes || prevClashes.length === 0) {
+      // First ever run — tag everything as new
+      var now0 = Date.now();
+      return newClashes.map(function(c) {
+        return Object.assign({}, c, {_identityKey:computeClashIdentityKey(c), _delta:'new', _firstSeen:now0, _lastSeen:now0, _runCount:1});
+      });
+    }
+    var now = Date.now();
+    // Build lookup: identity key → previous clash (also index adjacent cells)
+    var prevByKey = {};
+    prevClashes.forEach(function(c) {
+      var key = c._identityKey || computeClashIdentityKey(c);
+      prevByKey[key] = c;
+    });
+
+    var newKeys = {};
+    var merged = newClashes.map(function(c) {
+      var key = computeClashIdentityKey(c);
+      newKeys[key] = true;
+      // Try exact match first
+      var prev = prevByKey[key];
+      // If no exact match, check 26 adjacent grid cells (handles contact point drift across cell boundary)
+      if (!prev) {
+        var p = c.point || [0,0,0];
+        var gx = Math.round(p[0]/0.5), gy = Math.round(p[1]/0.5), gz = Math.round(p[2]/0.5);
+        var idA = (c.globalIdA && c.globalIdA!=='') ? c.globalIdA : ('eid:'+c.elemA);
+        var idB = (c.globalIdB && c.globalIdB!=='') ? c.globalIdB : ('eid:'+c.elemB);
+        var pair = idA < idB ? idA+'|'+idB : idB+'|'+idA;
+        outer: for (var dx=-1; dx<=1; dx++) { for (var dy=-1; dy<=1; dy++) { for (var dz=-1; dz<=1; dz++) {
+          if (dx===0 && dy===0 && dz===0) continue;
+          var adjKey = pair+'@'+(gx+dx)+','+(gy+dy)+','+(gz+dz);
+          var cand = prevByKey[adjKey];
+          if (cand) {
+            var pp = cand.point||[0,0,0];
+            var distMm = Math.sqrt(Math.pow((p[0]-pp[0])*1000,2)+Math.pow((p[1]-pp[1])*1000,2)+Math.pow((p[2]-pp[2])*1000,2));
+            if (distMm <= 300) { prev = cand; newKeys[adjKey] = true; break outer; }
+          }
+        }}}
+      }
+      if (prev) {
+        // Persisting — carry forward human state, update geometry
+        return Object.assign({}, c, {
+          id: prev.id,
+          _identityKey: key,
+          _delta: 'persisting',
+          _firstSeen: prev._firstSeen || now,
+          _lastSeen: now,
+          _runCount: (prev._runCount || 1) + 1,
+          _prevDepth: prev.distance,
+          _prevPoint: prev.point,
+          status: prev.status === 'auto_resolved' ? 'open' : prev.status,
+          aiSignals: prev.aiSignals,
+          aiFeedback: prev.aiFeedback,
+          aiReasons: prev.aiReasons,
+          aiNote: prev.aiNote,
+          clashTypeConfirmed: prev.clashTypeConfirmed,
+          linkedIssueId: prev.linkedIssueId,
+        });
+      }
+      return Object.assign({}, c, {_identityKey:key, _delta:'new', _firstSeen:now, _lastSeen:now, _runCount:1});
+    });
+
+    // Auto-resolve open clashes no longer detected
+    prevClashes.forEach(function(c) {
+      var key = c._identityKey || computeClashIdentityKey(c);
+      if (!newKeys[key] && (c.status==='open' || c.status==='in_progress')) {
+        merged.push(Object.assign({}, c, {_delta:'auto_resolved', _lastSeen:now, status:'auto_resolved'}));
+      }
+    });
+
+    return merged;
+  }
+
   // ── Save / Load Project ────────────────────────────────────────
 
   function saveProject(s) {
@@ -2079,6 +2173,7 @@ function startApp() {
       clashes: s.clashes,
       issues:  s.issues,
       floors:  s.floors,
+      lastDeltaSummary: s.lastDeltaSummary || null,
       viewpoints: (s.viewpoints||[]).map(function(v){return Object.assign({},v,{snapshot:undefined})}),
       measurements: s.measurements||[],
     };
@@ -5015,6 +5110,7 @@ function startApp() {
       clashes:s.clashes, issues:s.issues, rules:s.rules, floors:s.floors,
       viewpoints:(s.viewpoints||[]).map(function(v){return Object.assign({},v,{snapshot:undefined})}),
       measurements:s.measurements||[], filters:s.filters,
+      lastDeltaSummary:s.lastDeltaSummary||null,
       modelMeta:s.models.map(function(m){return {id:m.id,name:m.name,discipline:m.discipline,color:m.color,visible:m.visible};})
     };
     return idbSaveProjectData(pid, data);
@@ -5030,7 +5126,11 @@ function startApp() {
     // Load project data (modelMeta, clashes, etc.) FIRST so that modelMeta
     // is in state before any ADD_MODEL fires — otherwise visibility is lost.
     idbGetProjectData(pid).then(function(data){
-      if(data) d({t:'LOAD_PROJECT_STATE', data:data});
+      if(data) {
+        // Strip stale delta pills — _delta is only valid within the session that produced it
+        if(data.clashes) data.clashes = data.clashes.map(function(c){ return c._delta ? Object.assign({},c,{_delta:null}) : c; });
+        d({t:'LOAD_PROJECT_STATE', data:data});
+      }
     }).then(function(){
       return idbGetProjectFiles(pid);
     }).then(function(stored){
@@ -5073,7 +5173,7 @@ function startApp() {
     // Reset state to fresh (keep switchingProject:true while files load)
     d({t:'LOAD_PROJECT_STATE', data:{
       models:[], clashes:[], issues:[], activeId:null, detecting:false,
-      switchingProject:true,
+      switchingProject:true, lastDeltaSummary:null,
       sectionAxis:null, sectionPos:0.5, sectionCustom:null, sectionBox:null,
       filters:Object.assign({},INIT_FILTERS), floors:[],
       measurements:[], measureMode:null, viewpoints:[],
@@ -5941,7 +6041,7 @@ function startApp() {
 
   // ── Clash Stats Bar ──────────────────────────────────────────
   function ClashStatsBar(props) {
-    var items = props.items, isClash = props.isClash;
+    var items = props.items, isClash = props.isClash, delta = props.delta;
     if (!items.length) return null;
     var total = items.length;
     var open = items.filter(function(c){return c.status==='open';}).length;
@@ -5977,6 +6077,12 @@ function startApp() {
         ${isClash && soft > 0 && CHIP('Soft', soft, '#78350f', '#fcd34d')}
         ${isClash && dup > 0 && CHIP('Dup', dup, '#4c1d95', '#c4b5fd')}
       </div>
+      ${isClash && delta && html`<div style=${{display:'flex',gap:'.3rem',marginTop:'.25rem',alignItems:'center',flexWrap:'wrap'}}>
+        <span style=${{fontSize:'.55rem',color:'var(--text-faint)',flexShrink:0}}>This run:</span>
+        ${delta.newCount > 0 && html`<span style=${{fontSize:'.58rem',padding:'1px 5px',borderRadius:99,background:'#1e3a5f',color:'#60a5fa',fontWeight:700,whiteSpace:'nowrap'}}>${delta.newCount} new</span>`}
+        ${delta.persisting > 0 && html`<span style=${{fontSize:'.58rem',padding:'1px 5px',borderRadius:99,background:'var(--tag-bg)',color:'var(--text-secondary)',fontWeight:600,whiteSpace:'nowrap'}}>${delta.persisting} unchanged</span>`}
+        ${delta.autoResolved > 0 && html`<span style=${{fontSize:'.58rem',padding:'1px 5px',borderRadius:99,background:'#0f172a',color:'#64748b',fontWeight:600,whiteSpace:'nowrap'}}>${delta.autoResolved} auto-resolved</span>`}
+      </div>`}
     </div>`;
   }
 
@@ -6069,7 +6175,7 @@ function startApp() {
       _confirmIfClashes(function(){
         var ds = _captureDetectionSettings(s.rules, s.models);
         d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
-        setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, s.rules), detectionSettings:ds}); }, 20);
+        setTimeout(function(){ d({t:'MERGE_CLASHES', v:detectClashes(s.models, s.rules), detectionSettings:ds}); }, 20);
       });
     }
     function applyAndRun(preset) {
@@ -6079,7 +6185,7 @@ function startApp() {
         var ds = _captureDetectionSettings(merged, s.models);
         d({t:'UPD_RULES', u:preset.r});
         d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
-        setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, merged), detectionSettings:ds}); }, 20);
+        setTimeout(function(){ d({t:'MERGE_CLASHES', v:detectClashes(s.models, merged), detectionSettings:ds}); }, 20);
       });
     }
 
@@ -6142,7 +6248,7 @@ function startApp() {
                   if(!canRun)return;
                   var merged=Object.assign({},s.rules,sp.rules);
                   d({t:'UPD_RULES',u:sp.rules});d({t:'DETECTING'});d({t:'TAB',v:'clashes'});
-                  setTimeout(function(){d({t:'SET_CLASHES',v:detectClashes(s.models,merged)});},20);
+                  setTimeout(function(){d({t:'MERGE_CLASHES',v:detectClashes(s.models,merged)});},20);
                 }} disabled=${!canRun} title="Load & Run"
                   style=${{...S_BTN,fontSize:'.55rem',padding:'.15rem .25rem',background:'var(--accent-bg)',color:'var(--accent-subtle)',borderRadius:'0',borderLeft:'1px solid var(--border-subtle)'}}>▶</button>
                 <button onClick=${function(){
@@ -6328,6 +6434,7 @@ function startApp() {
     if(f.assignee!=='all') activeCount++;
     if(f.issueElementType!=='all') activeCount++;
     if(f.issueStorey!=='all') activeCount++;
+    if(f.deltaState && f.deltaState!=='all') activeCount++;
 
     // Apply all filters
     var items = useMemo(function(){
@@ -6359,6 +6466,7 @@ function startApp() {
           if(f.excludedMaterials&&f.excludedMaterials.length){var exm=f.excludedMaterials;if(exm.indexOf(it.elemAMaterial)!==-1||exm.indexOf(it.elemBMaterial)!==-1) return false;}
           if(f.storey!=='all' && it.elemAStorey!==f.storey && it.elemBStorey!==f.storey) return false;
           if(f.material!=='all' && it.elemAMaterial!==f.material && it.elemBMaterial!==f.material) return false;
+          if(f.deltaState && f.deltaState!=='all' && it._delta!==f.deltaState) return false;
         } else {
           // Issue-specific filters
           if(f.priority!=='all' && it.priority!==f.priority) return false;
@@ -6391,7 +6499,7 @@ function startApp() {
           </button>`})}
       </div>`}
 
-      ${!isExplorerTab && rawItems.length > 0 && html`<${ClashStatsBar} items=${rawItems} isClash=${isClashTab} />`}
+      ${!isExplorerTab && rawItems.length > 0 && html`<${ClashStatsBar} items=${rawItems} isClash=${isClashTab} delta=${isClashTab ? s.lastDeltaSummary : null} />`}
       ${isClashTab && html`<${ClashRulesPanel} s=${s} d=${d} />`}
 
       ${s.tab==='explorer' && html`<${ExplorerPanel} s=${s} d=${d} />`}
@@ -6427,6 +6535,14 @@ function startApp() {
           </div>
         </div>
 
+
+        ${isClashTab && s.clashes.some(function(c){return c._delta;}) && html`<div>
+          <span style=${FL}>Run delta</span>
+          <div style=${{display:'flex',gap:'.2rem',flexWrap:'wrap'}}>
+            ${[['all','All'],['new','New'],['persisting','Persisting'],['auto_resolved','Auto-resolved']].map(function(pair){return html`<button key=${pair[0]} onClick=${function(){d({t:'UPD_FILTERS',u:{deltaState:pair[0]}})}}
+              style=${PILL(f.deltaState===pair[0]||(!f.deltaState&&pair[0]==='all'))}>${pair[1]}</button>`;})}
+          </div>
+        </div>`}
 
         ${isClashTab && html`<div>
           <span style=${FL}>Self / Cross-model</span>
@@ -6996,6 +7112,8 @@ function startApp() {
         <div style=${{flex:1,minWidth:0}}>
           <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
             ${isClash && typeLabel && html`<span style=${{fontSize:'.55rem',padding:'.1rem .3rem',borderRadius:3,background:typeBg,color:typeCol,fontWeight:700,flexShrink:0}}>${typeLabel}</span>`}
+            ${isClash && it._delta==='new' && html`<span title="New this run" style=${{fontSize:'.5rem',padding:'.05rem .25rem',borderRadius:3,background:'#1e3a5f',color:'#60a5fa',fontWeight:700,flexShrink:0,letterSpacing:'.03em'}}>NEW</span>`}
+            ${isClash && it._delta==='auto_resolved' && html`<span title="No longer detected" style=${{fontSize:'.5rem',padding:'.05rem .25rem',borderRadius:3,background:'#1e293b',color:'#94a3b8',fontWeight:600,flexShrink:0}}>AUTO</span>`}
             <span style=${{color:'var(--text-primary)',fontSize:'.7rem',fontWeight:500,whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',flex:1}}>${it.title}</span>
             <span style=${{fontSize:'.55rem',padding:'.1rem .35rem',borderRadius:4,background:stBg+'22',color:stBg,fontWeight:600,flexShrink:0,whiteSpace:'nowrap'}}>${(STAT[it.status]||STAT.open).label}</span>
             ${isClash && trainingMode && function(){
@@ -7024,9 +7142,14 @@ function startApp() {
       </div>
       ${active && html`<div style=${{marginTop:'.4rem',paddingTop:'.4rem',borderTop:'1px solid var(--border)'}}>
         <div style=${{display:'flex',gap:'.25rem',marginBottom:'.4rem',flexWrap:'wrap',alignItems:'center'}}>
-          ${Object.keys(STAT).map(function(k){return html`<button key=${k}
+          ${Object.keys(STAT).filter(function(k){return k!=='auto_resolved';}).map(function(k){return html`<button key=${k}
             onClick=${function(e){e.stopPropagation();d({t:isClash?'UPD_CLASH':'UPD_ISSUE',id:it.id,u:{status:k}})}}
             style=${{...S_BTN,fontSize:'.6rem',padding:'.15rem .35rem',background:it.status===k?STAT[k].bg:'var(--bg-secondary)',color:it.status===k?'#fff':'var(--text-faint)'}}>${STAT[k].label}</button>`})}
+          ${isClash && !it.linkedIssueId && html`<button
+            onClick=${function(e){e.stopPropagation();d({t:'MODAL',v:true,el:{expressId:it.elemA,point:it.point,modelName:it.modelAName||'',props:{ifcType:it.elemAType,name:it.elemAName,storey:it.elemAStorey,material:it.elemAMaterial},_fromClash:it}});}}
+            title="Create issue from this clash"
+            style=${{...S_BTN,fontSize:'.6rem',padding:'.15rem .35rem',background:'#1e3a5f',color:'#93c5fd',border:'1px solid #3b82f644',flexShrink:0}}>+ Issue</button>`}
+          ${isClash && it.linkedIssueId && html`<span style=${{fontSize:'.55rem',color:'#4ade80',padding:'.15rem .25rem',flexShrink:0}}>✓ Issue linked</span>`}
           <button onClick=${function(e){e.stopPropagation();d({t:'ACTIVE',id:null});if(_unghostAll)_unghostAll();if(window._ccRemoveActiveClashMarker)window._ccRemoveActiveClashMarker();}}
             title="Collapse" style=${{...S_BTN,marginLeft:'auto',padding:'0 4px',background:'none',color:'var(--text-faint)',fontSize:'.7rem',flexShrink:0}}>▲</button>
         </div>
@@ -7075,10 +7198,15 @@ function startApp() {
   function NewIssueModal(props) {
     var d=props.d, el=props.el, pr=props.prefs||{};
     var clashes=props.clashes||[], activeId=props.activeId;
-    var ep = el ? el.props||{} : null;
+    var ep = el ? (el.props||{}) : null;
+    var fromClash = el ? el._fromClash : null; // clash object when opened via "+ Issue" button
     var hasEl = !!el;
-    var defaultTitle = hasEl ? ('Issue: '+(ep.ifcType||'Element')+' '+(ep.name||'#'+el.expressId)) : '';
-    var defaultDesc = '';
+    var defaultTitle = fromClash
+      ? ('Clash: '+(fromClash.elemAType||'Elem A')+' vs '+(fromClash.elemBType||'Elem B')+(fromClash.elemAStorey?' · '+fromClash.elemAStorey:''))
+      : (hasEl ? ('Issue: '+(ep.ifcType||'Element')+' '+(ep.name||'#'+el.expressId)) : '');
+    var defaultDesc = fromClash
+      ? ((fromClash.elemAName||fromClash.elemAType||'Element A')+' clashes with '+(fromClash.elemBName||fromClash.elemBType||'Element B')+(fromClash.distance!=null?' ('+fromClash.distance+'mm gap)':'')+'.')
+      : '';
 
     var f=useState({title:defaultTitle,desc:defaultDesc,priority:pr.defaultPriority||'normal',status:pr.defaultStatus||'open',category:pr.defaultCategory||'design',assignee:'',dueDate:''}), form=f[0], setForm=f[1];
     useEffect(function(){
@@ -7105,9 +7233,16 @@ function startApp() {
         issue.material = ep.material||'';
         issue.elementProps = ep;
         // Link to active clash for training signal
-        if (activeId) {
+        if (fromClash) {
+          issue.clashId = fromClash.id;
+          issue.clashIdentityKey = fromClash._identityKey;
+          issue.point = fromClash.point;
+          issue.storey = fromClash.elemAStorey || fromClash.elemBStorey || '';
+          // Mark the clash as having a linked issue (stable across runs via identity key)
+          d({t:'UPD_CLASH', id:fromClash.id, u:{linkedIssueId:issue.id, status:'in_progress'}});
+        } else if (activeId) {
           var linkedClash = clashes.find(function(c){return c.id===activeId && (c.elemA===el.expressId || c.elemB===el.expressId);});
-          if (linkedClash) issue.clashId = linkedClash.id;
+          if (linkedClash) { issue.clashId = linkedClash.id; issue.clashIdentityKey = linkedClash._identityKey; }
         }
       }
       d({t:'ADD_ISSUE',v:issue});
@@ -7118,12 +7253,23 @@ function startApp() {
     var LBL={fontSize:'.7rem',color:'var(--text-muted)',display:'block',marginBottom:'.2rem'};
     var ROW={display:'flex',justifyContent:'space-between',padding:'.1rem 0'};
     var LS={fontSize:'.6rem',color:'var(--text-muted)'}; var VS={fontSize:'.6rem',color:'var(--text-primary)'};
-    return html`<div style=${MS} role="dialog" aria-label=${hasEl?'New Element Issue':'New Issue'}><div style=${MX}>
+    return html`<div style=${MS} role="dialog" aria-label=${fromClash?'New Issue from Clash':hasEl?'New Element Issue':'New Issue'}><div style=${MX}>
       <div style=${{display:'flex',justifyContent:'space-between',padding:'.8rem 1rem',borderBottom:'1px solid var(--border)'}}>
-        <span style=${{fontWeight:600,fontSize:'.875rem'}}>${hasEl?'New Element Issue':'New Issue'}</span>
+        <span style=${{fontWeight:600,fontSize:'.875rem'}}>${fromClash?'New Issue from Clash':hasEl?'New Element Issue':'New Issue'}</span>
         <button onClick=${function(){d({t:'MODAL',v:false})}} style=${{...S_BTN,background:'none',color:'var(--text-muted)',fontSize:'1.1rem',padding:0}} aria-label="Close modal">✕</button>
       </div>
-      ${hasEl && html`<div style=${{padding:'.6rem 1rem',borderBottom:'1px solid var(--border)',background:'var(--bg-primary)'}}>
+      ${fromClash && html`<div style=${{padding:'.6rem 1rem',borderBottom:'1px solid var(--border)',background:'var(--bg-primary)'}}>
+        <div style=${{fontSize:'.65rem',fontWeight:600,color:'#93c5fd',marginBottom:'.3rem'}}>From Clash</div>
+        <div style=${{display:'flex',flexWrap:'wrap',gap:'.3rem',marginBottom:'.2rem'}}>
+          ${fromClash.elemAType && html`<span style=${{fontSize:'.6rem',background:'#1e3a5f',color:'#93c5fd',padding:'.1rem .4rem',borderRadius:4}}>${fromClash.elemAType}</span>`}
+          <span style=${{fontSize:'.6rem',color:'var(--text-faint)',alignSelf:'center'}}>vs</span>
+          ${fromClash.elemBType && html`<span style=${{fontSize:'.6rem',background:'#1e3a5f',color:'#93c5fd',padding:'.1rem .4rem',borderRadius:4}}>${fromClash.elemBType}</span>`}
+          ${fromClash.elemAStorey && html`<span style=${{fontSize:'.6rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',padding:'.1rem .4rem',borderRadius:4}}>${fromClash.elemAStorey}</span>`}
+          ${fromClash.distance!=null && html`<span style=${{fontSize:'.6rem',background:'var(--bg-secondary)',color:'var(--text-muted)',padding:'.1rem .4rem',borderRadius:4}}>${fromClash.distance===0?'touching':fromClash.distance+'mm gap'}</span>`}
+        </div>
+        <div style=${{fontSize:'.55rem',color:'var(--text-faint)'}}>${fromClash.elemAName||''} · ${fromClash.elemBName||''}</div>
+      </div>`}
+      ${hasEl && !fromClash && html`<div style=${{padding:'.6rem 1rem',borderBottom:'1px solid var(--border)',background:'var(--bg-primary)'}}>
         <div style=${{fontSize:'.65rem',fontWeight:600,color:'#93c5fd',marginBottom:'.3rem'}}>Linked Element</div>
         <div style=${{display:'flex',flexWrap:'wrap',gap:'.3rem'}}>
           ${ep.ifcType && html`<span style=${{fontSize:'.6rem',background:'#1e3a5f',color:'#93c5fd',padding:'.1rem .4rem',borderRadius:4}}>${ep.ifcType}</span>`}
@@ -7141,7 +7287,7 @@ function startApp() {
         <div style=${{display:'flex',gap:'.5rem'}}>
           <div style=${{flex:1}}><label style=${LBL}>Status</label>
             <select value=${form.status} onChange=${upd('status')} style=${S_INPUT}>
-              ${Object.keys(STAT).map(function(k){return html`<option key=${k} value=${k}>${STAT[k].label}</option>`})}
+              ${Object.keys(STAT).filter(function(k){return k!=='auto_resolved';}).map(function(k){return html`<option key=${k} value=${k}>${STAT[k].label}</option>`})}
             </select></div>
           <div style=${{flex:1}}><label style=${LBL}>Priority</label>
             <select value=${form.priority} onChange=${upd('priority')} style=${S_INPUT}>
@@ -8820,7 +8966,7 @@ function startApp() {
         if (/run/.test(text) && s.models.length && !s.detecting) {
           var merged = Object.assign({}, s.rules, found.rules);
           d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
-          setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, merged)}); }, 20);
+          setTimeout(function(){ d({t:'MERGE_CLASHES', v:detectClashes(s.models, merged)}); }, 20);
           return 'Running "' + found.name + '" preset…';
         }
         return 'Loaded preset "' + found.name + '". Say "run" to detect.';
@@ -8835,7 +8981,7 @@ function startApp() {
       if (!s.models.length) return 'No models loaded yet.';
       if (s.detecting) return 'Already running…';
       d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
-      setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models,s.rules)}); }, 20);
+      setTimeout(function(){ d({t:'MERGE_CLASHES', v:detectClashes(s.models,s.rules)}); }, 20);
       var r2 = s.rules;
       return 'Running clash detection' + (r2.maxGap ? ' with ' + r2.maxGap + 'mm max gap' : '') + '…';
     }
@@ -9251,7 +9397,7 @@ function startApp() {
       d({t:'UPD_RULES', u:rules});
       if (s.detecting) return;
       d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
-      setTimeout(function(){ d({t:'SET_CLASHES', v:detectClashes(s.models, Object.assign({},s.rules,rules))}); }, 20);
+      setTimeout(function(){ d({t:'MERGE_CLASHES', v:detectClashes(s.models, Object.assign({},s.rules,rules))}); }, 20);
     }
 
     function send() {
