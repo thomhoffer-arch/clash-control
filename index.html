@@ -249,7 +249,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.1.29',hash:'7575537',date:'2026-03-26T13:02:24Z'};
+  var CC_VERSION = {v:'3.1.30',hash:'e1f40e7',date:'2026-03-26T13:06:01Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -10778,7 +10778,7 @@ function startApp() {
         onClick=${function(){ setOpen(true); }}
         title=${isDetecting ? 'Clash detection running…' : modelLoading ? 'Model is loading… click to set up clashes' : 'ClashControl — describe tasks in plain English ( / )'}
         style=${{
-          position:'fixed', bottom:'1.5rem', left:'50%', transform:'translateX(-50%)',
+          position:'absolute', bottom:'1.5rem', left:'50%', transform:'translateX(-50%)',
           zIndex:1200, display:'flex', alignItems:'center', gap:'.5rem',
           padding:'.55rem 2rem', borderRadius:999, minWidth:280,justifyContent:'center',
           background:panelBg, border:closedBorder,
@@ -10800,8 +10800,8 @@ function startApp() {
     var backendLabel = backend === 'ollama' ? 'Ollama (' + _ollamaModel + ')' : backend === 'browser' ? 'In-browser (0.5B)' : null;
     var backendColor = backend === 'ollama' ? '#22c55e' : backend === 'browser' ? '#f59e0b' : mutedCol;
     return html`<div class="cc-nlpanel" style=${{
-      position:'fixed', bottom:'1rem', left:'50%', transform:'translateX(-50%)',
-      zIndex:1200, width:'min('+panelW+'px, calc(100vw - 2rem))',
+      position:'absolute', bottom:'1rem', left:'50%', transform:'translateX(-50%)',
+      zIndex:1200, width:'min('+panelW+'px, calc(100% - 2rem))',
       background:panelBg, border:'1px solid '+panelBorderCol,
       borderRadius:12, boxShadow:'var(--shadow-lg)',
       display:'flex', flexDirection:'column', overflow:'hidden',
@@ -11137,7 +11137,7 @@ function startApp() {
       return function(){ window.removeEventListener('cc-training-data-change', sync); window.removeEventListener('cc-training-sent', flash); };
     },[]);
 
-    return html`<div style=${{position:'fixed',top:'3.5rem',left:'50%',transform:'translateX(-50%)',
+    return html`<div style=${{position:'absolute',top:'3.5rem',left:'50%',transform:'translateX(-50%)',
       zIndex:20,pointerEvents:'auto',display:'flex',flexDirection:'column',alignItems:'center'}}>
       <div class="cc-training-btn-3d" style=${{display:'flex',alignItems:'center',
           borderRadius:999,
@@ -12158,13 +12158,13 @@ function startApp() {
         <${Header} s=${s} d=${d} />
         ${is2D ? html`<${View2D} s=${s} d=${d} />` : html`<${Viewer} s=${s} d=${d} />`}
         ${is2D && html`<${ExportBar} s=${s} d=${d} />`}
+        <${NLCommandPanel} s=${s} d=${d} />
       </div>
       <${SidePanel} s=${s} d=${d} />
       <${RightRail} s=${s} d=${d} />
       ${s.showModal && html`<${NewIssueModal} d=${d} el=${s.modalElement} prefs=${s.prefs} clashes=${s.clashes} activeId=${s.activeId} />`}
       ${s.showSettings && html`<${SettingsModal} d=${d} prefs=${s.prefs} models=${s.models} rules=${s.rules} />`}
       ${s.showRevitBridge && html`<${RevitBridgePanel} s=${s} d=${d} />`}
-      <${NLCommandPanel} s=${s} d=${d} />
       <${MobileNav} s=${s} d=${d} />
       <${WelcomePopup} d=${d} />
       <${TrainingModePopup} d=${d} active=${s.trainingMode} />
