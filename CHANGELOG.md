@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.0.13 (2026-03-26)
+- Set orbit target to clash point when marker is shown
+
 ## v3.0.12 (2026-03-26)
 - Make training pill data counts reactive — update every 3 seconds
 

@@ -249,7 +249,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.0.12',hash:'de15507',date:'2026-03-26T09:04:08Z'};
+  var CC_VERSION = {v:'3.0.13',hash:'aac4834',date:'2026-03-26T09:06:48Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -2546,10 +2546,12 @@ function startApp() {
         while(keys.length > _CLASH_TRAIN_CAP) { delete store[keys.shift()]; }
       }
       localStorage.setItem('cc_clash_training_data', JSON.stringify(store));
+      window.dispatchEvent(new Event('cc-training-data-change'));
     } catch(e) {}
   }
   function _clearClashTrainStore() {
     try { localStorage.removeItem('cc_clash_training_data'); } catch(e) {}
+    window.dispatchEvent(new Event('cc-training-data-change'));
   }
   function _getClashTrainCount() {
     try { var s = localStorage.getItem('cc_clash_training_data'); return s ? Object.keys(JSON.parse(s)).length : 0; } catch(e) { return 0; }
@@ -2567,6 +2569,7 @@ function startApp() {
     var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSdSMbfjcApszFebuvQXHKiWhH-zQJhk','_38m1vvMQ-_bMP_6eA'];
     var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
     fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
+      _clearClashTrainStore();
       onStatus('ok',null);
     }).catch(function(){
       try{
@@ -2594,10 +2597,12 @@ function startApp() {
       store.push({input:input, output:output, meta:meta});
       while (store.length > _NL_TRAIN_CAP) store.shift();
       localStorage.setItem('cc_nl_training_data', JSON.stringify(store));
+      window.dispatchEvent(new Event('cc-training-data-change'));
     } catch(e) {}
   }
   function _clearNLTrainStore() {
     try { localStorage.removeItem('cc_nl_training_data'); } catch(e) {}
+    window.dispatchEvent(new Event('cc-training-data-change'));
   }
   function _getNLTrainCount() {
     try { var s = localStorage.getItem('cc_nl_training_data'); return s ? JSON.parse(s).length : 0; } catch(e) { return 0; }
@@ -2705,8 +2710,8 @@ function startApp() {
     fd.append('entry.908589612', json);
     var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSdSMbfjcApszFebuvQXHKiWhH-zQJhk','_38m1vvMQ-_bMP_6eA'];
     var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
-    var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
     fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
+      _clearNLTrainStore();
       onStatus('ok',null);
     }).catch(function(){
       try{
@@ -10903,12 +10908,13 @@ function startApp() {
 
     function doDelete() { d({t:A.CLEAR_TRAINING_DATA}); }
     var hasData = feedbackCount > 0;
-    // Reactive data counts — poll localStorage so pill updates after sends/new records
+    // Reactive data counts — update when training data changes
     var stNlN = useState(function(){return _getNLTrainCount();}), nlN=stNlN[0], setNlN=stNlN[1];
     var stClN = useState(function(){return _getClashTrainCount();}), clashN=stClN[0], setClashN=stClN[1];
     useEffect(function(){
-      var iv = setInterval(function(){ setNlN(_getNLTrainCount()); setClashN(_getClashTrainCount()); }, 3000);
-      return function(){ clearInterval(iv); };
+      function sync(){ setNlN(_getNLTrainCount()); setClashN(_getClashTrainCount()); }
+      window.addEventListener('cc-training-data-change', sync);
+      return function(){ window.removeEventListener('cc-training-data-change', sync); };
     },[]);
 
     return html`<div style=${{position:'absolute',top:'2.6rem',left:'50%',transform:'translateX(-50%)',
@@ -11011,7 +11017,9 @@ function startApp() {
     fd.append('entry.1450623071', json);
     var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSdSMbfjcApszFebuvQXHKiWhH-zQJhk','_38m1vvMQ-_bMP_6eA'];
     var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
-    fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).catch(function(){});
+    fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
+      _clearClashTrainStore();
+    }).catch(function(){});
     unsent.forEach(function(c){ _beaconSentIds[c.id]=true; });
   }
 
@@ -11038,7 +11046,9 @@ function startApp() {
     fd.append('entry.908589612', json);
     var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSdSMbfjcApszFebuvQXHKiWhH-zQJhk','_38m1vvMQ-_bMP_6eA'];
     var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
-    fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).catch(function(){});
+    fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
+      _clearNLTrainStore();
+    }).catch(function(){});
     _beaconNLSentIdx = store.length;
   }
 
