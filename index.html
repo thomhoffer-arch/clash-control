@@ -249,7 +249,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.1.0',hash:'47cb498',date:'2026-03-26T09:22:14Z'};
+  var CC_VERSION = {v:'3.1.1',hash:'0feb803',date:'2026-03-26T09:24:39Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -11085,6 +11085,48 @@ function startApp() {
               border:'none',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:'.4rem'}}>
             Take the Interactive Tour
           </button>
+
+          <!-- Roadmap -->
+          <div style=${{borderTop:'1px solid var(--border-subtle)',marginTop:'1.1rem',paddingTop:'.8rem'}}>
+            <div style=${{fontSize:'0.94rem',fontWeight:700,color:'var(--text-primary)',marginBottom:'.5rem'}}>Roadmap</div>
+            <div style=${{display:'flex',flexDirection:'column',gap:'.4rem',fontSize:'0.83rem'}}>
+              <div style=${{display:'flex',alignItems:'center',gap:'.4rem'}}>
+                <span style=${{color:'#22c55e',fontSize:'0.9rem'}}>✓</span>
+                <span style=${{color:'var(--text-muted)',textDecoration:'line-through'}}>Open-source launch</span>
+              </div>
+              <div style=${{display:'flex',alignItems:'center',gap:'.4rem'}}>
+                <span style=${{color:'#a78bfa',fontSize:'0.9rem',animation:'nlBorderPulse 2s ease-in-out infinite'}}>◉</span>
+                <span style=${{color:'var(--text-primary)',fontWeight:600}}>Gather training data for AI clash classifier</span>
+              </div>
+              <div style=${{display:'flex',alignItems:'center',gap:'.4rem'}}>
+                <span style=${{color:'var(--text-faint)',fontSize:'0.9rem'}}>○</span>
+                <span style=${{color:'var(--text-muted)'}}>Train & deploy open-source LLM for clash detection</span>
+              </div>
+              <div style=${{display:'flex',alignItems:'center',gap:'.4rem'}}>
+                <span style=${{color:'var(--text-faint)',fontSize:'0.9rem'}}>○</span>
+                <span style=${{color:'var(--text-muted)'}}>Move to dedicated domain (clashcontrol.com)</span>
+              </div>
+              <div style=${{display:'flex',alignItems:'center',gap:'.4rem'}}>
+                <span style=${{color:'var(--text-faint)',fontSize:'0.9rem'}}>○</span>
+                <span style=${{color:'var(--text-muted)'}}>User accounts & cloud project storage</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Feedback & links -->
+          <div style=${{borderTop:'1px solid var(--border-subtle)',marginTop:'.8rem',paddingTop:'.8rem',display:'flex',gap:'.5rem',flexWrap:'wrap'}}>
+            <a href="https://github.com/thomhoffer-arch/clash-control/issues/new?template=bug_report.md" target="_blank" rel="noopener"
+              style=${{...S_BTN,flex:1,padding:'.4rem .6rem',borderRadius:6,fontSize:'0.8rem',fontWeight:600,
+                background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',
+                textDecoration:'none',textAlign:'center',cursor:'pointer'}}>Report a Bug</a>
+            <a href="https://github.com/thomhoffer-arch/clash-control/issues/new?template=feature_request.md" target="_blank" rel="noopener"
+              style=${{...S_BTN,flex:1,padding:'.4rem .6rem',borderRadius:6,fontSize:'0.8rem',fontWeight:600,
+                background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',
+                textDecoration:'none',textAlign:'center',cursor:'pointer'}}>Request a Feature</a>
+          </div>
+          <div style=${{fontSize:'0.72rem',color:'var(--text-faint)',marginTop:'.6rem',textAlign:'center'}}>
+            ClashControl v${CC_VERSION.v} \u2014 Free & open source
+          </div>
         </div>
       </div>`}
       ${tourStep!=null && html`<${GuidedTour} step=${tourStep} setStep=${setTourStep} d=${d} />`}

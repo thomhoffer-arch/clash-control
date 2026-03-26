@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.1.1 (2026-03-26)
+- Fix Quick Start Guide not showing on desktop + NL counter not resetting
+
 ## v3.1.0 (2026-03-26)
 - Clear localStorage after training data is sent + event-driven counter
 
