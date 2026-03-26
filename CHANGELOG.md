@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.12.19 (2026-03-26)
+- Fix NL training data form field ID to entry.908589612
+
 ## v2.12.18 (2026-03-26)
 - Unify training pill: show clash + NL stats, auto-share both via Google Form
 

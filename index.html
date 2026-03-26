@@ -4,7 +4,7 @@
   <meta charset="UTF-8"/>
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
   <title>ClashControl — Open BIM Clash Detection</title>
-  <link rel="manifest" href="manifest.json">
+  <!-- <link rel="manifest" href="manifest.json"> -->
   <meta name="theme-color" content="#0f172a">
 
   <!-- CSP: restrict resource loading to known CDN origins -->
@@ -227,23 +227,14 @@ window.addEventListener('unhandledrejection', function(e) {
   console.error('[ClashControl] Unhandled promise rejection:', e.reason);
 });
 
-// Service worker registration (PWA offline support)
+// Service worker disabled — unregister any existing SW to clear stale caches
 if ('serviceWorker' in navigator) {
-  var _swReloading = false;
-  function _swReload() { if (!_swReloading) { _swReloading = true; window.location.reload(); } }
-  navigator.serviceWorker.register('./sw.js').then(function(reg) {
-    reg.update();
-    if (reg.waiting) { reg.waiting.postMessage({type:'SKIP_WAITING'}); }
-    reg.addEventListener('updatefound', function() {
-      var newSW = reg.installing;
-      if (newSW) newSW.addEventListener('statechange', function() {
-        if (newSW.state === 'activated' && navigator.serviceWorker.controller) _swReload();
-      });
-    });
-  }).catch(function(e) {
-    console.warn('[ClashControl] SW registration failed:', e);
+  navigator.serviceWorker.getRegistrations().then(function(regs) {
+    regs.forEach(function(r) { r.unregister(); });
   });
-  navigator.serviceWorker.addEventListener('controllerchange', _swReload);
+  caches.keys().then(function(names) {
+    names.forEach(function(n) { caches.delete(n); });
+  });
 }
 
 window.onload = function() {
@@ -257,7 +248,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.12.18',hash:'916ba75',date:'2026-03-26T07:45:40Z'};
+  var CC_VERSION = {v:'2.12.19',hash:'da51154',date:'2026-03-26T07:57:06Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
