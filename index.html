@@ -250,7 +250,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.6',hash:'cbb9f9e',date:'2026-03-26T17:24:59Z'};
+  var CC_VERSION = {v:'3.2.7',hash:'e1cc0d8',date:'2026-03-26T17:26:57Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -1948,10 +1948,15 @@ function startApp() {
   // Returns a Promise that resolves with the clash array.
   var _DETECT_CHUNK_SIZE = 80; // candidates per chunk before yielding
   function detectClashesAsync(models, rules, onProgress) {
-    return new Promise(function(resolve) {
-      // Run synchronous detection but yield between chunks
-      var result = _detectClashesCore(models, rules, onProgress, resolve);
-      if (result !== undefined) resolve(result); // fell through synchronously (small dataset)
+    return new Promise(function(resolve, reject) {
+      try {
+        // Run synchronous detection but yield between chunks
+        var result = _detectClashesCore(models, rules, onProgress, resolve);
+        if (result !== undefined) resolve(result); // fell through synchronously (small dataset)
+      } catch(e) {
+        console.error('Clash detection failed:', e);
+        resolve([]); // resolve with empty array to unblock UI (sets detecting:false)
+      }
     });
   }
 
@@ -2052,9 +2057,10 @@ function startApp() {
     // each element's BVH is built exactly once (not repeatedly per pair).
     var _bvhSeen = {};
     for (var ci=0; ci<candidates.length; ci++) {
-      var _peA=candidates[ci].eA, _peB=candidates[ci].eB;
-      if (!_bvhSeen[_peA.expressId]) { _bvhSeen[_peA.expressId]=true; _getBVH(_peA); }
-      if (!_bvhSeen[_peB.expressId]) { _bvhSeen[_peB.expressId]=true; _getBVH(_peB); }
+      var _peA=candidates[ci].eA, _peB=candidates[ci].eB, _pmA=candidates[ci].mA, _pmB=candidates[ci].mB;
+      var _kA=_pmA.id+':'+_peA.expressId, _kB=_pmB.id+':'+_peB.expressId;
+      if (!_bvhSeen[_kA]) { _bvhSeen[_kA]=true; _getBVH(_peA); }
+      if (!_bvhSeen[_kB]) { _bvhSeen[_kB]=true; _getBVH(_peB); }
     }
 
     // ── Process candidate pairs (chunkable) ───────────────────────
@@ -2374,8 +2380,9 @@ function startApp() {
     // Async chunked path
     var chunkIdx = 0;
     function _runChunk() {
+      try {
       var end = Math.min(chunkIdx + _DETECT_CHUNK_SIZE, totalCandidates);
-      for (var i=chunkIdx; i<end; i++) _processCandidate(candidates[i]);
+      for (var i=chunkIdx; i<end; i++) { try { _processCandidate(candidates[i]); } catch(e) { /* skip bad candidate */ } }
       chunkIdx = end;
       if (onProgress) onProgress(chunkIdx, totalCandidates);
       if (chunkIdx < totalCandidates) {
@@ -2383,6 +2390,7 @@ function startApp() {
       } else {
         resolveAsync(_finalize());
       }
+      } catch(e) { console.error('Detection chunk error:', e); resolveAsync(_finalize()); }
     }
     _runChunk();
     return undefined; // signal async path taken

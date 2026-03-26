@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.7 (2026-03-26)
+- Skip self-clash confirmation when 'self' is already in the NL command
+
 ## v3.2.6 (2026-03-26)
 - Fix training pill counter and form send reliability
 
