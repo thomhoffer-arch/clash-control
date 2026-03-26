@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.1.0 (2026-03-26)
+- Clear localStorage after training data is sent + event-driven counter
+
 ## v3.0.13 (2026-03-26)
 - Set orbit target to clash point when marker is shown
 
