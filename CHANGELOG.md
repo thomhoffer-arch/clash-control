@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.12.8 (2026-03-26)
+- Add type-pair exclusion in NL commands + 15% font size increase in panels
+
 ## v2.12.7 (2026-03-26)
 - Increase font sizes in all side panel tabs by 15% for readability
 
