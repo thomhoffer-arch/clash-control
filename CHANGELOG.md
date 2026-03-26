@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.0.8 (2026-03-26)
+- Clean up training pill: show only data records, move clash stats to tab
+
 ## v3.0.7 (2026-03-26)
 - Fix auto-share status text: mention periodic sending, not just session end
 

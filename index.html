@@ -249,7 +249,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.0.7',hash:'1f8d564',date:'2026-03-26T08:30:20Z'};
+  var CC_VERSION = {v:'3.0.8',hash:'5a8c145',date:'2026-03-26T08:56:59Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -7218,10 +7218,10 @@ function startApp() {
           <button onClick=${function(){if(_fitToElement&&it.elementId)_fitToElement(it.elementId);if(_highlightById)_highlightById(it.elementId,false);_sboxAroundElements&&_sboxAroundElements([it.elementId]);}}
             style=${{...S_BTN,fontSize:'0.57rem',padding:'.1rem .3rem',background:'#3b0764',color:'#c084fc',flex:1}} title="Section box around element">Box</button>
         ` : html`
-          <button onClick=${function(){_zoomToggle(it.elemA,'A');}}
-            style=${{...S_BTN,fontSize:'0.57rem',padding:'.1rem .3rem',background:zoomedTo==='A'?'#1e40af':'#0f3a5f',color:'#93c5fd',flex:1}}>${zoomedTo==='A'?'Zoom Clash':'Zoom A'}</button>
-          <button onClick=${function(){_zoomToggle(it.elemB,'B');}}
-            style=${{...S_BTN,fontSize:'0.57rem',padding:'.1rem .3rem',background:zoomedTo==='B'?'#1e40af':'#0f3a5f',color:'#93c5fd',flex:1}}>${zoomedTo==='B'?'Zoom Clash':'Zoom B'}</button>
+          <button onClick=${function(){if(_fitToElement&&it.elemA)_fitToElement(it.elemA);if(_highlightById&&it.elemA)_highlightById(it.elemA);}}
+            style=${{...S_BTN,fontSize:'0.57rem',padding:'.1rem .3rem',background:'#0f3a5f',color:'#93c5fd',flex:1}}>Zoom A</button>
+          <button onClick=${function(){if(_fitToElement&&it.elemB)_fitToElement(it.elemB);if(_highlightById&&it.elemB)_highlightById(it.elemB);}}
+            style=${{...S_BTN,fontSize:'0.57rem',padding:'.1rem .3rem',background:'#0f3a5f',color:'#93c5fd',flex:1}}>Zoom B</button>
           <button onClick=${function(){if(_fitToElement&&it.elemA)_fitToElement(it.elemA);if(_highlightById)_highlightById(it.elemA,false);_sboxAroundElements&&_sboxAroundElements([it.elemA,it.elemB]);}}
             style=${{...S_BTN,fontSize:'0.57rem',padding:'.1rem .3rem',background:'#3b0764',color:'#c084fc',flex:1}} title="Section box around both elements">Box</button>
         `}
@@ -9377,8 +9377,17 @@ function startApp() {
     // Capture hook: write all inputs to NL training store (including unmatched)
     function _captureNL(result, path) {
       try {
-        var output = result != null ? (typeof result === 'object' ? result : String(result)) : null;
-        _saveNLTrainRecord(raw, output, {ts:Date.now(), path:path, matched:result!=null, v:CC_VERSION.v});
+        var action = null;
+        if (result != null) {
+          if (typeof result === 'object' && result._clashSetup) action = 'clash_setup';
+          else if (typeof result === 'string') {
+            // Derive action from response text (first few words)
+            var first = result.replace(/\*\*/g,'').substring(0, 60);
+            action = first;
+          }
+        }
+        _saveNLTrainRecord(raw, result != null ? (typeof result === 'object' ? result : String(result)) : null,
+          {ts:Date.now(), path:path, matched:result!=null, action:action, v:CC_VERSION.v});
       } catch(e) {}
       return result;
     }
@@ -10366,6 +10375,29 @@ function startApp() {
       setTimeout(function(){ d({t:A.MERGE_CLASHES, v:detectClashes(s.models, Object.assign({},s.rules,rules))}); }, 20);
     }
 
+    // ── NL feedback for unmatched commands (training mode only) ─
+    var nlFeedbackRef = useRef(null); // {input: string} — pending user description of intent
+    function _checkNLFeedback(text) {
+      if (!nlFeedbackRef.current) return null;
+      var pending = nlFeedbackRef.current;
+      nlFeedbackRef.current = null;
+      // Save the feedback: original command + what user actually wanted
+      try {
+        var store = _getNLTrainStore();
+        // Find the last record matching this input and annotate it
+        for (var i = store.length - 1; i >= 0; i--) {
+          if (store[i].input === pending.input) {
+            store[i].meta = store[i].meta || {};
+            store[i].meta.user_intent = text;
+            store[i].meta.feedback = true;
+            break;
+          }
+        }
+        localStorage.setItem('cc_nl_training_data', JSON.stringify(store));
+      } catch(e) {}
+      return 'Thanks! I\'ll learn from this. Your feedback has been saved.';
+    }
+
     // ── Conversational clash setup context ──────────────────────
     var clashCtxRef = useRef(null); // {rules, asked, nameA, nameB}
     function _clashConverse(text, result) {
@@ -10443,6 +10475,12 @@ function startApp() {
       if (!text) return;
       setMsgs(function(m){ return m.concat([{role:'user', text:text}]); });
       setInput('');
+      // Check if this is a response to NL feedback prompt
+      var feedbackResult = _checkNLFeedback(text);
+      if (feedbackResult) {
+        setMsgs(function(m){ return m.concat([{role:'assistant', text:feedbackResult}]); });
+        return;
+      }
       // Check if this is a response to a pending clash conversation
       var ctxResult = _clashConverse(text, null);
       if (ctxResult !== null && ctxResult !== undefined) {
@@ -10466,7 +10504,12 @@ function startApp() {
         } else if (rawResult !== null) {
           setMsgs(function(m){ return m.concat([{role:'assistant', text:rawResult}]); });
         } else {
-          setMsgs(function(m){ return m.concat([{role:'assistant', text:'Not sure what you mean. Try: "check structural vs MEP", "find near misses", "how many clashes?", or "help".'}]); });
+          if (s.trainingMode) {
+            nlFeedbackRef.current = {input: text};
+            setMsgs(function(m){ return m.concat([{role:'assistant', text:'I didn\'t understand that. Could you describe what you wanted to happen? This helps me learn and serve you better next time.\n\n*(Or try: "check structural vs MEP", "find near misses", "how many clashes?", or "help")*'}]); });
+          } else {
+            setMsgs(function(m){ return m.concat([{role:'assistant', text:'Not sure what you mean. Try: "check structural vs MEP", "find near misses", "how many clashes?", or "help".'}]); });
+          }
         }
         setLoading(false);
       });
