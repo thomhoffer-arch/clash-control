@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.19 (2026-03-26)
+- Delay detection start 80ms so 'Running...' message paints first
+
 ## v3.2.18 (2026-03-26)
 - Move training pill up when clash overlay buttons aren't visible
 
