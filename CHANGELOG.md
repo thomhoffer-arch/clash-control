@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.2 (2026-03-26)
+- Remove extra 'mep' from Standards discipline dropdown to match spec
+
 ## v3.2.1 (2026-03-26)
 - Add Standards tab with discipline/IFC-type tolerance rules, tolerance input on clash cards, expected-clash tag, and accepted-needs-check status
 

@@ -250,7 +250,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.1',hash:'a887129',date:'2026-03-26T16:38:21Z'};
+  var CC_VERSION = {v:'3.2.2',hash:'ca07935',date:'2026-03-26T16:49:26Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -1712,7 +1712,8 @@ function startApp() {
   // Dual-BVH traversal: L2 AABB check at every node, L3 Möller at leaves
   // Collects up to maxPts intersection points for accurate centroid placement
   // maxDepth is a single-element array [0] that tracks the max intersection segment length
-  function _bvhTraverseAll(nA, trisA, nB, trisB, pts, maxPts, maxDepth) {
+  // earlyExit: if true, stop after first hit (fast path for hard clash detection)
+  function _bvhTraverseAll(nA, trisA, nB, trisB, pts, maxPts, maxDepth, earlyExit) {
     if (pts.length >= maxPts) return;
     // L2: AABB overlap check — prune entire subtree if boxes miss
     if (nA.mnx>nB.mxx||nA.mxx<nB.mnx||
@@ -1725,17 +1726,19 @@ function startApp() {
       for (var i=nA.lo; i<nA.hi && pts.length<maxPts; i++)
         for (var j=nB.lo; j<nB.hi && pts.length<maxPts; j++) {
           var cp = _triTriTest(trisA, nA.idx[i]*9, trisB, nB.idx[j]*9);
-          if (cp) { pts.push(cp[0], cp[1], cp[2]); if (cp[3] > maxDepth[0]) maxDepth[0] = cp[3]; }
+          if (cp) { pts.push(cp[0], cp[1], cp[2]); if (cp[3] > maxDepth[0]) maxDepth[0] = cp[3]; if (earlyExit) return; }
         }
       return;
     }
     // Descend into the node with more triangles (maximises early rejection)
     if (bLeaf || (!aLeaf && (nA.cnt||1) >= (nB.cnt||1))) {
-      _bvhTraverseAll(nA.left, trisA, nB, trisB, pts, maxPts, maxDepth);
-      _bvhTraverseAll(nA.right, trisA, nB, trisB, pts, maxPts, maxDepth);
+      _bvhTraverseAll(nA.left, trisA, nB, trisB, pts, maxPts, maxDepth, earlyExit);
+      if (earlyExit && pts.length) return;
+      _bvhTraverseAll(nA.right, trisA, nB, trisB, pts, maxPts, maxDepth, earlyExit);
     } else {
-      _bvhTraverseAll(nA, trisA, nB.left, trisB, pts, maxPts, maxDepth);
-      _bvhTraverseAll(nA, trisA, nB.right, trisB, pts, maxPts, maxDepth);
+      _bvhTraverseAll(nA, trisA, nB.left, trisB, pts, maxPts, maxDepth, earlyExit);
+      if (earlyExit && pts.length) return;
+      _bvhTraverseAll(nA, trisA, nB.right, trisB, pts, maxPts, maxDepth, earlyExit);
     }
   }
 
@@ -1744,8 +1747,13 @@ function startApp() {
   function _meshesIntersect(elA, elB) {
     var bA = _getBVH(elA), bB = _getBVH(elB);
     if (!bA || !bB) return false;
+    // Fast early-exit pass: check if ANY triangles intersect before collecting all points
+    var probe = [], probeDepth = [0];
+    _bvhTraverseAll(bA.root, bA.tris, bB.root, bB.tris, probe, 3, probeDepth, true);
+    if (!probe.length) return false;
+    // Full pass: collect up to 24 points for accurate centroid (only runs when clash confirmed)
     var pts = [], maxDepth = [0];
-    _bvhTraverseAll(bA.root, bA.tris, bB.root, bB.tris, pts, 24, maxDepth);
+    _bvhTraverseAll(bA.root, bA.tris, bB.root, bB.tris, pts, 24, maxDepth, false);
     if (!pts.length) return false;
     // Validate: reject intersection points outside both elements' AABBs
     // (catches false positives from near-coplanar/degenerate triangles)
@@ -1932,7 +1940,22 @@ function startApp() {
     return pairs;
   }
 
-  function detectClashes(models, rules) {
+  // ── Async clash detection with chunked processing ───────────────
+  // Wraps the synchronous detectClashes in a chunked async pipeline:
+  //   1. Sweep-and-prune (fast, stays synchronous)
+  //   2. Pre-build all BVHs upfront (avoids lazy builds during candidate loop)
+  //   3. Process candidates in chunks, yielding to UI between each chunk
+  // Returns a Promise that resolves with the clash array.
+  var _DETECT_CHUNK_SIZE = 80; // candidates per chunk before yielding
+  function detectClashesAsync(models, rules, onProgress) {
+    return new Promise(function(resolve) {
+      // Run synchronous detection but yield between chunks
+      var result = _detectClashesCore(models, rules, onProgress, resolve);
+      if (result !== undefined) resolve(result); // fell through synchronously (small dataset)
+    });
+  }
+
+  function _detectClashesCore(models, rules, onProgress, resolveAsync) {
     var pick = function(id) {
       if (id === 'all') return models;
       // Array of selectors: union all matches
@@ -2024,7 +2047,18 @@ function startApp() {
     // ── L0: Sweep and Prune — O(n log n + k) candidate pairs ───────
     var candidates = _sweepAndPrune(grpA, grpB, rules, maxGapM);
 
-    candidates.forEach(function(pair) {
+    // ── Pre-build BVHs for all elements in candidate pairs ────────
+    // This avoids lazy-building during the hot candidate loop and ensures
+    // each element's BVH is built exactly once (not repeatedly per pair).
+    var _bvhSeen = {};
+    for (var ci=0; ci<candidates.length; ci++) {
+      var _peA=candidates[ci].eA, _peB=candidates[ci].eB;
+      if (!_bvhSeen[_peA.expressId]) { _bvhSeen[_peA.expressId]=true; _getBVH(_peA); }
+      if (!_bvhSeen[_peB.expressId]) { _bvhSeen[_peB.expressId]=true; _getBVH(_peB); }
+    }
+
+    // ── Process candidate pairs (chunkable) ───────────────────────
+    function _processCandidate(pair) {
       var eA=pair.eA, mA=pair.mA, eB=pair.eB, mB=pair.mB, sameModel=pair.sameModel;
 
       // Change-aware: skip pairs where neither element changed
@@ -2193,8 +2227,10 @@ function startApp() {
           }
         }));
       }
-    });
+    }
 
+    // ── Finalize results after all candidates processed ───────────
+    function _finalize() {
     // Update element hashes for next change-aware run
     if (rules.changeAware) _prevElementHashes = newHashes;
 
@@ -2301,8 +2337,8 @@ function startApp() {
           soft: runSoft,
           duplicate: runDup,
           candidatesChecked: candidates.length,
-          elementsScanned: items.length,
-          modelCount: Object.keys(seenModels).length,
+          elementsScanned: Object.keys(_bvhSeen).length,
+          modelCount: models.length,
           typePairDistribution: typePairs
         },
         // Feature vectors for all detected clashes (anonymous geometric data only)
@@ -2324,6 +2360,37 @@ function startApp() {
     } catch(e) {}
 
     return merged;
+    } // end _finalize
+
+    // ── Chunked execution: process candidates in batches ──────────
+    // For small datasets, run synchronously for zero overhead.
+    // For larger datasets, yield to UI between chunks via setTimeout.
+    var totalCandidates = candidates.length;
+    if (totalCandidates <= _DETECT_CHUNK_SIZE || !resolveAsync) {
+      // Synchronous path (small dataset or legacy call)
+      for (var si=0; si<totalCandidates; si++) _processCandidate(candidates[si]);
+      return _finalize();
+    }
+    // Async chunked path
+    var chunkIdx = 0;
+    function _runChunk() {
+      var end = Math.min(chunkIdx + _DETECT_CHUNK_SIZE, totalCandidates);
+      for (var i=chunkIdx; i<end; i++) _processCandidate(candidates[i]);
+      chunkIdx = end;
+      if (onProgress) onProgress(chunkIdx, totalCandidates);
+      if (chunkIdx < totalCandidates) {
+        setTimeout(_runChunk, 0); // yield to UI
+      } else {
+        resolveAsync(_finalize());
+      }
+    }
+    _runChunk();
+    return undefined; // signal async path taken
+  }
+
+  // Synchronous wrapper for backward compatibility
+  function detectClashes(models, rules) {
+    return _detectClashesCore(models, rules, null, null);
   }
 
   function deriveFloors(clashes) {
@@ -6911,7 +6978,7 @@ function startApp() {
       _confirmIfClashes(function(){
         var ds = _captureDetectionSettings(s.rules, s.models);
         d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
-        setTimeout(function(){ d({t:A.MERGE_CLASHES, v:detectClashes(s.models, s.rules), detectionSettings:ds}); }, 20);
+        detectClashesAsync(s.models, s.rules).then(function(result){ d({t:A.MERGE_CLASHES, v:result, detectionSettings:ds}); });
       });
     }
     function applyAndRun(preset) {
@@ -6921,7 +6988,7 @@ function startApp() {
         var ds = _captureDetectionSettings(merged, s.models);
         d({t:A.UPD_RULES, u:preset.r});
         d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
-        setTimeout(function(){ d({t:A.MERGE_CLASHES, v:detectClashes(s.models, merged), detectionSettings:ds}); }, 20);
+        detectClashesAsync(s.models, merged).then(function(result){ d({t:A.MERGE_CLASHES, v:result, detectionSettings:ds}); });
       });
     }
 
@@ -6984,7 +7051,7 @@ function startApp() {
                   if(!canRun)return;
                   var merged=Object.assign({},s.rules,sp.rules);
                   d({t:A.UPD_RULES,u:sp.rules});d({t:A.DETECTING});d({t:A.TAB,v:'clashes'});
-                  setTimeout(function(){d({t:A.MERGE_CLASHES,v:detectClashes(s.models,merged)});},20);
+                  detectClashesAsync(s.models,merged).then(function(result){d({t:A.MERGE_CLASHES,v:result});});
                 }} disabled=${!canRun} title="Load & Run"
                   style=${{...S_BTN,fontSize:'0.63rem',padding:'.15rem .25rem',background:'var(--accent-bg)',color:'var(--accent-subtle)',borderRadius:'0',borderLeft:'1px solid var(--border-subtle)'}}>▶</button>
                 <button onClick=${function(){
@@ -10344,7 +10411,7 @@ function startApp() {
         if (/run/.test(text) && s.models.length && !s.detecting) {
           var merged = Object.assign({}, s.rules, found.rules);
           d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
-          setTimeout(function(){ d({t:A.MERGE_CLASHES, v:detectClashes(s.models, merged)}); }, 20);
+          detectClashesAsync(s.models, merged).then(function(result){ d({t:A.MERGE_CLASHES, v:result}); });
           return 'Running "' + found.name + '" preset…';
         }
         return 'Loaded preset "' + found.name + '". Say "run" to detect.';
@@ -10359,7 +10426,7 @@ function startApp() {
       if (!s.models.length) return 'No models loaded yet.';
       if (s.detecting) return 'Already running…';
       d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
-      setTimeout(function(){ d({t:A.MERGE_CLASHES, v:detectClashes(s.models,s.rules)}); }, 20);
+      detectClashesAsync(s.models,s.rules).then(function(result){ d({t:A.MERGE_CLASHES, v:result}); });
       var r2 = s.rules;
       return 'Running clash detection' + (r2.maxGap ? ' with ' + r2.maxGap + 'mm max gap' : '') + '…';
     }
@@ -10669,16 +10736,15 @@ function startApp() {
         d({t:A.UPD_RULES, u:rules});
         if (s.detecting) return;
         d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
-        setTimeout(function(){
+        var mergedRules = Object.assign({},s.rules,rules);
+        Promise.all(multiSelf.map(function(pass){
+          var passRules = Object.assign({}, mergedRules, {modelA:pass.id, modelB:pass.id, excludeSelf:false});
+          return detectClashesAsync(s.models, passRules);
+        })).then(function(results){
           var allClashes = [];
-          var mergedRules = Object.assign({},s.rules,rules);
-          multiSelf.forEach(function(pass){
-            var passRules = Object.assign({}, mergedRules, {modelA:pass.id, modelB:pass.id, excludeSelf:false});
-            var result = detectClashes(s.models, passRules);
-            allClashes = allClashes.concat(result);
-          });
+          results.forEach(function(r){allClashes=allClashes.concat(r);});
           d({t:A.MERGE_CLASHES, v:allClashes});
-        }, 20);
+        });
         return;
       }
       var nameA=opts.find(function(o){return o.id===rules.modelA;})||{label:'All'};
@@ -10888,7 +10954,7 @@ function startApp() {
       d({t:A.UPD_RULES, u:rules});
       if (s.detecting) return;
       d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
-      setTimeout(function(){ d({t:A.MERGE_CLASHES, v:detectClashes(s.models, Object.assign({},s.rules,rules))}); }, 20);
+      detectClashesAsync(s.models, Object.assign({},s.rules,rules)).then(function(result){ d({t:A.MERGE_CLASHES, v:result}); });
     }
 
     // ── NL feedback for unmatched commands (training mode only) ─
@@ -12152,38 +12218,45 @@ function startApp() {
 
   function App() {
     var st = useReducer(reducer, INIT), s=st[0], _rawD=st[1];
+    // Use refs for training side-effects to always read latest state (avoids stale closure)
+    var _clashesRef = useRef(s.clashes);
+    var _selectedRef = useRef(s.selected);
+    _clashesRef.current = s.clashes;
+    _selectedRef.current = s.selected;
     // Wrap dispatch to capture training signals as side-effects
     var d = useCallback(function(a) {
       _rawD(a);
-      // Write clash training labels to localStorage
+      // Write clash training labels to localStorage — read from refs for latest state
       try {
+        var _clashes = _clashesRef.current;
+        var _sel = _selectedRef.current;
         if (a.t===A.UPD_CLASH && a.u && a.u.status) {
-          var c = s.clashes.find(function(c){return c.id===a.id;});
+          var c = _clashes.find(function(c){return c.id===a.id;});
           if (c && c._trainFV && a.u.status !== c.status) {
-            var labelMap = {confirmed:1.0, denied:0.0, in_progress:0.8, resolved:0.7, closed:0.2};
+            var labelMap = {confirmed:1.0, denied:0.0, accepted_needs_check:0.6, in_progress:0.8, resolved:0.7, closed:0.2};
             var isVerdict = a.u.status==='confirmed'||a.u.status==='denied';
             if (labelMap[a.u.status] != null) _saveClashTrainRecord(c.id, c._trainFV, labelMap[a.u.status], isVerdict?'verdict':'status_change', false);
           }
         }
         if (a.t===A.AI_FEEDBACK && a.v) {
-          var c2 = s.clashes.find(function(c){return c.id===a.id;});
+          var c2 = _clashes.find(function(c){return c.id===a.id;});
           if (c2 && c2._trainFV) _saveClashTrainRecord(c2.id, c2._trainFV, a.v==='up'?1.0:0.0, 'thumbs_feedback', false);
         }
         if (a.t===A.ADD_ISSUE && a.v && a.v.clashId) {
-          var c3 = s.clashes.find(function(c){return c.id===a.v.clashId;});
+          var c3 = _clashes.find(function(c){return c.id===a.v.clashId;});
           if (c3 && c3._trainFV) _saveClashTrainRecord(c3.id, c3._trainFV, 1.0, 'issue_created', false);
         }
         if (a.t===A.BATCH_UPD_CLASH && a.u && a.u.status) {
-          var labelMap2 = {confirmed:1.0, denied:0.0, in_progress:0.8, resolved:0.7, closed:0.2};
+          var labelMap2 = {confirmed:1.0, denied:0.0, accepted_needs_check:0.6, in_progress:0.8, resolved:0.7, closed:0.2};
           if (labelMap2[a.u.status] != null) {
-            s.clashes.forEach(function(c){
+            _clashes.forEach(function(c){
               var isV2 = a.u.status==='confirmed'||a.u.status==='denied';
-              if (s.selected[c.id] && c._trainFV && c.status !== a.u.status) _saveClashTrainRecord(c.id, c._trainFV, labelMap2[a.u.status], isV2?'verdict':'status_change', false);
+              if (_sel[c.id] && c._trainFV && c.status !== a.u.status) _saveClashTrainRecord(c.id, c._trainFV, labelMap2[a.u.status], isV2?'verdict':'status_change', false);
             });
           }
         }
       } catch(e) {}
-    }, [s.clashes, s.selected]);
+    }, []);
     window._ccDispatch = d;
     window._ccLatestState = s;
     // Apply theme to document and persist to localStorage
