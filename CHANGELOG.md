@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.12.16 (2026-03-26)
+- Add conversational clash setup + fuzzy confirmation for low-confidence matches
+
 ## v2.12.15 (2026-03-26)
 - Add fuzzy intent fallback to NL command parser
 

@@ -257,7 +257,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'2.12.15',hash:'3a97006',date:'2026-03-26T07:02:49Z'};
+  var CC_VERSION = {v:'2.12.16',hash:'7890004',date:'2026-03-26T07:15:05Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -2562,6 +2562,32 @@ function startApp() {
   function _getClashTrainCount() {
     try { var s = localStorage.getItem('cc_clash_training_data'); return s ? Object.keys(JSON.parse(s)).length : 0; } catch(e) { return 0; }
   }
+  function _shareClashTrainStore(onStatus) {
+    var store = _getClashTrainStore();
+    var keys = Object.keys(store);
+    if (!keys.length) { onStatus('error','No clash training data to share.'); return; }
+    var records = keys.map(function(k) { return Object.assign({id:k}, store[k]); });
+    var payload = {type:'clash_training', version:'1.0', app_version:CC_VERSION.v, count:records.length, records:records};
+    var json = JSON.stringify(payload);
+    onStatus('sending', null);
+    var fd = new FormData();
+    fd.append('entry.1450623071', json);
+    var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSdSMbfjcApszFebuvQXHKiWhH-zQJhk','_38m1vvMQ-_bMP_6eA'];
+    var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
+    fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
+      onStatus('ok',null);
+    }).catch(function(){
+      try{
+        var iframe=document.createElement('iframe');iframe.name='cc_clash_frame';iframe.style.cssText='display:none';
+        document.body.appendChild(iframe);
+        var form=document.createElement('form');form.method='POST';form.action=baseUrl+'/formResponse';form.target='cc_clash_frame';
+        var input=document.createElement('input');input.type='hidden';input.name='entry.1450623071';input.value=json;
+        form.appendChild(input);document.body.appendChild(form);form.submit();
+        setTimeout(function(){document.body.removeChild(form);document.body.removeChild(iframe);},5000);
+        onStatus('ok',null);
+      }catch(e){onStatus('error','blocked');}
+    });
+  }
 
   // ── NL Training Data (localStorage) ───────────────────────────
   var _NL_TRAIN_CAP = 2000;
@@ -2684,8 +2710,9 @@ function startApp() {
     var json = JSON.stringify(payload);
     onStatus('sending',null);
     var fd = new FormData();
-    fd.append('entry.1450623071', json);
+    fd.append('entry.217498498', json);
     var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSdSMbfjcApszFebuvQXHKiWhH-zQJhk','_38m1vvMQ-_bMP_6eA'];
+    var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
     var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
     fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
       onStatus('ok',null);
@@ -2694,7 +2721,7 @@ function startApp() {
         var iframe=document.createElement('iframe');iframe.name='cc_nl_frame';iframe.style.cssText='display:none';
         document.body.appendChild(iframe);
         var form=document.createElement('form');form.method='POST';form.action=baseUrl+'/formResponse';form.target='cc_nl_frame';
-        var input=document.createElement('input');input.type='hidden';input.name='entry.1450623071';input.value=json;
+        var input=document.createElement('input');input.type='hidden';input.name='entry.217498498';input.value=json;
         form.appendChild(input);document.body.appendChild(form);form.submit();
         setTimeout(function(){document.body.removeChild(form);document.body.removeChild(iframe);},5000);
         onStatus('ok',null);
@@ -7916,6 +7943,8 @@ function startApp() {
     var clashCount = useState(function(){return _getClashTrainCount();}), clashN=clashCount[0], setClashN=clashCount[1];
     var confirmClearNL = useState(false), showClearNL=confirmClearNL[0], setClearNL=confirmClearNL[1];
     var confirmClearClash = useState(false), showClearClash=confirmClearClash[0], setClearClash=confirmClearClash[1];
+    var nlShareSt = useState(null), nlShareStatus=nlShareSt[0], setNlShareStatus=nlShareSt[1];
+    var clShareSt = useState(null), clShareStatus=clShareSt[0], setClShareStatus=clShareSt[1];
     var TLBL={fontSize:'1.03rem',color:'var(--text-primary)'};
     var TSUB={fontSize:'0.86rem',color:'var(--text-muted)',marginTop:'.1rem',lineHeight:1.4};
     var TROW={display:'flex',justifyContent:'space-between',alignItems:'center',padding:'.5rem 0',gap:'1rem',borderBottom:'1px solid var(--border-subtle)'};
@@ -7927,6 +7956,9 @@ function startApp() {
           <div style=${TSUB}>User commands paired with resolved actions</div>
         </div>
         <div style=${{display:'flex',gap:'.25rem',flexShrink:0}}>
+          <button onClick=${function(){_shareNLTrainingData(models,function(st){setNlShareStatus(st);if(st==='ok')setTimeout(function(){setNlShareStatus(null);},3000);});}}
+            disabled=${!nlN||nlShareStatus==='sending'}
+            style=${{...S_BTN,fontSize:'0.79rem',padding:'.2rem .4rem',background:nlN?'#7c3aed':'var(--bg-secondary)',color:nlN?'#fff':'var(--text-faint)'}}>${nlShareStatus==='sending'?'Sending…':nlShareStatus==='ok'?'Sent ✓':'Share'}</button>
           <button onClick=${function(){_exportNLTrainingJSONL();}}
             disabled=${!nlN}
             style=${{...S_BTN,fontSize:'0.79rem',padding:'.2rem .4rem',background:nlN?'var(--accent)':'var(--bg-secondary)',color:nlN?'#fff':'var(--text-faint)'}}>Export</button>
@@ -7945,6 +7977,9 @@ function startApp() {
           <div style=${TSUB}>Feature vectors with user labels for classifier training</div>
         </div>
         <div style=${{display:'flex',gap:'.25rem',flexShrink:0}}>
+          <button onClick=${function(){_shareClashTrainStore(function(st){setClShareStatus(st);if(st==='ok')setTimeout(function(){setClShareStatus(null);},3000);});}}
+            disabled=${!clashN||clShareStatus==='sending'}
+            style=${{...S_BTN,fontSize:'0.69rem',padding:'.2rem .4rem',background:clashN?'#7c3aed':'var(--bg-secondary)',color:clashN?'#fff':'var(--text-faint)'}}>${clShareStatus==='sending'?'Sending…':clShareStatus==='ok'?'Sent ✓':'Share'}</button>
           <button onClick=${function(){_exportClashTrainingJSONL();}}
             disabled=${!clashN}
             style=${{...S_BTN,fontSize:'0.69rem',padding:'.2rem .4rem',background:clashN?'var(--accent)':'var(--bg-secondary)',color:clashN?'#fff':'var(--text-faint)'}}>Export</button>
@@ -10867,12 +10902,18 @@ function startApp() {
         </div>
         ${dataConsent && html`<div style=${{fontSize:'0.57rem',color:'#a78bfa',marginBottom:'.3rem'}}>Sharing enabled \u2014 data sent automatically at end of session.</div>`}
         ${!dataConsent && html`<div style=${{fontSize:'0.57rem',color:'var(--text-faint)',marginBottom:'.3rem'}}>Sharing disabled \u2014 data stays local. Export or delete in Settings.</div>`}
-        <div style=${{display:'flex',gap:'.25rem',flexWrap:'wrap',marginBottom:'.2rem'}}>
+        <div style=${{display:'flex',gap:'.25rem',flexWrap:'wrap',marginBottom:'.3rem'}}>
           ${!showDelConfirm && html`<button onClick=${function(){if(hasData)setShowDelConfirm(true);}} disabled=${!hasData}
             style=${{...S_BTN,fontSize:'0.63rem',padding:'.2rem .4rem',background:'var(--bg-secondary)',color:hasData?'var(--text-secondary)':'var(--text-faint)',border:'1px solid var(--border)',flex:1}}>Delete</button>`}
           ${showDelConfirm && html`<button onClick=${function(){doDelete();setShowDelConfirm(false);}}
             style=${{...S_BTN,fontSize:'0.63rem',padding:'.2rem .4rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',flex:1}}>Confirm?</button>`}
         </div>
+        ${function(){
+          var nlN=_getNLTrainCount();
+          return nlN>0 && html`<div style=${{borderTop:'1px solid rgba(124,58,237,.2)',paddingTop:'.3rem',marginBottom:'.2rem'}}>
+            <div style=${{fontSize:'0.57rem',color:'var(--text-faint)',marginBottom:'.2rem'}}>${nlN} NL command${nlN!==1?'s':''} recorded</div>
+          </div>`;
+        }()}
       </div>`}
       ${showWarn && html`<div style=${{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:2000,
         background:'rgba(0,0,0,.6)',display:'flex',alignItems:'flex-start',justifyContent:'center',padding:'3rem 0'}}
@@ -10940,8 +10981,12 @@ function startApp() {
       };
     });
     var payload = {type:'nl_training', version:'1.0', app_version:CC_VERSION.v, count:records.length, records:records};
-    var blob = new Blob([JSON.stringify(payload)], {type:'application/json'});
-    navigator.sendBeacon(NL_DATA_ENDPOINT, blob);
+    var json = JSON.stringify(payload);
+    var fd = new FormData();
+    fd.append('entry.217498498', json);
+    var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSdSMbfjcApszFebuvQXHKiWhH-zQJhk','_38m1vvMQ-_bMP_6eA'];
+    var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
+    fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).catch(function(){});
     _beaconNLSentIdx = store.length;
   }
 
