@@ -250,7 +250,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.13',hash:'88aa438',date:'2026-03-26T17:39:15Z'};
+  var CC_VERSION = {v:'3.2.14',hash:'eb55e78',date:'2026-03-26T17:40:25Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -418,7 +418,7 @@ function startApp() {
   };
   // Action type constants — single source of truth for all dispatch/reducer references
   var A = {
-    ADD_MODEL:'ADD_MODEL', DEL_MODEL:'DEL_MODEL', UPD_MODEL:'UPD_MODEL',
+    ADD_MODEL:'ADD_MODEL', DEL_MODEL:'DEL_MODEL', REPLACE_MODEL:'REPLACE_MODEL', UPD_MODEL:'UPD_MODEL',
     TOGGLE_STOREY:'TOGGLE_STOREY', TOGGLE_ALL_STOREYS:'TOGGLE_ALL_STOREYS',
     SET_CLASHES:'SET_CLASHES', MERGE_CLASHES:'MERGE_CLASHES', DETECTING:'DETECTING',
     SWITCHING_PROJECT:'SWITCHING_PROJECT',
@@ -454,6 +454,7 @@ function startApp() {
     switch(a.t) {
       case A.ADD_MODEL:   var _am=a.v; if(s.modelMeta){var _mm=s.modelMeta.find(function(m){return m.id===_am.id});if(_mm){if(_mm.visible===false)_am=Object.assign({},_am,{visible:false});if(_mm.discipline)_am=Object.assign({},_am,{discipline:_mm.discipline});if(_mm.color)_am=Object.assign({},_am,{color:_mm.color});if(_mm.tag)_am=Object.assign({},_am,{tag:_mm.tag});}} return Object.assign({},s,{models:s.models.concat([_am])});
       case A.DEL_MODEL:   return Object.assign({},s,{models:s.models.filter(function(m){return m.id!==a.id})});
+      case A.REPLACE_MODEL: return Object.assign({},s,{models:s.models.map(function(m){return m.id===a.id?a.v:m})});
       case A.UPD_MODEL:   return Object.assign({},s,{models:s.models.map(function(m){return m.id===a.id?Object.assign({},m,a.u):m})});
       case A.TOGGLE_STOREY: return Object.assign({},s,{models:s.models.map(function(m){if(m.id!==a.id)return m;var hs=Object.assign({},m.hiddenStoreys||{});if(hs[a.storey])delete hs[a.storey];else hs[a.storey]=true;return Object.assign({},m,{hiddenStoreys:hs});})});
       case A.TOGGLE_ALL_STOREYS: return Object.assign({},s,{models:s.models.map(function(m){if(m.id!==a.id)return m;return Object.assign({},m,{hiddenStoreys:a.hide?a.storeys.reduce(function(o,st){o[st]=true;return o;},{}):{}}); })});
@@ -4608,15 +4609,28 @@ function startApp() {
           if(S._hsCache) delete S._hsCache[id];
         }
       });
-      // Add new
+      // Add new or replace updated
       s.models.forEach(function(model){
-        if(!S.map[model.id] && model.meshes && model.meshes.length) {
-          var grp = new THREE.Group();
-          grp.userData.modelId = model.id;
-          model.meshes.forEach(function(m){grp.add(m)});
-          S.mg.add(grp); S.map[model.id] = grp;
-          // Auto-fit view when first model loads
-          if(Object.keys(S.map).length===1 && _resetView) _resetView();
+        if(model.meshes && model.meshes.length) {
+          var existingGrp = S.map[model.id];
+          // Detect version change: meshes[0] reference differs from what's in the scene group
+          var needsSwap = existingGrp && model.meshes[0] && existingGrp.children[0] !== model.meshes[0];
+          if (needsSwap) {
+            // Remove old meshes from scene
+            existingGrp.traverse(function(obj){if(obj.isMesh){obj.geometry&&obj.geometry.dispose();obj.material&&obj.material.dispose();}});
+            S.mg.remove(existingGrp); delete S.map[model.id];
+            if(S._elMapCache) delete S._elMapCache[model.id];
+            if(S._hsCache) delete S._hsCache[model.id];
+            existingGrp = null;
+          }
+          if (!existingGrp) {
+            var grp = new THREE.Group();
+            grp.userData.modelId = model.id;
+            model.meshes.forEach(function(m){grp.add(m)});
+            S.mg.add(grp); S.map[model.id] = grp;
+            // Auto-fit view when first model loads
+            if(Object.keys(S.map).length===1 && _resetView) _resetView();
+          }
         }
         if(S.map[model.id]) {
           S.map[model.id].visible = model.visible!==false;
@@ -6309,17 +6323,15 @@ function startApp() {
               var modelId;
               if (existing) {
                 modelId = existing.id;
-                // Preserve user settings from the old version
-                disc = existing.discipline || disc;
-                col = existing.color || col;
-                var preservedTag = existing.tag;
-                var preservedVis = existing.visible;
-                var preservedVersion = (existing._version || 1) + 1;
-                // Remove old model
-                d({t:A.DEL_MODEL, id:existing.id});
-                idbDeleteFile(existing.id); idbDeleteGeoCache(existing.id);
-                // Add updated model with same ID and preserved settings
-                d({t:A.ADD_MODEL, v:{id:modelId, name:baseName, discipline:disc, color:col, visible:preservedVis!==false, tag:preservedTag||'', _version:preservedVersion, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], storeyData:result.storeyData||[], relatedPairs:result.relatedPairs||{}, stats:result.stats||{fileSize:fSize}}});
+                // Atomic replace: preserve user settings, update geometry
+                d({t:A.REPLACE_MODEL, id:modelId, v:{id:modelId, name:baseName,
+                  discipline:existing.discipline||disc, color:existing.color||col,
+                  visible:existing.visible!==false, tag:existing.tag||'',
+                  _version:(existing._version||1)+1,
+                  meshes:result.meshes, elements:result.elements,
+                  storeys:result.storeys||[], storeyData:result.storeyData||[],
+                  relatedPairs:result.relatedPairs||{},
+                  stats:result.stats||{fileSize:fSize}}});
               } else {
                 modelId = uid();
                 d({t:A.ADD_MODEL, v:{id:modelId, name:baseName, discipline:disc, color:col, visible:true, _version:1, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], storeyData:result.storeyData||[], relatedPairs:result.relatedPairs||{}, stats:result.stats||{fileSize:fSize}}});

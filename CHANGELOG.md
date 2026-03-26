@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.14 (2026-03-26)
+- Auto-version models when reloading IFC with same filename
+
 ## v3.2.13 (2026-03-26)
 - Make popups scroll internally instead of scrolling the page
 
