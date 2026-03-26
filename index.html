@@ -250,7 +250,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.4',hash:'b1090d8',date:'2026-03-26T17:02:43Z'};
+  var CC_VERSION = {v:'3.2.5',hash:'ef62cc5',date:'2026-03-26T17:09:14Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -2714,9 +2714,9 @@ function startApp() {
       if (synthetic) return; // Skip incomplete data — only store user-confirmed/denied clashes
       var store = _getClashTrainStore();
       var existing = store[id];
-      // Keep strongest label (higher wins, except explicit feedback always wins)
+      // Keep strongest label (higher wins; verdict always beats thumbs/AI feedback)
       if (existing && existing.label != null && label != null) {
-        var srcPri = {explicit_feedback:3, verdict:3, thumbs_feedback:3, issue_created:2, status_change:1, semantic_filter:0};
+        var srcPri = {verdict:4, explicit_feedback:3, thumbs_feedback:3, issue_created:2, status_change:1, semantic_filter:0};
         if ((srcPri[labelSource]||0) < (srcPri[existing.label_source]||0)) return;
         if ((srcPri[labelSource]||0) === (srcPri[existing.label_source]||0) && label <= existing.label) return;
       }
@@ -2740,7 +2740,8 @@ function startApp() {
       var s = localStorage.getItem('cc_clash_training_data');
       if (!s) return 0;
       var store = JSON.parse(s), count = 0;
-      Object.keys(store).forEach(function(k){ if(store[k].label_source==='verdict') count++; });
+      var _countSources = {verdict:1, thumbs_feedback:1, explicit_feedback:1};
+      Object.keys(store).forEach(function(k){ if(_countSources[store[k].label_source]) count++; });
       return count;
     } catch(e) { return 0; }
   }
@@ -2756,19 +2757,29 @@ function startApp() {
     fd.append('entry.1252313993', json);
     var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSc51xdQw_8JY2lN1aw8OZOT2Jzdx42m','vilJzqMGVw4tXo7wtA'];
     var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
-    fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
-      _clearClashTrainStore();
-      onStatus('ok',null);
+    // Try cors first to verify delivery; fall back to no-cors + iframe
+    fetch(baseUrl+'/formResponse',{method:'POST',body:fd}).then(function(resp){
+      if(resp.ok||resp.status===0){_clearClashTrainStore();onStatus('ok',null);}
+      else{onStatus('error','Form returned '+resp.status+'. Check the form URL and entry field IDs.');}
     }).catch(function(){
-      try{
-        var iframe=document.createElement('iframe');iframe.name='cc_clash_frame';iframe.style.cssText='display:none';
-        document.body.appendChild(iframe);
-        var form=document.createElement('form');form.method='POST';form.action=baseUrl+'/formResponse';form.target='cc_clash_frame';
-        var input=document.createElement('input');input.type='hidden';input.name='entry.1252313993';input.value=json;
-        form.appendChild(input);document.body.appendChild(form);form.submit();
-        setTimeout(function(){document.body.removeChild(form);document.body.removeChild(iframe);},5000);
-        onStatus('ok',null);
-      }catch(e){onStatus('error','blocked');}
+      // CORS blocked — retry with no-cors (opaque response, can't verify)
+      fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
+        // no-cors: can't read response, but request was sent
+        _clearClashTrainStore();
+        onStatus('ok','Sent (unverified — no-cors)');
+      }).catch(function(){
+        // Network error — try iframe fallback
+        try{
+          var iframe=document.createElement('iframe');iframe.name='cc_clash_frame';iframe.style.cssText='display:none';
+          document.body.appendChild(iframe);
+          var form=document.createElement('form');form.method='POST';form.action=baseUrl+'/formResponse';form.target='cc_clash_frame';
+          var input=document.createElement('input');input.type='hidden';input.name='entry.1252313993';input.value=json;
+          form.appendChild(input);document.body.appendChild(form);form.submit();
+          setTimeout(function(){try{document.body.removeChild(form);document.body.removeChild(iframe);}catch(e){}},5000);
+          _clearClashTrainStore();
+          onStatus('ok','Sent via iframe fallback');
+        }catch(e){onStatus('error','Send failed — network or CORS blocked');}
+      });
     });
   }
 
@@ -2899,19 +2910,24 @@ function startApp() {
     fd.append('entry.65932609', json);
     var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSc51xdQw_8JY2lN1aw8OZOT2Jzdx42m','vilJzqMGVw4tXo7wtA'];
     var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
-    fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
-      _clearNLTrainStore();
-      onStatus('ok',null);
+    fetch(baseUrl+'/formResponse',{method:'POST',body:fd}).then(function(resp){
+      if(resp.ok||resp.status===0){_clearNLTrainStore();onStatus('ok',null);}
+      else{onStatus('error','Form returned '+resp.status);}
     }).catch(function(){
+      fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
+        _clearNLTrainStore();onStatus('ok','Sent (unverified)');
+      }).catch(function(){
       try{
         var iframe=document.createElement('iframe');iframe.name='cc_nl_frame';iframe.style.cssText='display:none';
         document.body.appendChild(iframe);
         var form=document.createElement('form');form.method='POST';form.action=baseUrl+'/formResponse';form.target='cc_nl_frame';
         var input=document.createElement('input');input.type='hidden';input.name='entry.65932609';input.value=json;
         form.appendChild(input);document.body.appendChild(form);form.submit();
-        setTimeout(function(){document.body.removeChild(form);document.body.removeChild(iframe);},5000);
-        onStatus('ok',null);
-      }catch(e){onStatus('error','blocked');}
+        setTimeout(function(){try{document.body.removeChild(form);document.body.removeChild(iframe);}catch(e){}},5000);
+        _clearNLTrainStore();
+        onStatus('ok','Sent via iframe fallback');
+      }catch(e){onStatus('error','Send failed — network or CORS blocked');}
+      });
     });
   }
 
@@ -3035,13 +3051,14 @@ function startApp() {
     var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSc51xdQw_8JY2lN1aw8OZOT2Jzdx42m','vilJzqMGVw4tXo7wtA'];
     var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
 
-    // Try fetch first
-    fetch(baseUrl+'/formResponse', {
-      method:'POST', mode:'no-cors', body:fd
-    }).then(function(){
-      onStatus('ok', null);
-    }).catch(function(e){
-      // Fetch blocked — fallback to hidden iframe form submission
+    // Try cors first to verify; fall back to no-cors + iframe
+    fetch(baseUrl+'/formResponse', {method:'POST', body:fd}).then(function(resp){
+      if(resp.ok||resp.status===0){onStatus('ok',null);}
+      else{onStatus('error','Form returned '+resp.status+'. Check form URL.');}
+    }).catch(function(){
+      fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
+        onStatus('ok','Sent (unverified — no-cors)');
+      }).catch(function(e){
       try {
         var iframe = document.createElement('iframe');
         iframe.name = 'cc_submit_frame';
@@ -3056,11 +3073,12 @@ function startApp() {
         form.appendChild(input);
         document.body.appendChild(form);
         form.submit();
-        setTimeout(function(){ document.body.removeChild(form); document.body.removeChild(iframe); }, 5000);
-        onStatus('ok', null);
+        setTimeout(function(){ try{document.body.removeChild(form); document.body.removeChild(iframe);}catch(e){} }, 5000);
+        onStatus('ok', 'Sent via iframe fallback');
       } catch(e2) {
-        onStatus('error', 'blocked');
+        onStatus('error', 'Send failed — network or CORS blocked');
       }
+      });
     });
   }
 

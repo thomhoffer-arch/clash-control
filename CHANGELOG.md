@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.5 (2026-03-26)
+- Add 'Functional clearance' reason chip for element-type clearance envelopes
+
 ## v3.2.4 (2026-03-26)
 - Add 'Expected clash' to training reason chips
 
