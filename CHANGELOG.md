@@ -1,5 +1,8 @@
 # Changelog
 
+## v2.12.17 (2026-03-26)
+- Separate NL data submission from clash data using different form fields
+
 ## v2.12.16 (2026-03-26)
 - Add conversational clash setup + fuzzy confirmation for low-confidence matches
 
