@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.24 (2026-03-26)
+- Add 'stop' command to cancel any pending NL chat conversation
+
 ## v3.2.23 (2026-03-26)
 - Reset markers to off when switching projects
 

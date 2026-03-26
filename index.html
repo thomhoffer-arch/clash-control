@@ -250,7 +250,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.23',hash:'0eff56f',date:'2026-03-26T17:59:50Z'};
+  var CC_VERSION = {v:'3.2.24',hash:'0c4e4c6',date:'2026-03-26T18:01:18Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -11399,7 +11399,17 @@ function startApp() {
           <span class="spin" style=${{display:'inline-block',width:'.7rem',height:'.7rem',borderRadius:'50%',border:'1.5px solid rgba(96,165,250,.3)',borderTopColor:'#60a5fa',flexShrink:0}}></span>
           <span style=${{fontSize:'0.85rem',color:'#60a5fa',fontWeight:500}}>${isDetecting ? (function(){
             var p=detectPct, t=detectElapsed;
-            var msg=t>=240?'So… what movie are you watching?':t>=180?'Still going… maybe grab a coffee':t>=120?'This is a big one, hang in there':p===0?'Running clash detection':p<15?'Running clash detection':p<30?'Crunching triangles':p<45?'Working hard':p<60?'Running as fast as I can':p<75?'Almost halfway… just kidding, past it':p<85?'So many clashes to check':p<93?'Wrapping things up':p>=93?'Final stretch':'Detecting';
+            // Time-based overrides for very long runs
+            if(t>=240) return 'So… what movie are you watching?'+(p>0?' — '+p+'%':'')+'…';
+            if(t>=180) return 'Still going… maybe grab a coffee'+(p>0?' — '+p+'%':'')+'…';
+            if(t>=120) return 'This is a big one, hang in there'+(p>0?' — '+p+'%':'')+'…';
+            // Fast detection (<10s): just show base message
+            // Moderate (10-30s): 2 messages
+            // Slow (30s+): full message variety
+            var msg;
+            if(t<10) msg='Running clash detection';
+            else if(t<30) msg=p<50?'Running clash detection':p<93?'Working hard':'Almost done';
+            else msg=p===0?'Running clash detection':p<15?'Running clash detection':p<30?'Crunching triangles':p<45?'Working hard':p<60?'Running as fast as I can':p<75?'Almost halfway… just kidding, past it':p<85?'So many clashes to check':p<93?'Wrapping things up':'Final stretch';
             return msg+(p>0?' — '+p+'%':'')+'…';
           }()) : 'Model loading…'}</span>
         </div>
