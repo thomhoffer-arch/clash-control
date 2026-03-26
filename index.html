@@ -250,7 +250,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.7',hash:'e1cc0d8',date:'2026-03-26T17:26:57Z'};
+  var CC_VERSION = {v:'3.2.8',hash:'6ce9592',date:'2026-03-26T17:29:06Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -11676,9 +11676,13 @@ function startApp() {
     fd.append('entry.1252313993', json);
     var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSc51xdQw_8JY2lN1aw8OZOT2Jzdx42m','vilJzqMGVw4tXo7wtA'];
     var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
-    fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
-      window.dispatchEvent(new Event('cc-training-sent'));
-    }).catch(function(){});
+    fetch(baseUrl+'/formResponse',{method:'POST',body:fd}).then(function(resp){
+      if(resp.ok||resp.status===0) window.dispatchEvent(new Event('cc-training-sent'));
+    }).catch(function(){
+      fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
+        window.dispatchEvent(new Event('cc-training-sent'));
+      }).catch(function(){});
+    });
   }
 
   function _beaconSendNLTrainingData(models) {
@@ -11706,9 +11710,13 @@ function startApp() {
     fd.append('entry.65932609', json);
     var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSc51xdQw_8JY2lN1aw8OZOT2Jzdx42m','vilJzqMGVw4tXo7wtA'];
     var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
-    fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
-      window.dispatchEvent(new Event('cc-training-sent'));
-    }).catch(function(){});
+    fetch(baseUrl+'/formResponse',{method:'POST',body:fd}).then(function(resp){
+      if(resp.ok||resp.status===0) window.dispatchEvent(new Event('cc-training-sent'));
+    }).catch(function(){
+      fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
+        window.dispatchEvent(new Event('cc-training-sent'));
+      }).catch(function(){});
+    });
   }
 
   function _beaconSendDetectionRuns() {
@@ -11718,7 +11726,15 @@ function startApp() {
     var runs = [];
     try { runs = JSON.parse(localStorage.getItem('cc_detection_runs')||'[]'); } catch(e){ return; }
     if (!runs.length) return;
-    var payload = {type:'detection_runs', version:'1.0', app_version:CC_VERSION.v, count:runs.length, runs:runs};
+    // Slim payload: strip bulky clashFeatures/suppressedPairs to stay within form field limits
+    var slimRuns = runs.map(function(r){
+      var s = Object.assign({}, r);
+      delete s.clashFeatures;
+      delete s.suppressedPairs;
+      s.suppressedCount = r.suppressedCount || (r.suppressedPairs||[]).length;
+      return s;
+    });
+    var payload = {type:'detection_runs', version:'1.0', app_version:CC_VERSION.v, count:slimRuns.length, runs:slimRuns};
     var json = JSON.stringify(payload);
     try { localStorage.removeItem('cc_detection_runs'); } catch(e){}
     window.dispatchEvent(new Event('cc-training-data-change'));
@@ -11726,9 +11742,13 @@ function startApp() {
     fd.append('entry.61454827', json);
     var _gf = ['https://docs','google','com/forms/d/e/','1FAIpQLSc51xdQw_8JY2lN1aw8OZOT2Jzdx42m','vilJzqMGVw4tXo7wtA'];
     var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
-    fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
-      window.dispatchEvent(new Event('cc-training-sent'));
-    }).catch(function(){});
+    fetch(baseUrl+'/formResponse',{method:'POST',body:fd}).then(function(resp){
+      if(resp.ok||resp.status===0) window.dispatchEvent(new Event('cc-training-sent'));
+    }).catch(function(){
+      fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
+        window.dispatchEvent(new Event('cc-training-sent'));
+      }).catch(function(){});
+    });
   }
 
   function TrainingModePopup(props) {
