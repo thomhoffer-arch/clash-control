@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.1.6 (2026-03-26)
+- Add descriptions to each roadmap milestone in Quick Start Guide
+
 ## v3.1.5 (2026-03-26)
 - Add descriptions to each roadmap milestone in Quick Start Guide
 

@@ -249,7 +249,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.1.5',hash:'29fd93d',date:'2026-03-26T09:31:50Z'};
+  var CC_VERSION = {v:'3.1.6',hash:'62c0dd8',date:'2026-03-26T09:36:46Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -3436,7 +3436,34 @@ function startApp() {
         _activeClashMarker = grp;
         // Set orbit target to clash point so scroll-zoom centers on the clash
         S.orbit.target.set(point[0], point[1], point[2]);
+        // Save camera state after fly-to animation completes (~600ms)
+        setTimeout(function(){
+          window._ccClashCamState = {
+            pos: S.camera.position.clone(),
+            target: S.orbit.target.clone()
+          };
+        }, 600);
         invalidate();
+      };
+      window._ccRestoreClashCam = function() {
+        var saved = window._ccClashCamState;
+        if (!saved) return;
+        var startPos = S.camera.position.clone();
+        var startTarget = S.orbit.target.clone();
+        var endPos = saved.pos;
+        var endTarget = saved.target;
+        var dur = 400, start = performance.now();
+        function ease(t){ return t<0.5?4*t*t*t:(1-Math.pow(-2*t+2,3)/2); }
+        function anim() {
+          var t = Math.min(1, (performance.now()-start)/dur);
+          var e = ease(t);
+          S.camera.position.lerpVectors(startPos, endPos, e);
+          S.orbit.target.lerpVectors(startTarget, endTarget, e);
+          S.camera.lookAt(S.orbit.target);
+          invalidate();
+          if (t<1) requestAnimationFrame(anim);
+        }
+        requestAnimationFrame(anim);
       };
       window._ccRemoveActiveClashMarker = function() {
         if(_activeClashMarker) {
@@ -7145,7 +7172,7 @@ function startApp() {
     var stZoomed=useState(null), zoomedTo=stZoomed[0], setZoomedTo=stZoomed[1];
     function _zoomToggle(elemId, label) {
       if (zoomedTo === label) {
-        // Second click — fly to both elements
+        // Second click — smoothly restore camera to clash overview
         setZoomedTo(null);
         var reIds = [];
         if (it.elemA) reIds.push(it.elemA);
@@ -7153,9 +7180,7 @@ function startApp() {
         if (it._groupedElems) it._groupedElems.forEach(function(eid){reIds.push(eid);});
         if (reIds.length && _ghostOthers) _ghostOthers(reIds);
         if (it.elemA && _highlightById) _highlightById(it.elemA, false);
-        if (it.point && window._ccShowActiveClashMarker) window._ccShowActiveClashMarker(it.point);
-        if (_flyToElements && reIds.length) _flyToElements(reIds, it.point);
-        else if (it.point && _flyTo) _flyTo(it.point);
+        if (window._ccRestoreClashCam) window._ccRestoreClashCam();
       } else {
         setZoomedTo(label);
         if (_fitToElement && elemId) _fitToElement(elemId);
