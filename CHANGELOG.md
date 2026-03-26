@@ -1,5 +1,20 @@
 # Changelog
 
+## v3.2.25 (2026-03-26)
+- Scale detection messages to speed — fewer messages when it's fast
+
+## v3.2.24 (2026-03-26)
+- Add 'stop' command to cancel any pending NL chat conversation
+
+## v3.2.23 (2026-03-26)
+- Reset markers to off when switching projects
+
+## v3.2.22 (2026-03-26)
+- Add time-based fun messages for long-running clash detection
+
+## v3.2.21 (2026-03-26)
+- Add fun progress messages during clash detection
+
 ## v3.2.20 (2026-03-26)
 - Show detection progress percentage in NL command bar
 

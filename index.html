@@ -250,7 +250,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.20',hash:'b1dd634',date:'2026-03-26T17:56:27Z'};
+  var CC_VERSION = {v:'3.2.25',hash:'e4c52f3',date:'2026-03-26T18:37:03Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -1970,6 +1970,8 @@ function startApp() {
   }
 
   function _detectClashesCore(models, rules, onProgress, resolveAsync) {
+    var _prof = {t0:performance.now(), phases:{}}; // profiling
+    function _mark(name) { _prof.phases[name] = performance.now(); }
     var pick = function(id) {
       if (id === 'all') return models;
       // Array of selectors: union all matches
@@ -2059,7 +2061,9 @@ function startApp() {
     var _suppressedFVs = []; // semantic filter negatives for training
 
     // ── L0: Sweep and Prune — O(n log n + k) candidate pairs ───────
+    _mark('sweep_start');
     var candidates = _sweepAndPrune(grpA, grpB, rules, maxGapM);
+    _mark('sweep_end');
 
     // ── Pre-build BVHs for all elements in candidate pairs ────────
     // This avoids lazy-building during the hot candidate loop and ensures
@@ -2071,6 +2075,12 @@ function startApp() {
       if (!_bvhSeen[_kA]) { _bvhSeen[_kA]=true; _getBVH(_peA); }
       if (!_bvhSeen[_kB]) { _bvhSeen[_kB]=true; _getBVH(_peB); }
     }
+    _mark('bvh_build_end');
+    _prof._nElements = Object.keys(_bvhSeen).length;
+    _prof._nCandidates = candidates.length;
+
+    // ── Per-candidate timing accumulators ─────────────────────────
+    var _tHard = 0, _tSoft = 0, _tFilters = 0, _nHardTests = 0, _nSoftTests = 0;
 
     // ── Process candidate pairs (chunkable) ───────────────────────
     function _processCandidate(pair) {
@@ -2176,13 +2186,18 @@ function startApp() {
           if (_suppressedFVs.length < 500) _suppressedFVs.push(_sfFV);
         } catch(e) {}
       }
-      if (rules.hard && !_semanticSkipHard) hardPt = _meshesIntersect(eA, eB);
+      var _t1 = performance.now();
+      if (rules.hard && !_semanticSkipHard) { hardPt = _meshesIntersect(eA, eB); _nHardTests++; }
+      _tHard += performance.now() - _t1;
       // Overlap volume gate: reject hard clashes with trivial AABB overlap (surface contact noise)
       if (hardPt && rules.minOverlapVolM3 > 0) {
         if (_aabbOverlap(bA, bB).vol < rules.minOverlapVolM3) hardPt = false;
       }
       if (!hardPt && pairGapM>0) {
+        var _t2 = performance.now();
         geoDist = _meshMinDist(eA, eB, pairGapM, _softPairBuf);
+        _tSoft += performance.now() - _t2;
+        _nSoftTests++;
         isSoft = geoDist<=pairGapM;
       }
 
@@ -2373,6 +2388,47 @@ function startApp() {
       localStorage.setItem('cc_detection_runs', JSON.stringify(runs));
       window.dispatchEvent(new Event('cc-training-data-change'));
     } catch(e) {}
+
+    // ── Profiling summary ──────────────────────────────────────────
+    _mark('done');
+    var _ph = _prof.phases;
+    var _totalMs = _ph.done - _prof.t0;
+    var _sweepMs = _ph.sweep_end - _ph.sweep_start;
+    var _bvhMs = _ph.bvh_build_end - _ph.sweep_end;
+    var _mergeMs = _ph.done - (_ph.bvh_build_end + _tHard + _tSoft);
+    var profile = {
+      total_ms: Math.round(_totalMs),
+      sweep_and_prune_ms: Math.round(_sweepMs),
+      bvh_build_ms: Math.round(_bvhMs),
+      hard_clash_ms: Math.round(_tHard),
+      soft_clash_ms: Math.round(_tSoft),
+      merge_and_post_ms: Math.round(Math.max(0, _mergeMs)),
+      candidates: _prof._nCandidates,
+      elements: _prof._nElements,
+      hard_tests: _nHardTests,
+      soft_tests: _nSoftTests,
+      clashes_found: merged.length
+    };
+    // Calculate percentages
+    var _pcts = {};
+    ['sweep_and_prune_ms','bvh_build_ms','hard_clash_ms','soft_clash_ms','merge_and_post_ms'].forEach(function(k){
+      _pcts[k.replace('_ms','')] = _totalMs>0 ? Math.round(profile[k]/_totalMs*100)+'%' : '0%';
+    });
+    // Console table
+    try {
+      console.log('%c ClashControl Detection Profile ', 'background:#2563eb;color:#fff;font-weight:bold;padding:2px 8px;border-radius:4px');
+      console.table([
+        {Phase:'Sweep & Prune',    Time:profile.sweep_and_prune_ms+'ms', Pct:_pcts.sweep_and_prune, Detail:profile.elements+' elements → '+profile.candidates+' candidates'},
+        {Phase:'BVH Build',        Time:profile.bvh_build_ms+'ms',       Pct:_pcts.bvh_build,       Detail:profile.elements+' element BVHs'},
+        {Phase:'Hard Clash Tests', Time:profile.hard_clash_ms+'ms',      Pct:_pcts.hard_clash,      Detail:profile.hard_tests+' tri-tri tests'},
+        {Phase:'Soft Clash Tests', Time:profile.soft_clash_ms+'ms',      Pct:_pcts.soft_clash,      Detail:profile.soft_tests+' spatial hash queries'},
+        {Phase:'Merge & Post',     Time:profile.merge_and_post_ms+'ms',  Pct:_pcts.merge_and_post,  Detail:merged.length+' clashes after merge'},
+        {Phase:'TOTAL',            Time:profile.total_ms+'ms',           Pct:'100%',                Detail:''}
+      ]);
+    } catch(e){}
+    // Store for UI access
+    window._ccDetectProfile = profile;
+    window.dispatchEvent(new Event('cc-detect-profile'));
 
     return merged;
     } // end _finalize
@@ -5961,6 +6017,8 @@ function startApp() {
       classifications:{}, hiddenClasses:{}, colorByClass:null,
       floorPlan:null, _highlightedStorey:null
     }});
+    // Reset markers to off for new project (user can re-enable)
+    d({t:A.UPD_PREFS, u:{showMarkers:false}});
     d({t:A.SET_PROJECT, id:newProjId});
     setActiveProjectId(newProjId);
     // Trigger reload of stored files for new project (ModelSidebar will handle via effect)
@@ -10964,6 +11022,15 @@ function startApp() {
       return function() { window.removeEventListener('cc-model-loading', onModelLoad); };
     }, []);
 
+    // Track detection elapsed time for fun messages
+    var detectStartRef = useRef(0);
+    var stElapsed = useState(0), detectElapsed = stElapsed[0], setDetectElapsed = stElapsed[1];
+    useEffect(function() {
+      if (!s.detecting) { detectStartRef.current = 0; setDetectElapsed(0); return; }
+      if (!detectStartRef.current) detectStartRef.current = Date.now();
+      var timer = setInterval(function(){ setDetectElapsed(Math.floor((Date.now()-detectStartRef.current)/1000)); }, 1000);
+      return function(){ clearInterval(timer); };
+    }, [s.detecting]);
     // Show a chat bubble while detection runs, replace with result when done
     useEffect(function() {
       var was = prevDetecting.current;
@@ -10983,6 +11050,18 @@ function startApp() {
         if(nHard) breakdown.push(nHard+' hard');
         if(nSoft) breakdown.push(nSoft+' soft');
         var txt = n===0 ? 'No clashes detected.' : 'Found '+n+' clash'+(n!==1?'es':'')+' ('+breakdown.join(', ')+(breakdown.length?', ':'')+op+' open).';
+        // Append profiling summary if available
+        var _pr = window._ccDetectProfile;
+        if (_pr && _pr.total_ms) {
+          var secs = (_pr.total_ms/1000).toFixed(1);
+          txt += '\n*'+secs+'s total — ';
+          // Find the dominant phase
+          var phases = [['BVH build',_pr.bvh_build_ms],['hard tests',_pr.hard_clash_ms],['soft tests',_pr.soft_clash_ms],['sweep',_pr.sweep_and_prune_ms]];
+          phases.sort(function(a,b){return b[1]-a[1];});
+          var top2 = phases.slice(0,2).filter(function(p){return p[1]>50;});
+          txt += top2.map(function(p){return p[0]+' '+Math.round(p[1]/10)*10+'ms';}).join(', ');
+          txt += ' (see console for full breakdown)*';
+        }
         setMsgs(function(prev) {
           var idx = detectMsgIdx.current;
           var next = prev.slice();
@@ -11164,6 +11243,14 @@ function startApp() {
       if (!text) return;
       setMsgs(function(m){ return m.concat([{role:'user', text:text}]); });
       setInput('');
+      // "stop" / "cancel" / "clear" — reset chat state, cancel any pending conversation
+      if (/^(?:stop|cancel|clear|reset|nevermind)$/i.test(text)) {
+        clashCtxRef.current = null;
+        nlFeedbackRef.current = null;
+        setLoading(false);
+        setMsgs(function(m){ return m.concat([{role:'assistant', text:'Stopped. What would you like to do?'}]); });
+        return;
+      }
       // Check if this is a response to NL feedback prompt
       var feedbackResult = _checkNLFeedback(text);
       if (feedbackResult) {
@@ -11379,8 +11466,18 @@ function startApp() {
         }}>
           <span class="spin" style=${{display:'inline-block',width:'.7rem',height:'.7rem',borderRadius:'50%',border:'1.5px solid rgba(96,165,250,.3)',borderTopColor:'#60a5fa',flexShrink:0}}></span>
           <span style=${{fontSize:'0.85rem',color:'#60a5fa',fontWeight:500}}>${isDetecting ? (function(){
-            var p=detectPct;
-            var msg=p===0?'Running clash detection':p<15?'Running clash detection':p<30?'Crunching triangles':p<45?'Working hard':p<60?'Running as fast as I can':p<75?'Almost halfway… just kidding, past it':p<85?'So many clashes to check':p<93?'Wrapping things up':p>=93?'Final stretch':'Detecting';
+            var p=detectPct, t=detectElapsed;
+            // Time-based overrides for very long runs
+            if(t>=240) return 'So… what movie are you watching?'+(p>0?' — '+p+'%':'')+'…';
+            if(t>=180) return 'Still going… maybe grab a coffee'+(p>0?' — '+p+'%':'')+'…';
+            if(t>=120) return 'This is a big one, hang in there'+(p>0?' — '+p+'%':'')+'…';
+            // Fast detection (<10s): just show base message
+            // Moderate (10-30s): 2 messages
+            // Slow (30s+): full message variety
+            var msg;
+            if(t<10) msg='Running clash detection';
+            else if(t<30) msg=p<50?'Running clash detection':p<93?'Working hard':'Almost done';
+            else msg=p===0?'Running clash detection':p<15?'Running clash detection':p<30?'Crunching triangles':p<45?'Working hard':p<60?'Running as fast as I can':p<75?'Almost halfway… just kidding, past it':p<85?'So many clashes to check':p<93?'Wrapping things up':'Final stretch';
             return msg+(p>0?' — '+p+'%':'')+'…';
           }()) : 'Model loading…'}</span>
         </div>
