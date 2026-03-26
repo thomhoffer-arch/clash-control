@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.3 (2026-03-26)
+- Optimize clash detection performance and fix denied clash training data
+
 ## v3.2.2 (2026-03-26)
 - Remove extra 'mep' from Standards discipline dropdown to match spec
 
