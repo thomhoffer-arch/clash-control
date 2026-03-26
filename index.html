@@ -250,7 +250,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.18',hash:'b9b75b7',date:'2026-03-26T17:49:12Z'};
+  var CC_VERSION = {v:'3.2.20',hash:'b1dd634',date:'2026-03-26T17:56:27Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -1948,7 +1948,15 @@ function startApp() {
   //   3. Process candidates in chunks, yielding to UI between each chunk
   // Returns a Promise that resolves with the clash array.
   var _DETECT_CHUNK_SIZE = 80; // candidates per chunk before yielding
+  window._ccDetectProgress = null; // {done, total, pct} — updated during async detection
   function detectClashesAsync(models, rules, onProgress) {
+    var _userCb = onProgress;
+    onProgress = function(done, total) {
+      var pct = Math.round(done / total * 100);
+      window._ccDetectProgress = {done:done, total:total, pct:pct};
+      window.dispatchEvent(new Event('cc-detect-progress'));
+      if (_userCb) _userCb(done, total);
+    };
     return new Promise(function(resolve, reject) {
       try {
         // Run synchronous detection but yield between chunks
@@ -10932,6 +10940,17 @@ function startApp() {
     var detectMsgIdx = useRef(-1);
     var prevDetecting = useRef(s.detecting);
 
+    // Detection progress
+    var stPct = useState(0), detectPct = stPct[0], setDetectPct = stPct[1];
+    useEffect(function() {
+      function onProg() { var p = window._ccDetectProgress; setDetectPct(p ? p.pct : 0); }
+      function onDone() { setDetectPct(0); window._ccDetectProgress = null; }
+      window.addEventListener('cc-detect-progress', onProg);
+      // Reset when detection ends (clashes state changes)
+      return function() { window.removeEventListener('cc-detect-progress', onProg); };
+    }, []);
+    // Reset progress when detection finishes
+    useEffect(function() { if (!s.detecting) { setDetectPct(0); window._ccDetectProgress = null; } }, [s.detecting]);
     // Clear messages on project switch
     useEffect(function() {
       function onSwitch() { setMsgs([{role:'assistant', text:'New project loaded. How can I help?'}]); }
@@ -11352,12 +11371,18 @@ function startApp() {
       }}>
         <div style=${{
           flex:1, display:'flex', alignItems:'center', gap:'.45rem',
-          background:inputBg, border:'1px solid rgba(96,165,250,.35)',
+          background:isDetecting && detectPct>0 ? 'linear-gradient(90deg, rgba(37,99,235,.25) '+detectPct+'%, '+inputBg+' '+detectPct+'%)' : inputBg,
+          border:'1px solid rgba(96,165,250,.35)',
           borderRadius:8, padding:'.5rem .65rem',
-          animation:'nlBorderPulse 2s ease-in-out infinite'
+          transition:'background .3s',
+          animation:(!isDetecting||detectPct===0)?'nlBorderPulse 2s ease-in-out infinite':'none'
         }}>
           <span class="spin" style=${{display:'inline-block',width:'.7rem',height:'.7rem',borderRadius:'50%',border:'1.5px solid rgba(96,165,250,.3)',borderTopColor:'#60a5fa',flexShrink:0}}></span>
-          <span style=${{fontSize:'0.85rem',color:'#60a5fa',fontWeight:500}}>${isDetecting ? 'Running clash detection…' : 'Model loading…'}</span>
+          <span style=${{fontSize:'0.85rem',color:'#60a5fa',fontWeight:500}}>${isDetecting ? (function(){
+            var p=detectPct;
+            var msg=p===0?'Running clash detection':p<15?'Running clash detection':p<30?'Crunching triangles':p<45?'Working hard':p<60?'Running as fast as I can':p<75?'Almost halfway… just kidding, past it':p<85?'So many clashes to check':p<93?'Wrapping things up':p>=93?'Final stretch':'Detecting';
+            return msg+(p>0?' — '+p+'%':'')+'…';
+          }()) : 'Model loading…'}</span>
         </div>
       </div>` : html`<div style=${{
         padding:'.55rem .7rem', borderTop:'1px solid '+borderCol,
