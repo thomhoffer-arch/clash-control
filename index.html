@@ -249,7 +249,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.1.14',hash:'59a5303',date:'2026-03-26T11:16:16Z'};
+  var CC_VERSION = {v:'3.1.15',hash:'1c65b12',date:'2026-03-26T11:30:35Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -4161,6 +4161,8 @@ function startApp() {
           faceNormal.transformDirection(hit.object.matrixWorld);
           var pt = hit.point;
           var ctxEid = hit.object.userData.expressId;
+          // Highlight the right-clicked element (no ghost)
+          if (ctxEid && _highlightById) _highlightById(ctxEid, false);
           setCtxMenu({
             x: e.clientX - rect.left,
             y: e.clientY - rect.top,
@@ -4189,7 +4191,7 @@ function startApp() {
           var mx = ((e.clientX-rect.left)/rect.width)*2-1;
           var my = -((e.clientY-rect.top)/rect.height)*2+1;
           raycaster.setFromCamera(new THREE.Vector2(mx,my), S2.camera);
-          var hits = raycaster.intersectObject(S2._sectionPlaneVis);
+          var hits = raycaster.intersectObjects(S2._sectionPlaneVis.children, true);
           if (hits.length > 0) {
             e.preventDefault(); e.stopPropagation();
             _secDrag = {startY: e.clientY, startPos: cs.pos, didDrag: false, button: 0};
@@ -4237,7 +4239,7 @@ function startApp() {
         var mx = ((e.clientX-rect.left)/rect.width)*2-1;
         var my = -((e.clientY-rect.top)/rect.height)*2+1;
         raycaster.setFromCamera(new THREE.Vector2(mx,my), S2.camera);
-        var hits = raycaster.intersectObject(S2._sectionPlaneVis);
+        var hits = raycaster.intersectObjects(S2._sectionPlaneVis.children, true);
         if (hits.length > 0) {
           renderer.domElement.style.cursor = 'grab';
           _prevSecHover = true;
@@ -4466,28 +4468,48 @@ function startApp() {
       else window._ccCurrentSection = null;
       var planes = [];
       // Remove old section plane visual
-      if (S._sectionPlaneVis) { S.scene.remove(S._sectionPlaneVis); S._sectionPlaneVis.geometry.dispose(); S._sectionPlaneVis.material.dispose(); S._sectionPlaneVis = null; }
+      if (S._sectionPlaneVis) {
+        S._sectionPlaneVis.traverse(function(o){if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose();});
+        S.scene.remove(S._sectionPlaneVis); S._sectionPlaneVis = null;
+      }
+      // Helper: create wireframe rectangle + invisible drag surface
+      function _makeSectionVis(halfW, halfH, position, quaternion) {
+        var grp = new THREE.Group();
+        // Wireframe border (visible)
+        var pts = [new THREE.Vector3(-halfW,-halfH,0), new THREE.Vector3(halfW,-halfH,0),
+          new THREE.Vector3(halfW,halfH,0), new THREE.Vector3(-halfW,halfH,0)];
+        var lineGeo = new THREE.BufferGeometry().setFromPoints(pts);
+        var lineMat = new THREE.LineBasicMaterial({color:0x3b82f6, linewidth:1, transparent:true, opacity:0.7});
+        lineMat.clippingPlanes = [];
+        var border = new THREE.LineLoop(lineGeo, lineMat);
+        grp.add(border);
+        // Invisible fill for raycasting / drag detection
+        var fillGeo = new THREE.PlaneGeometry(halfW*2, halfH*2);
+        var fillMat = new THREE.MeshBasicMaterial({visible:false, side:THREE.DoubleSide});
+        fillMat.clippingPlanes = [];
+        var fill = new THREE.Mesh(fillGeo, fillMat);
+        fill.userData._sectionPlane = true;
+        grp.add(fill);
+        grp.position.copy(position);
+        if (quaternion) grp.quaternion.copy(quaternion);
+        grp.renderOrder = 999;
+        grp.userData._sectionPlane = true;
+        return grp;
+      }
       if(s.sectionAxis && S.mg.children.length>0){
         var box=new THREE.Box3().setFromObject(S.mg);
         var cut=box.min[s.sectionAxis]+(box.max[s.sectionAxis]-box.min[s.sectionAxis])*s.sectionPos;
         var nm={x:new THREE.Vector3(1,0,0),y:new THREE.Vector3(0,1,0),z:new THREE.Vector3(0,0,1)};
         planes.push(new THREE.Plane(nm[s.sectionAxis].clone().negate(),cut));
-        // Create visible plane
         var size = box.getSize(new THREE.Vector3());
-        var maxDim = Math.max(size.x, size.y, size.z) * 1.2;
-        var planeGeo = new THREE.PlaneGeometry(maxDim, maxDim);
-        var planeMat = new THREE.MeshBasicMaterial({color:0x3b82f6, transparent:true, opacity:0.08, side:THREE.DoubleSide, depthWrite:false});
-        var planeMesh = new THREE.Mesh(planeGeo, planeMat);
-        // Don't clip the plane itself
-        planeMat.clippingPlanes = [];
         var center = box.getCenter(new THREE.Vector3());
-        if(s.sectionAxis==='x'){ planeMesh.rotation.y=Math.PI/2; planeMesh.position.set(cut,center.y,center.z); }
-        else if(s.sectionAxis==='y'){ planeMesh.rotation.x=-Math.PI/2; planeMesh.position.set(center.x,cut,center.z); }
-        else { planeMesh.position.set(center.x,center.y,cut); }
-        planeMesh.userData._sectionPlane = true;
-        planeMesh.renderOrder = 999;
-        S.scene.add(planeMesh);
-        S._sectionPlaneVis = planeMesh;
+        var hw, hh, pos = new THREE.Vector3(), q = new THREE.Quaternion();
+        if(s.sectionAxis==='x'){ hw=Math.max(size.y,size.z)*0.7; hh=hw; pos.set(cut,center.y,center.z); q.setFromAxisAngle(new THREE.Vector3(0,1,0),Math.PI/2); }
+        else if(s.sectionAxis==='y'){ hw=Math.max(size.x,size.z)*0.7; hh=hw; pos.set(center.x,cut,center.z); q.setFromAxisAngle(new THREE.Vector3(1,0,0),-Math.PI/2); }
+        else { hw=Math.max(size.x,size.y)*0.7; hh=hw; pos.set(center.x,center.y,cut); }
+        var vis = _makeSectionVis(hw, hh, pos, q);
+        S.scene.add(vis);
+        S._sectionPlaneVis = vis;
       } else if(s.sectionCustom){
         var sc=s.sectionCustom;
         var normal=new THREE.Vector3(sc.normal[0],sc.normal[1],sc.normal[2]);
@@ -4498,18 +4520,11 @@ function startApp() {
         var shiftedPt=pt.clone().addScaledVector(normal,offset);
         var plane=new THREE.Plane().setFromNormalAndCoplanarPoint(normal.negate(),shiftedPt);
         planes.push(plane);
-        // Create visible plane for custom section
-        var maxDim2 = diag * 0.8;
-        var planeGeo2 = new THREE.PlaneGeometry(maxDim2, maxDim2);
-        var planeMat2 = new THREE.MeshBasicMaterial({color:0x3b82f6, transparent:true, opacity:0.08, side:THREE.DoubleSide, depthWrite:false});
-        var planeMesh2 = new THREE.Mesh(planeGeo2, planeMat2);
-        planeMat2.clippingPlanes = [];
-        planeMesh2.position.copy(shiftedPt);
-        planeMesh2.lookAt(shiftedPt.clone().add(normal));
-        planeMesh2.userData._sectionPlane = true;
-        planeMesh2.renderOrder = 999;
-        S.scene.add(planeMesh2);
-        S._sectionPlaneVis = planeMesh2;
+        var halfDim = diag * 0.35;
+        var vis2 = _makeSectionVis(halfDim, halfDim, shiftedPt, null);
+        vis2.lookAt(shiftedPt.clone().add(normal));
+        S.scene.add(vis2);
+        S._sectionPlaneVis = vis2;
       }
       S.renderer.clippingPlanes=planes;
       invalidate();
