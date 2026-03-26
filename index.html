@@ -250,7 +250,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.30',hash:'5fcb1c3',date:'2026-03-26T21:41:47Z'};
+  var CC_VERSION = {v:'3.2.31',hash:'c2b4d39',date:'2026-03-26T21:51:00Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -450,6 +450,15 @@ function startApp() {
     REVIT_BRIDGE:'REVIT_BRIDGE', UPD_BRIDGE:'UPD_BRIDGE',
     BRIDGE_LOG:'BRIDGE_LOG', CLEAR_BRIDGE_LOG:'CLEAR_BRIDGE_LOG'
   };
+  // Collect all element IDs from a clash/issue item
+  function _itemEids(item) {
+    var ids=[];
+    if(item.elemA) ids.push(item.elemA);
+    if(item.elemB) ids.push(item.elemB);
+    if(item.elementId) ids.push(item.elementId);
+    if(item._groupedElems) item._groupedElems.forEach(function(eid){ids.push(eid);});
+    return ids;
+  }
   function reducer(s,a) {
     switch(a.t) {
       case A.ADD_MODEL:   var _am=a.v; if(s.modelMeta){var _mm=s.modelMeta.find(function(m){return m.id===_am.id});if(_mm){if(_mm.visible===false)_am=Object.assign({},_am,{visible:false});if(_mm.discipline)_am=Object.assign({},_am,{discipline:_mm.discipline});if(_mm.color)_am=Object.assign({},_am,{color:_mm.color});if(_mm.tag)_am=Object.assign({},_am,{tag:_mm.tag});}} return Object.assign({},s,{models:s.models.concat([_am])});
@@ -512,9 +521,7 @@ function startApp() {
             var dNext=dVisible[Math.min(dIdx,dVisible.length-1)]||null;
             var dNextId=dNext?dNext.id:null;
             if(dNext) setTimeout(function(){
-              var ids=[];
-              if(dNext.elemA) ids.push(dNext.elemA);
-              if(dNext.elemB) ids.push(dNext.elemB);
+              var ids=_itemEids(dNext);
               if(ids.length&&_ghostOthers) _ghostOthers(ids);
               if(dNext.elemA&&_highlightById) _highlightById(dNext.elemA,false);
               if(dNext.point&&window._ccShowActiveClashMarker) window._ccShowActiveClashMarker(dNext.point);
@@ -578,9 +585,7 @@ function startApp() {
             var nextId = nextClash ? nextClash.id : null;
             // Schedule camera fly-to for the next clash
             if(nextClash) setTimeout(function(){
-              var ids=[];
-              if(nextClash.elemA) ids.push(nextClash.elemA);
-              if(nextClash.elemB) ids.push(nextClash.elemB);
+              var ids=_itemEids(nextClash);
               if(ids.length&&_ghostOthers) _ghostOthers(ids);
               if(nextClash.elemA&&_highlightById) _highlightById(nextClash.elemA,false);
               if(nextClash.point&&window._ccShowActiveClashMarker) window._ccShowActiveClashMarker(nextClash.point);
@@ -3883,7 +3888,7 @@ function startApp() {
       }
       function unghostAll(){
         _ghostedMeshes.forEach(function(g){
-          g.mesh.material = g.origMaterial;
+          if(g.mesh.parent) g.mesh.material = g.origMaterial;
         });
         _ghostedMeshes = [];
         // Reset hover tracking to prevent stale material references
@@ -4027,22 +4032,7 @@ function startApp() {
       window._ccRestoreClashCam = function() {
         var saved = window._ccClashCamState;
         if (!saved) return;
-        var startPos = S.camera.position.clone();
-        var startTarget = S.orbit.target.clone();
-        var endPos = saved.pos;
-        var endTarget = saved.target;
-        var dur = 400, start = performance.now();
-        function ease(t){ return t<0.5?4*t*t*t:(1-Math.pow(-2*t+2,3)/2); }
-        function anim() {
-          var t = Math.min(1, (performance.now()-start)/dur);
-          var e = ease(t);
-          S.camera.position.lerpVectors(startPos, endPos, e);
-          S.orbit.target.lerpVectors(startTarget, endTarget, e);
-          S.camera.lookAt(S.orbit.target);
-          invalidate();
-          if (t<1) requestAnimationFrame(anim);
-        }
-        requestAnimationFrame(anim);
+        _animateFly(saved.target.clone(), saved.pos.clone(), 400);
       };
       window._ccRemoveActiveClashMarker = function() {
         if(_activeClashMarker) {
@@ -4144,6 +4134,13 @@ function startApp() {
         var dist = Math.max(sz.x,sz.y,sz.z,5)*2;
         _flyTo([ctr.x,ctr.y,ctr.z], dist);
       };
+      // Adaptive zoom distance: smaller objects get more padding, large objects get tighter framing
+      function _zoomDist(maxDim) {
+        var d = Math.max(maxDim, 0.5);
+        var scale = 2.5 - (Math.min(d, 20) / 20) * 1.3; // 2.5 for tiny, 1.2 for 20m+
+        return d * Math.max(1.2, Math.min(2.5, scale));
+      }
+
       _fitToElement = function(expressId, hint) {
         if(!expressId||!S.mg||!S.orbit) return;
         var found = null;
@@ -4159,12 +4156,7 @@ function startApp() {
         if(box.isEmpty()) return;
         var ctr = box.getCenter(new THREE.Vector3());
         var sz = box.getSize(new THREE.Vector3());
-        var maxDim = Math.max(sz.x,sz.y,sz.z,0.5);
-        // Scale factor: smaller objects *2.5, larger objects approach *1.2
-        var scaleFactor = 2.5 - (Math.min(maxDim, 20) / 20) * 1.3; // 2.5 for tiny, 1.2 for 20m+
-        scaleFactor = Math.max(1.2, Math.min(2.5, scaleFactor));
-        var dist = maxDim * scaleFactor;
-        _flyTo([ctr.x,ctr.y,ctr.z], dist, hint||null);
+        _flyTo([ctr.x,ctr.y,ctr.z], _zoomDist(Math.max(sz.x,sz.y,sz.z)), hint||null);
       };
 
       // Fly to element(s) — auto-detects vertical shift vs full reframe
@@ -4193,11 +4185,7 @@ function startApp() {
         }
         var ctr = box.getCenter(new THREE.Vector3());
         var sz = box.getSize(new THREE.Vector3());
-        var maxDim = Math.max(sz.x, sz.y, sz.z, 0.5);
-        var scaleFactor = 2.5 - (Math.min(maxDim, 20) / 20) * 1.3;
-        scaleFactor = Math.max(1.2, Math.min(2.5, scaleFactor));
-        var dist = maxDim * scaleFactor;
-        _flyTo([ctr.x, ctr.y, ctr.z], dist);
+        _flyTo([ctr.x, ctr.y, ctr.z], _zoomDist(Math.max(sz.x,sz.y,sz.z)));
       };
 
       // ── Section Box helper ──
@@ -4465,7 +4453,7 @@ function startApp() {
         });
 
         // ── Measurement mode: intercept clicks ──
-        if(measureModeRef.current && hits.length>0 && hits[0].object.material !== _ghostMat) {
+        if(measureModeRef.current && hits.length>0) {
           var hitPt = hits[0].point.clone();
           measurePtsRef.current.push(hitPt);
           // Add a small sphere at click point
@@ -4551,10 +4539,7 @@ function startApp() {
               var hitClash = null;
               for(var ci=0;ci<allClashes.length;ci++){if(allClashes[ci].id===mh.userData.clashId){hitClash=allClashes[ci];break;}}
               if(hitClash){
-                var cids=[];
-                if(hitClash.elemA) cids.push(hitClash.elemA);
-                if(hitClash.elemB) cids.push(hitClash.elemB);
-                if(hitClash._groupedElems) hitClash._groupedElems.forEach(function(eid2){cids.push(eid2);});
+                var cids=_itemEids(hitClash);
                 if(cids.length&&_ghostOthers) _ghostOthers(cids);
                 if(hitClash.elemA&&_highlightById) _highlightById(hitClash.elemA,false);
                 if(hitClash.point && window._ccShowActiveClashMarker) window._ccShowActiveClashMarker(hitClash.point);
@@ -4576,8 +4561,7 @@ function startApp() {
               var hitIssue = null;
               for(var ii=0;ii<allIssues.length;ii++){if(allIssues[ii].id===imh.userData.issueId){hitIssue=allIssues[ii];break;}}
               if(hitIssue){
-                var iids=[];
-                if(hitIssue.elementId) iids.push(hitIssue.elementId);
+                var iids=_itemEids(hitIssue);
                 if(iids.length&&_ghostOthers) _ghostOthers(iids);
                 if(hitIssue.elementId&&_highlightById) _highlightById(hitIssue.elementId,false);
                 if(hitIssue.point && window._ccShowActiveClashMarker) window._ccShowActiveClashMarker(hitIssue.point);
@@ -4645,11 +4629,7 @@ function startApp() {
             // Fly to element on click (if autoFlyTo enabled)
             if(prefsRef.current.autoFlyTo!==false && _flyTo) {
               var elSz = hitBox.getSize(new THREE.Vector3());
-              var elMaxDim = Math.max(elSz.x,elSz.y,elSz.z,0.5);
-              var elScale = 2.5 - (Math.min(elMaxDim, 20) / 20) * 1.3;
-              elScale = Math.max(1.2, Math.min(2.5, elScale));
-              var elDist = elMaxDim * elScale;
-              _flyTo(hitPt, elDist, hitNormal ? {normal:hitNormal} : null);
+              _flyTo(hitPt, _zoomDist(Math.max(elSz.x,elSz.y,elSz.z)), hitNormal ? {normal:hitNormal} : null);
             }
             } catch(pickErr) { console.warn('Element pick failed:', pickErr.message||pickErr); }
           }
@@ -5150,11 +5130,16 @@ function startApp() {
     useEffect(function(){
       var S = state3d.current; if(!S.renderer||!S.mg) return;
       // Clean up previous
+      function _disposeMesh(obj){
+        S.scene.remove(obj);
+        if(obj.geometry) obj.geometry.dispose();
+        if(obj.material) obj.material.dispose();
+      }
       function cleanupSbox(){
-        if(S._sboxHelper){S.scene.remove(S._sboxHelper);S._sboxHelper=null;}
-        if(S._sboxHandles){S._sboxHandles.forEach(function(h){S.scene.remove(h);});S._sboxHandles=null;}
-        if(S._sboxRotRing){S.scene.remove(S._sboxRotRing);S._sboxRotRing=null;}
-        if(S._sboxFacePanels){S._sboxFacePanels.forEach(function(p){S.scene.remove(p);});S._sboxFacePanels=null;}
+        if(S._sboxHelper){_disposeMesh(S._sboxHelper);S._sboxHelper=null;}
+        if(S._sboxHandles){S._sboxHandles.forEach(_disposeMesh);S._sboxHandles=null;}
+        if(S._sboxRotRing){_disposeMesh(S._sboxRotRing);S._sboxRotRing=null;}
+        if(S._sboxFacePanels){S._sboxFacePanels.forEach(_disposeMesh);S._sboxFacePanels=null;}
       }
       if(!s.sectionBox||!s.sectionBox.enabled) {
         if(S._sectionBoxActive) {
@@ -6848,21 +6833,24 @@ function startApp() {
             var hasElev = elev!=null;
             var isPlanActive = activePlan && activePlan.storeyName===st;
             var isHighlighted = s._highlightedStorey===st;
+            function _storeyEids(){
+              var ids=[];
+              s.models.forEach(function(m){
+                (m.elements||[]).forEach(function(el){
+                  if(el.props&&el.props.storey===st) ids.push(el.expressId);
+                });
+              });
+              return ids;
+            }
             return html`<div key=${st}
               onClick=${function(e){
                 e.preventDefault();
                 // Single click: highlight elements on this storey (ghost others, NO fly-to)
                 if(isHighlighted){
-                  // Un-highlight: unghost all
                   if(_unghostAll) _unghostAll();
                   d({t:A.SET_HIGHLIGHTED_STOREY,v:null});
                 } else {
-                  var ids=[];
-                  s.models.forEach(function(m){
-                    (m.elements||[]).forEach(function(el){
-                      if(el.props&&el.props.storey===st) ids.push(el.expressId);
-                    });
-                  });
+                  var ids=_storeyEids();
                   if(ids.length && _ghostOthers) _ghostOthers(ids);
                   d({t:A.SET_HIGHLIGHTED_STOREY,v:st});
                 }
@@ -6870,13 +6858,7 @@ function startApp() {
               onDblClick=${function(e){
                 e.preventDefault(); e.stopPropagation();
                 // Double click: fly-to + ghost others
-                // If already viewing a level, use vertical shift (no rotation)
-                var ids=[];
-                s.models.forEach(function(m){
-                  (m.elements||[]).forEach(function(el){
-                    if(el.props&&el.props.storey===st) ids.push(el.expressId);
-                  });
-                });
+                var ids=_storeyEids();
                 if(ids.length){
                   if(_ghostOthers) _ghostOthers(ids);
                   if(_flyToElements) _flyToElements(ids);
@@ -8147,10 +8129,7 @@ function startApp() {
       if (zoomedTo === label) {
         // Second click — smoothly restore camera to clash overview
         setZoomedTo(null);
-        var reIds = [];
-        if (it.elemA) reIds.push(it.elemA);
-        if (it.elemB) reIds.push(it.elemB);
-        if (it._groupedElems) it._groupedElems.forEach(function(eid){reIds.push(eid);});
+        var reIds = _itemEids(it);
         if (reIds.length && _ghostOthers) _ghostOthers(reIds);
         if (it.elemA && _highlightById) _highlightById(it.elemA, false);
         if (window._ccRestoreClashCam) window._ccRestoreClashCam();
@@ -8323,11 +8302,7 @@ function startApp() {
           var nxt = flatItems[nextIdx];
           d({t:A.ACTIVE,id:nxt.id});
           // Trigger highlight + fly-to for the newly selected item
-          var hIds=[];
-          if(nxt.elemA) hIds.push(nxt.elemA);
-          if(nxt.elemB) hIds.push(nxt.elemB);
-          if(nxt.elementId) hIds.push(nxt.elementId);
-          if(nxt._groupedElems) nxt._groupedElems.forEach(function(eid){hIds.push(eid);});
+          var hIds=_itemEids(nxt);
           if(hIds.length&&_ghostOthers) _ghostOthers(hIds);
           if(nxt.elemA&&_highlightById) _highlightById(nxt.elemA,false);
           if(nxt.elementId&&_highlightById) _highlightById(nxt.elementId,false);
@@ -8481,18 +8456,14 @@ function startApp() {
     })();
     return html`<div onClick=${function(){
         var wasActive=active;
+        var eids=_itemEids(it);
         if(wasActive){
           // Already active — re-zoom to both elements (restore ghost + fly to both)
-          var reIds=[];
-          if(it.elemA) reIds.push(it.elemA);
-          if(it.elemB) reIds.push(it.elemB);
-          if(it.elementId) reIds.push(it.elementId);
-          if(it._groupedElems) it._groupedElems.forEach(function(eid){reIds.push(eid);});
-          if(reIds.length&&_ghostOthers) _ghostOthers(reIds);
+          if(eids.length&&_ghostOthers) _ghostOthers(eids);
           if(it.elemA&&_highlightById) _highlightById(it.elemA,false);
           if(it.elementId&&_highlightById) _highlightById(it.elementId,false);
           if(it.point && window._ccShowActiveClashMarker) window._ccShowActiveClashMarker(it.point);
-          if(_flyToElements && reIds.length) _flyToElements(reIds, it.point);
+          if(_flyToElements && eids.length) _flyToElements(eids, it.point);
           else if(it.point && _flyTo) _flyTo(it.point);
           return;
         }
@@ -8502,24 +8473,13 @@ function startApp() {
           window._ccDispatch({t:A.SECTION_BOX,v:null});
         }
         if(pr.autoHighlight!==false){
-          var ids=[];
-          if(it.elemA) ids.push(it.elemA);
-          if(it.elemB) ids.push(it.elemB);
-          if(it.elementId) ids.push(it.elementId);
-          if(it._groupedElems) it._groupedElems.forEach(function(eid){ids.push(eid);});
-          if(ids.length&&_ghostOthers) _ghostOthers(ids);
+          if(eids.length&&_ghostOthers) _ghostOthers(eids);
           if(it.elemA&&_highlightById) _highlightById(it.elemA,false);
           if(it.elementId&&_highlightById) _highlightById(it.elementId,false);
-          // Show bright blue marker at clash point
           if(it.point && window._ccShowActiveClashMarker) window._ccShowActiveClashMarker(it.point);
         }
         if(pr.autoFlyTo!==false){
-          var flyIds=[];
-          if(it.elemA) flyIds.push(it.elemA);
-          if(it.elemB) flyIds.push(it.elemB);
-          if(it.elementId) flyIds.push(it.elementId);
-          if(it._groupedElems) it._groupedElems.forEach(function(eid){flyIds.push(eid);});
-          if(_flyToElements && flyIds.length) _flyToElements(flyIds, it.point);
+          if(_flyToElements && eids.length) _flyToElements(eids, it.point);
           else if(it.point && _flyTo) _flyTo(it.point);
         }
       }}
@@ -12977,19 +12937,13 @@ function startApp() {
             if(selKeys.length>0){
               selKeys.forEach(function(sid){
                 var it=all.find(function(c){return c.id===sid;});
-                if(it){
-                  if(it.elemA) ids.push(it.elemA);
-                  if(it.elemB) ids.push(it.elemB);
-                }
+                if(it) _itemEids(it).forEach(function(eid){ids.push(eid);});
               });
             }
             // Fall back to single active item
             if(!ids.length && s.activeId){
               var item=all.find(function(c){return c.id===s.activeId;});
-              if(item){
-                if(item.elemA) ids.push(item.elemA);
-                if(item.elemB) ids.push(item.elemB);
-              }
+              if(item) ids=_itemEids(item);
             }
             return ids.length?ids:null;
           }
