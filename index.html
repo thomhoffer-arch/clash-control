@@ -249,7 +249,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.1.24',hash:'1a05ce4',date:'2026-03-26T12:43:31Z'};
+  var CC_VERSION = {v:'3.1.25',hash:'6006dc5',date:'2026-03-26T12:45:52Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -11122,19 +11122,23 @@ function startApp() {
     var stNlN = useState(function(){return _getNLTrainCount();}), nlN=stNlN[0], setNlN=stNlN[1];
     var stClN = useState(function(){return _getClashTrainCount();}), clashN=stClN[0], setClashN=stClN[1];
     var stRunN = useState(function(){try{return JSON.parse(localStorage.getItem('cc_detection_runs')||'[]').length;}catch(e){return 0;}}), runN=stRunN[0], setRunN=stRunN[1];
+    var stFlash = useState(false), sentFlash=stFlash[0], setSentFlash=stFlash[1];
     useEffect(function(){
       function sync(){ setNlN(_getNLTrainCount()); setClashN(_getClashTrainCount()); try{setRunN(JSON.parse(localStorage.getItem('cc_detection_runs')||'[]').length);}catch(e){setRunN(0);} }
+      function flash(){ setSentFlash(true); setTimeout(function(){setSentFlash(false);},2000); }
       window.addEventListener('cc-training-data-change', sync);
-      return function(){ window.removeEventListener('cc-training-data-change', sync); };
+      window.addEventListener('cc-training-sent', flash);
+      return function(){ window.removeEventListener('cc-training-data-change', sync); window.removeEventListener('cc-training-sent', flash); };
     },[]);
 
     return html`<div style=${{position:'absolute',top:'3.5rem',left:'50%',transform:'translateX(-50%)',
       zIndex:20,pointerEvents:'auto',display:'flex',flexDirection:'column',alignItems:'center'}}>
       <div class="cc-training-btn-3d" style=${{display:'flex',alignItems:'center',
           borderRadius:999,
-          background:s.trainingMode?'rgba(124,58,237,.85)':'var(--overlay-bg)',
-          border:'1px solid '+(s.trainingMode?'#a78bfa':'var(--border)'),
-          boxShadow:s.trainingMode?'0 0 20px rgba(124,58,237,.3)':'var(--shadow-md)',
+          background:sentFlash?'rgba(34,197,94,.85)':s.trainingMode?'rgba(124,58,237,.85)':'var(--overlay-bg)',
+          border:'1px solid '+(sentFlash?'#22c55e':s.trainingMode?'#a78bfa':'var(--border)'),
+          boxShadow:sentFlash?'0 0 24px rgba(34,197,94,.5)':s.trainingMode?'0 0 20px rgba(124,58,237,.3)':'var(--shadow-md)',
+          transition:'background .3s, border-color .3s, box-shadow .3s',
           overflow:'hidden'}}>
         <button onClick=${function(){if(window._ccToggleTraining)window._ccToggleTraining();else d({t:A.TRAINING_MODE}); if(!s.trainingMode) setExpanded(false);}}
           style=${{display:'flex',alignItems:'center',gap:'.4rem',
@@ -11236,6 +11240,7 @@ function startApp() {
     var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
     fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
       _clearClashTrainStore();
+      window.dispatchEvent(new Event('cc-training-sent'));
     }).catch(function(){});
     unsent.forEach(function(c){ _beaconSentIds[c.id]=true; });
   }
@@ -11265,6 +11270,7 @@ function startApp() {
     var baseUrl = _gf[0]+'.'+_gf[1]+'.'+_gf[2]+_gf[3]+_gf[4];
     fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
       _clearNLTrainStore();
+      window.dispatchEvent(new Event('cc-training-sent'));
     }).catch(function(){});
     _beaconNLSentIdx = store.length;
   }
@@ -11285,6 +11291,7 @@ function startApp() {
     fetch(baseUrl+'/formResponse',{method:'POST',mode:'no-cors',body:fd}).then(function(){
       try { localStorage.removeItem('cc_detection_runs'); } catch(e){}
       window.dispatchEvent(new Event('cc-training-data-change'));
+      window.dispatchEvent(new Event('cc-training-sent'));
     }).catch(function(){});
   }
 
