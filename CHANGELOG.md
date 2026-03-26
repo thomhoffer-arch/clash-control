@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.10 (2026-03-26)
+- Switch all Google Form sends from FormData to URLSearchParams
+
 ## v3.2.9 (2026-03-26)
 - Fix detection run summary not appearing in Google Form
 
