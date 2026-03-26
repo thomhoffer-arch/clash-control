@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.16 (2026-03-26)
+- Clear NL chat messages when switching projects
+
 ## v3.2.15 (2026-03-26)
 - Use atomic REPLACE_MODEL for model versioning, fix Three.js mesh swap
 

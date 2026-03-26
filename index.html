@@ -250,7 +250,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.15',hash:'b228d2a',date:'2026-03-26T17:43:26Z'};
+  var CC_VERSION = {v:'3.2.16',hash:'c92d86b',date:'2026-03-26T17:45:36Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -5272,11 +5272,11 @@ function startApp() {
           <span style=${{color:'var(--text-muted)'}}>${CC_VERSION.v} (${CC_VERSION.hash})</span>
         </div>
       </div>`}
-      ${s.clashes.length>0 && html`<div class="cc-overlay-top" style=${{position:'absolute',top:'.75rem',left:'50%',transform:'translateX(-50%)',display:'flex',gap:'.3rem',pointerEvents:'auto'}}>
-        <button onClick=${function(){if(_fitToClashes)_fitToClashes(s.clashes);}}
+      ${s.models.length>0 && html`<div class="cc-overlay-top" style=${{position:'absolute',top:'.75rem',left:'50%',transform:'translateX(-50%)',display:'flex',gap:'.3rem',pointerEvents:'auto'}}>
+        ${s.clashes.length>0 && html`<button onClick=${function(){if(_fitToClashes)_fitToClashes(s.clashes);}}
           style=${{...S_BTN,background:'var(--overlay-bg)',color:'#93c5fd',border:'1px solid var(--border)',fontSize:'0.75rem',padding:'.25rem .5rem'}}>
           Fit All Clashes
-        </button>
+        </button>`}
         <button onClick=${function(){d({t:A.UPD_PREFS,u:{showMarkers:!s.prefs.showMarkers}})}}
           style=${{...S_BTN,background:s.prefs.showMarkers?'rgba(37,99,235,.7)':'var(--overlay-bg)',color:s.prefs.showMarkers?'#fff':'var(--text-muted)',border:'1px solid var(--border)',fontSize:'0.75rem',padding:'.25rem .5rem'}}>
           ${s.prefs.showMarkers?'Markers On':'Markers Off'}
