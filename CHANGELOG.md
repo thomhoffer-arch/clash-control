@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.0.7 (2026-03-26)
+- Fix auto-share status text: mention periodic sending, not just session end
+
+## v3.0.6 (2026-03-26)
+- Remove inner sphere from clash marker — only keep crosshair rings
+
 ## v3.0.5 (2026-03-26)
 - Zoom A/B toggle: second click flies to clash point
 
