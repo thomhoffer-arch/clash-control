@@ -249,7 +249,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.0.5',hash:'d422622',date:'2026-03-26T08:24:18Z'};
+  var CC_VERSION = {v:'3.0.6',hash:'83a88ee',date:'2026-03-26T08:27:09Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -10915,7 +10915,7 @@ function startApp() {
             ${clashN>0?clashN+' clash record'+(clashN!==1?'s':''):''}${clashN>0&&nlN>0?' \u2022 ':''}${nlN>0?nlN+' NL command'+(nlN!==1?'s':''):''}${!clashN&&!nlN?'No stored training data':''}
           </div>
           <!-- Status -->
-          ${dataConsent && html`<div style=${{fontSize:'0.57rem',color:'#a78bfa',marginBottom:'.3rem'}}>Auto-sharing on \u2014 clash + NL data sent at end of session.</div>`}
+          ${dataConsent && html`<div style=${{fontSize:'0.57rem',color:'#a78bfa',marginBottom:'.3rem'}}>Auto-sharing on \u2014 data sent periodically and at end of session.</div>`}
           ${!dataConsent && html`<div style=${{fontSize:'0.57rem',color:'var(--text-faint)',marginBottom:'.3rem'}}>Auto-sharing off \u2014 data stays local.</div>`}
           <!-- Delete -->
           <div style=${{display:'flex',gap:'.25rem',flexWrap:'wrap'}}>
