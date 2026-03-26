@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.1.15 (2026-03-26)
+- Add visible section plane with drag-to-move in 3D viewport
+
 ## v3.1.14 (2026-03-26)
 - Right-click drag to move section plane in the 3D viewport
 
