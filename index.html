@@ -249,7 +249,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.1.27',hash:'7c3ab7b',date:'2026-03-26T12:49:11Z'};
+  var CC_VERSION = {v:'3.1.28',hash:'483ca51',date:'2026-03-26T12:51:33Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -2615,7 +2615,7 @@ function startApp() {
       var s = localStorage.getItem('cc_clash_training_data');
       if (!s) return 0;
       var store = JSON.parse(s), count = 0;
-      Object.keys(store).forEach(function(k){ if(store[k].label_source!=='thumbs_feedback') count++; });
+      Object.keys(store).forEach(function(k){ if(store[k].label_source==='verdict') count++; });
       return count;
     } catch(e) { return 0; }
   }
@@ -11824,7 +11824,8 @@ function startApp() {
           var c = s.clashes.find(function(c){return c.id===a.id;});
           if (c && c._trainFV && a.u.status !== c.status) {
             var labelMap = {confirmed:1.0, denied:0.0, in_progress:0.8, resolved:0.7, closed:0.2};
-            if (labelMap[a.u.status] != null) _saveClashTrainRecord(c.id, c._trainFV, labelMap[a.u.status], a.u.status==='denied'?'explicit_feedback':'status_change', false);
+            var isVerdict = a.u.status==='confirmed'||a.u.status==='denied';
+            if (labelMap[a.u.status] != null) _saveClashTrainRecord(c.id, c._trainFV, labelMap[a.u.status], isVerdict?'verdict':'status_change', false);
           }
         }
         if (a.t===A.AI_FEEDBACK && a.v) {
@@ -11839,7 +11840,8 @@ function startApp() {
           var labelMap2 = {confirmed:1.0, denied:0.0, in_progress:0.8, resolved:0.7, closed:0.2};
           if (labelMap2[a.u.status] != null) {
             s.clashes.forEach(function(c){
-              if (s.selected[c.id] && c._trainFV && c.status !== a.u.status) _saveClashTrainRecord(c.id, c._trainFV, labelMap2[a.u.status], a.u.status==='denied'?'explicit_feedback':'status_change', false);
+              var isV2 = a.u.status==='confirmed'||a.u.status==='denied';
+              if (s.selected[c.id] && c._trainFV && c.status !== a.u.status) _saveClashTrainRecord(c.id, c._trainFV, labelMap2[a.u.status], isV2?'verdict':'status_change', false);
             });
           }
         }

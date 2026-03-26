@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.1.28 (2026-03-26)
+- Exclude thumbs feedback from clash verdict counter
+
 ## v3.1.27 (2026-03-26)
 - Clear section plane when switching tabs or selecting a clash/issue
 
