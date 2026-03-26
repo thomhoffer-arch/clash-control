@@ -250,7 +250,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.9',hash:'f2232ec',date:'2026-03-26T17:30:13Z'};
+  var CC_VERSION = {v:'3.2.12',hash:'ed0b45e',date:'2026-03-26T17:37:01Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -8362,8 +8362,8 @@ function startApp() {
       d({t:A.ADD_ISSUE,v:issue});
       d({t:A.MODAL,v:false}); d({t:A.TAB,v:'issues'});
     }
-    var MS={position:'fixed',inset:0,background:'rgba(0,0,0,.7)',display:'flex',alignItems:'flex-start',justifyContent:'center',zIndex:50,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'2rem 0'};
-    var MX={background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:12,width:420,maxWidth:'95vw',overflowY:'auto',boxShadow:'0 25px 50px rgba(0,0,0,.5)',flexShrink:0,marginBottom:'4rem'};
+    var MS={position:'fixed',inset:0,background:'rgba(0,0,0,.7)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:50,overflow:'hidden',padding:'2rem 0'};
+    var MX={background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:12,width:420,maxWidth:'95vw',maxHeight:'85vh',overflowY:'auto',WebkitOverflowScrolling:'touch',boxShadow:'0 25px 50px rgba(0,0,0,.5)',flexShrink:0};
     var LBL={fontSize:'0.8rem',color:'var(--text-muted)',display:'block',marginBottom:'.2rem'};
     var ROW={display:'flex',justifyContent:'space-between',padding:'.1rem 0'};
     var LS={fontSize:'0.69rem',color:'var(--text-muted)'}; var VS={fontSize:'0.69rem',color:'var(--text-primary)'};
@@ -8438,8 +8438,8 @@ function startApp() {
     },[]);
     function tog(k){return function(){var u={};u[k]=!p[k];d({t:A.UPD_PREFS,u:u});}}
     function sel(k){return function(e){var u={};u[k]=e.target.value;d({t:A.UPD_PREFS,u:u});}}
-    var MS={position:'fixed',inset:0,background:'var(--modal-bg)',display:'flex',alignItems:'flex-start',justifyContent:'center',zIndex:50,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'2rem 0'};
-    var MX={background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:14,width:460,maxWidth:'95vw',overflowY:'auto',boxShadow:'0 25px 50px rgba(0,0,0,.5)',flexShrink:0,marginBottom:'4rem'};
+    var MS={position:'fixed',inset:0,background:'var(--modal-bg)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:50,overflow:'hidden',padding:'2rem 0'};
+    var MX={background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:14,width:460,maxWidth:'95vw',maxHeight:'85vh',overflowY:'auto',WebkitOverflowScrolling:'touch',boxShadow:'0 25px 50px rgba(0,0,0,.5)',flexShrink:0};
     var LBL={fontSize:'0.83rem',color:'var(--text-muted)',display:'block',marginBottom:'.25rem'};
     var SEC={fontSize:'0.8rem',fontWeight:700,color:'var(--pill-blue)',textTransform:'uppercase',letterSpacing:'.06em',marginBottom:'.5rem',marginTop:'.8rem'};
     var TROW={display:'flex',justifyContent:'space-between',alignItems:'center',padding:'.5rem 0',gap:'1rem',borderBottom:'1px solid var(--border-subtle)'};
@@ -9114,8 +9114,8 @@ function startApp() {
     }, []);
 
     var isDark = (s.prefs.theme||'dark')==='dark';
-    var MS={position:'fixed',inset:0,background:'var(--modal-bg)',display:'flex',alignItems:'flex-start',justifyContent:'center',zIndex:50,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'2rem 0'};
-    var MX={background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:14,width:520,maxWidth:'95vw',overflowY:'auto',boxShadow:'var(--shadow-lg)',flexShrink:0,marginBottom:'4rem'};
+    var MS={position:'fixed',inset:0,background:'var(--modal-bg)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:50,overflow:'hidden',padding:'2rem 0'};
+    var MX={background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:14,width:520,maxWidth:'95vw',maxHeight:'85vh',overflowY:'auto',WebkitOverflowScrolling:'touch',boxShadow:'var(--shadow-lg)',flexShrink:0};
     var SEC={fontSize:'0.8rem',fontWeight:700,color:'var(--accent-subtle)',textTransform:'uppercase',letterSpacing:'.06em',marginBottom:'.5rem',marginTop:'.8rem'};
     var LBL={fontSize:'0.83rem',color:'var(--text-muted)',display:'block',marginBottom:'.25rem'};
     var ROW={display:'flex',gap:'.5rem',marginBottom:'.5rem'};
@@ -10147,6 +10147,9 @@ function startApp() {
       return bestScore >= 75 ? best : null;
     }
     function applyClashOpts(updRules) {
+      // Reset exclusions for new detection setups — only carry forward if user re-specifies
+      if (!updRules.excludeTypes) updRules.excludeTypes = [];
+      if (!updRules.excludeTypePairs) updRules.excludeTypePairs = [];
       var gap = parseMM(text); if (gap !== null) { updRules.maxGap = gap; updRules.hard = true; }
       if (/\bnear[\s-]*miss|\bproximity\b|\bwithin\b|\bnearby\b|\bclose\s+to\b|\bgap\b/.test(text)) { if (!gap) updRules.maxGap = updRules.maxGap || 50; updRules.hard = true; }
       if (/hard\s+only|no\s+gap|gap\s*(?:=\s*)?0/.test(text)) { updRules.hard=true; updRules.maxGap=0; }
@@ -10154,7 +10157,7 @@ function startApp() {
       if (/\bcross[\s-]*(?:model\s+)?only\b|\bno\s+self[\s-]*clash|\bexclude\s+self|\bnot?\s+with\s+itself|\b(?:against|vs)\s+(?:all\s+)?others?\b/.test(text)) updRules.excludeSelf=true;
       else if (/\bself[\s-]*clash|\bself\b|\binclude\s+self|\bintra[\s-]*model|\bwithin\s+(?:same\s+)?model/i.test(text)) updRules.excludeSelf=false;
       // Parse type-pair exclusions: -beam vs pipe, -IfcBeam x IfcPipe, -wall vs duct, etc.
-      var pairExcludes = (updRules.excludeTypePairs||[]).slice();
+      var pairExcludes = updRules.excludeTypePairs.slice();
       var pairMatches = text.match(/-\s*(\w+)\s*(?:vs\.?|versus|against|x|×)\s*(\w+)/gi);
       if (pairMatches) {
         pairMatches.forEach(function(m) {
@@ -10173,7 +10176,7 @@ function startApp() {
       // (only matches standalone types NOT followed by vs/x/against)
       var exMatches = text.match(/-(\w+)(?!\s*(?:vs\.?|versus|against|x|×)\s*\w)/g);
       if(exMatches){
-        var excludes = (updRules.excludeTypes||[]).slice();
+        var excludes = updRules.excludeTypes.slice();
         exMatches.forEach(function(m){
           var raw = m.slice(1);
           var resolved = _resolveIfcType(raw);
@@ -11772,13 +11775,13 @@ function startApp() {
       setShow(false);
     }
     return html`<div style=${{position:'fixed',top:0,left:0,right:0,bottom:0,zIndex:2000,
-      background:'rgba(0,0,0,.6)',display:'flex',alignItems:'flex-start',justifyContent:'center',
-      overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'2rem 0'}}
+      background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center',
+      overflow:'hidden',padding:'2rem 0'}}
       onClick=${function(){dismiss('denied');}}>
       <div onClick=${function(e){e.stopPropagation();}}
         style=${{background:'var(--bg-primary)',border:'1px solid var(--border)',borderRadius:12,
-          padding:'1.5rem',maxWidth:440,width:'90%',boxShadow:'0 8px 32px rgba(0,0,0,.4)',
-          flexShrink:0,marginBottom:'4rem'}}>
+          padding:'1.5rem',maxWidth:440,width:'90%',maxHeight:'85vh',overflowY:'auto',WebkitOverflowScrolling:'touch',boxShadow:'0 8px 32px rgba(0,0,0,.4)',
+          flexShrink:0}}>
         <div style=${{display:'flex',alignItems:'center',gap:'.5rem',marginBottom:'.8rem'}}>
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
             <path d="M12 2a4 4 0 0 1 4 4c0 1.95-1.4 3.58-3.25 3.93V12h3.5a2.25 2.25 0 0 1 0 4.5h-3.5v1.25A3.25 3.25 0 0 1 9.5 21 3.25 3.25 0 0 1 6.25 17.75V14.5h-1A2.25 2.25 0 0 1 3 12.25 2.25 2.25 0 0 1 5.25 10h3.5V9.93A4 4 0 0 1 12 2z"/>
@@ -11817,8 +11820,8 @@ function startApp() {
     window._ccStartTour = function(){ setShowTutorial(false); setTourStep(0); };
     if (!showTutorial && tourStep == null) return null;
     return html`<div>
-      ${showTutorial && html`<div onClick=${function(e){if(e.target===e.currentTarget)setShowTutorial(false)}} style=${{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'flex-start',justifyContent:'center',overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'2rem 0',backdropFilter:'blur(4px)'}}>
-        <div style=${{background:'var(--bg-primary)',border:'1px solid var(--border)',borderRadius:12,padding:'1.5rem',maxWidth:560,width:'90vw',overflowY:'auto',boxShadow:'0 16px 48px rgba(0,0,0,.5)',flexShrink:0,marginBottom:'4rem'}}>
+      ${showTutorial && html`<div onClick=${function(e){if(e.target===e.currentTarget)setShowTutorial(false)}} style=${{position:'fixed',inset:0,background:'rgba(0,0,0,.6)',zIndex:9999,display:'flex',alignItems:'center',justifyContent:'center',overflow:'hidden',padding:'2rem 0',backdropFilter:'blur(4px)'}}>
+        <div style=${{background:'var(--bg-primary)',border:'1px solid var(--border)',borderRadius:12,padding:'1.5rem',maxWidth:560,width:'90vw',maxHeight:'85vh',overflowY:'auto',WebkitOverflowScrolling:'touch',boxShadow:'0 16px 48px rgba(0,0,0,.5)',flexShrink:0}}>
           <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'1rem'}}>
             <span style=${{fontSize:'1.26rem',fontWeight:700}}>Quick Start Guide</span>
             <button onClick=${function(){setShowTutorial(false)}} style=${{...S_BTN,background:'none',color:'var(--text-muted)',fontSize:'1.38rem',padding:'0 .3rem',lineHeight:1}}>✕</button>
@@ -11937,6 +11940,7 @@ function startApp() {
     var SVG_CLASHES = '<path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/>';
     var SVG_ISSUES  = '<path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/>';
     var SVG_EXPLORE = '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>';
+    var SVG_STANDARDS = '<path d="M4 7h16M4 12h10M4 17h13"/><path d="M20 12l-3-3v6z"/>';
 
     return html`<div class="cc-right-rail" style=${{
       width:48,flexShrink:0,background:'var(--bg-primary)',
@@ -11948,6 +11952,7 @@ function startApp() {
       ${tabBtn('clashes', SVG_CLASHES, 'Clashes',  clashN)}
       ${tabBtn('issues',  SVG_ISSUES,  'Issues',   issueN)}
       ${tabBtn('explorer',SVG_EXPLORE, 'Explorer', 0)}
+      ${tabBtn('standards',SVG_STANDARDS,'Standards',0)}
     </div>`;
   }
 
@@ -11994,6 +11999,7 @@ function startApp() {
       ${tab==='clashes'  && html`<${IssuePanel} key="clashes" s=${s} d=${d} hideTabBar=${true} />`}
       ${tab==='issues'   && html`<${IssuePanel} key="issues" s=${s} d=${d} hideTabBar=${true} />`}
       ${tab==='explorer' && html`<${IssuePanel} key="explorer" s=${s} d=${d} hideTabBar=${true} />`}
+      ${tab==='standards' && html`<${StandardsPanel} />`}
       ${tab==='tools'    && html`<${ToolsPanel} s=${s} d=${d} />`}
     </div>`;
   }
@@ -12036,9 +12042,9 @@ function startApp() {
     var cardBorder = 'var(--card-border)';
     var CARD = {background:cardBg,border:'1px solid '+cardBorder,borderRadius:10,padding:'.65rem .75rem',display:'flex',gap:'.6rem',alignItems:'flex-start',cursor:'default'};
 
-    return html`<div style=${{position:'fixed',inset:0,background:vis?'var(--modal-bg)':'transparent',display:'flex',alignItems:'flex-start',justifyContent:'center',zIndex:60,transition:'background .2s',overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'2rem 0'}}
+    return html`<div style=${{position:'fixed',inset:0,background:vis?'var(--modal-bg)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',zIndex:60,transition:'background .2s',overflow:'hidden',padding:'2rem 0'}}
       onClick=${function(e){if(e.target===e.currentTarget)dismiss(needsConsent?'denied':null);}}>
-      <div style=${{background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:16,width:480,maxWidth:'92vw',boxShadow:'var(--shadow-lg)',overflow:'hidden',transform:vis?'translateY(0) scale(1)':'translateY(12px) scale(.97)',opacity:vis?1:0,transition:'transform .25s cubic-bezier(.16,1,.3,1), opacity .2s',flexShrink:0,marginBottom:'4rem'}}>
+      <div style=${{background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:16,width:480,maxWidth:'92vw',maxHeight:'85vh',overflowY:'auto',WebkitOverflowScrolling:'touch',boxShadow:'var(--shadow-lg)',transform:vis?'translateY(0) scale(1)':'translateY(12px) scale(.97)',opacity:vis?1:0,transition:'transform .25s cubic-bezier(.16,1,.3,1), opacity .2s',flexShrink:0}}>
 
         <!-- Header -->
         <div style=${{background:'linear-gradient(135deg,#1a0533 0%,#3b1764 40%,#7c3aed 100%)',padding:'1.4rem 1.4rem 1.2rem',position:'relative',overflow:'hidden'}}>

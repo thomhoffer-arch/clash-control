@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.2.12 (2026-03-26)
+- Fix Standards tab not rendering — add sidebar button and standalone mount
+
+## v3.2.11 (2026-03-26)
+- Reset excludeTypes and excludeTypePairs on new NL detection setup
+
+## v3.2.10 (2026-03-26)
+- Switch all Google Form sends from FormData to URLSearchParams
+
 ## v3.2.9 (2026-03-26)
 - Fix detection run summary not appearing in Google Form
 
