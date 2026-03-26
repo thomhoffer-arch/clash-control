@@ -249,7 +249,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.1.12',hash:'1353029',date:'2026-03-26T09:49:54Z'};
+  var CC_VERSION = {v:'3.1.13',hash:'fc8806b',date:'2026-03-26T11:04:36Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -4172,6 +4172,37 @@ function startApp() {
           setCtxMenu(null);
         }
       });
+
+      // ── Right-click drag to move section plane ──
+      var _secDrag = null; // {startY, startPos}
+      renderer.domElement.addEventListener('mousedown', function(e) {
+        if (e.button !== 2) return; // right button only
+        var cs = window._ccCurrentSection;
+        if (!cs) return;
+        _secDrag = {startY: e.clientY, startPos: cs.pos, didDrag: false};
+      });
+      window.addEventListener('mousemove', function(e) {
+        if (!_secDrag) return;
+        var dy = _secDrag.startY - e.clientY; // up = positive
+        if (Math.abs(dy) < 3 && !_secDrag.didDrag) return; // dead zone
+        _secDrag.didDrag = true;
+        var sensitivity = 0.003; // pixels to section pos ratio
+        var newPos = Math.max(0, Math.min(1, _secDrag.startPos + dy * sensitivity));
+        var cs = window._ccCurrentSection;
+        if (cs && cs.axis && window._ccDispatch) {
+          window._ccDispatch({t:A.SECTION, axis:cs.axis, pos:newPos});
+        } else if (cs && cs.custom && window._ccDispatch) {
+          window._ccDispatch({t:A.SECTION_CUSTOM, v:cs.custom, pos:newPos});
+        }
+      });
+      window.addEventListener('mouseup', function(e) {
+        if (e.button !== 2 || !_secDrag) return;
+        _secDrag = null;
+      });
+      // Suppress context menu when right-drag was used for section
+      renderer.domElement.addEventListener('contextmenu', function(e) {
+        if (_secDrag && _secDrag.didDrag) { e.preventDefault(); e.stopPropagation(); }
+      }, true); // capture phase — fires before the main contextmenu handler
 
       // ── Viewpoint capture/restore ──
       _captureViewpoint = function(name, linkedId) {

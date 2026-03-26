@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.1.13 (2026-03-26)
+- Point detection run summary to its own form field entry.39972213
+
 ## v3.1.12 (2026-03-26)
 - Include semantic filter negatives in detection run summary
 
