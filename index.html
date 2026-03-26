@@ -249,7 +249,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.1.19',hash:'8860508',date:'2026-03-26T12:37:33Z'};
+  var CC_VERSION = {v:'3.1.20',hash:'edffadb',date:'2026-03-26T12:39:06Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -4177,15 +4177,27 @@ function startApp() {
       });
 
       // ── Right-click drag to move section plane ──
-      var _secDrag = null; // {startY, startPos, didDrag, button}
+      var _secDrag = null;
+      function _getSecNormalAndPoint(cs) {
+        var S2 = state3d.current;
+        if (cs.custom) return {normal:cs.custom.normal.slice(), point:cs.custom.point.slice()};
+        if (cs.axis && S2.mg) {
+          var nm = {x:[1,0,0], y:[0,1,0], z:[0,0,1]};
+          var box = new THREE.Box3().setFromObject(S2.mg);
+          var cut = box.min[cs.axis]+(box.max[cs.axis]-box.min[cs.axis])*cs.pos;
+          var ctr = box.getCenter(new THREE.Vector3());
+          var pt = [ctr.x, ctr.y, ctr.z];
+          pt[{x:0,y:1,z:2}[cs.axis]] = cut;
+          return {normal:nm[cs.axis], point:pt};
+        }
+        return null;
+      }
       renderer.domElement.addEventListener('mousedown', function(e) {
         var cs = window._ccCurrentSection;
         if (!cs) return;
         if (e.button === 2) {
-          // Right-click drag anywhere when section is active
-          _secDrag = {startY: e.clientY, startPos: cs.pos, didDrag: false, button: 2};
+          _secDrag = {startY: e.clientY, startPos: cs.pos, didDrag: false, button: 2, mode:'move'};
         } else if (e.button === 0) {
-          // Left-click: check if user clicked on the section plane visual
           var S2 = state3d.current;
           if (!S2._sectionPlaneVis) return;
           var rect = renderer.domElement.getBoundingClientRect();
@@ -4195,34 +4207,43 @@ function startApp() {
           var hits = raycaster.intersectObjects(S2._sectionPlaneVis.children, true);
           if (hits.length > 0) {
             e.preventDefault(); e.stopPropagation();
-            _secDrag = {startY: e.clientY, startPos: cs.pos, didDrag: false, button: 0};
-            S2.orbit.enabled = false; // disable orbit while dragging plane
+            S2.orbit.enabled = false;
+            if (e.shiftKey) {
+              var np = _getSecNormalAndPoint(cs);
+              if (np) _secDrag = {startX: e.clientX, startPos: cs.pos, didDrag: false, button: 0, mode:'rotate', startNormal: np.normal, startPoint: np.point};
+            } else {
+              _secDrag = {startY: e.clientY, startPos: cs.pos, didDrag: false, button: 0, mode:'move'};
+            }
           }
         }
       }, true);
       window.addEventListener('mousemove', function(e) {
         if (!_secDrag) return;
-        var dy = e.clientY - _secDrag.startY;
-        if (Math.abs(dy) < 3 && !_secDrag.didDrag) return;
-        _secDrag.didDrag = true;
-        var sensitivity = 0.003;
-        var newPos = Math.max(0, Math.min(1, _secDrag.startPos + dy * sensitivity));
-        var cs = window._ccCurrentSection;
-        if (cs && cs.axis && window._ccDispatch) {
-          window._ccDispatch({t:A.SECTION, axis:cs.axis, pos:newPos});
-        } else if (cs && cs.custom && window._ccDispatch) {
-          window._ccDispatch({t:A.SECTION_CUSTOM, v:cs.custom, pos:newPos});
+        if (_secDrag.mode === 'rotate') {
+          var dx = e.clientX - _secDrag.startX;
+          if (Math.abs(dx) < 3 && !_secDrag.didDrag) return;
+          _secDrag.didDrag = true;
+          var angle = dx * 0.005;
+          var nx = _secDrag.startNormal[0], nz = _secDrag.startNormal[2];
+          var cosA = Math.cos(angle), sinA = Math.sin(angle);
+          var rn = [nx*cosA - nz*sinA, _secDrag.startNormal[1], nx*sinA + nz*cosA];
+          if (window._ccDispatch) window._ccDispatch({t:A.SECTION_CUSTOM, v:{normal:rn, point:_secDrag.startPoint}, pos:_secDrag.startPos});
+          renderer.domElement.style.cursor = 'ew-resize';
+        } else {
+          var dy = e.clientY - _secDrag.startY;
+          if (Math.abs(dy) < 3 && !_secDrag.didDrag) return;
+          _secDrag.didDrag = true;
+          var newPos = Math.max(0, Math.min(1, _secDrag.startPos + dy * 0.003));
+          var cs = window._ccCurrentSection;
+          if (cs && cs.axis && window._ccDispatch) window._ccDispatch({t:A.SECTION, axis:cs.axis, pos:newPos});
+          else if (cs && cs.custom && window._ccDispatch) window._ccDispatch({t:A.SECTION_CUSTOM, v:cs.custom, pos:newPos});
+          renderer.domElement.style.cursor = 'ns-resize';
         }
-        // Change cursor while dragging
-        renderer.domElement.style.cursor = 'ns-resize';
       });
       window.addEventListener('mouseup', function(e) {
         if (!_secDrag) return;
         if (e.button !== _secDrag.button) return;
-        if (_secDrag.button === 0) {
-          var S2 = state3d.current;
-          if (S2.orbit) S2.orbit.enabled = true;
-        }
+        if (_secDrag.button === 0) { var S2 = state3d.current; if (S2.orbit) S2.orbit.enabled = true; }
         _secDrag = null;
         renderer.domElement.style.cursor = '';
       });

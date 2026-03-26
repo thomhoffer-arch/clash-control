@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.1.20 (2026-03-26)
+- Fix section plane alignment + line-arrow handles
+
 ## v3.1.19 (2026-03-26)
 - Tune section plane: smaller size, reversed drag, smaller flipped arrows
 
