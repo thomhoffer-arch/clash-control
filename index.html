@@ -250,7 +250,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.12',hash:'ed0b45e',date:'2026-03-26T17:37:01Z'};
+  var CC_VERSION = {v:'3.2.13',hash:'88aa438',date:'2026-03-26T17:39:15Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -6303,8 +6303,27 @@ function startApp() {
               var dObj = DISC.find(function(x){return x.id===disc;});
               col = dObj ? dObj.c : col;
               var fSize = result.stats ? result.stats.fileSize : buf.byteLength;
-              var modelId = uid();
-              d({t:A.ADD_MODEL, v:{id:modelId, name:f.name.replace(/\.ifc$/i,''), discipline:disc, color:col, visible:true, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], storeyData:result.storeyData||[], relatedPairs:result.relatedPairs||{}, stats:result.stats||{fileSize:fSize}}});
+              var baseName = f.name.replace(/\.ifc$/i,'');
+              // Check for existing model with same name — replace it (version update)
+              var existing = s.models.find(function(m){ return m.name === baseName; });
+              var modelId;
+              if (existing) {
+                modelId = existing.id;
+                // Preserve user settings from the old version
+                disc = existing.discipline || disc;
+                col = existing.color || col;
+                var preservedTag = existing.tag;
+                var preservedVis = existing.visible;
+                var preservedVersion = (existing._version || 1) + 1;
+                // Remove old model
+                d({t:A.DEL_MODEL, id:existing.id});
+                idbDeleteFile(existing.id); idbDeleteGeoCache(existing.id);
+                // Add updated model with same ID and preserved settings
+                d({t:A.ADD_MODEL, v:{id:modelId, name:baseName, discipline:disc, color:col, visible:preservedVis!==false, tag:preservedTag||'', _version:preservedVersion, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], storeyData:result.storeyData||[], relatedPairs:result.relatedPairs||{}, stats:result.stats||{fileSize:fSize}}});
+              } else {
+                modelId = uid();
+                d({t:A.ADD_MODEL, v:{id:modelId, name:baseName, discipline:disc, color:col, visible:true, _version:1, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], storeyData:result.storeyData||[], relatedPairs:result.relatedPairs||{}, stats:result.stats||{fileSize:fSize}}});
+              }
               idbSaveFile(modelId, f.name, buf, s.activeProject||'default');
               idbSaveGeoCache(modelId, _geoSerialize(result)); // cache geometry for fast project-switch restore
             });
@@ -6521,6 +6540,7 @@ function startApp() {
         </span>
         <span style=${{width:10,height:10,borderRadius:'50%',background:m.color,flexShrink:0}}></span>
         <span style=${{color:'var(--text-primary)',fontSize:'0.86rem',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title=${m.name}>${m.name}</span>
+        ${m._version>1 && html`<span style=${{fontSize:'0.57rem',color:'#60a5fa',background:'#1e3a5f',padding:'.05rem .25rem',borderRadius:3,flexShrink:0,fontWeight:600}}>v${m._version}</span>`}
         ${m._stub && html`<span style=${{fontSize:'0.63rem',color:'#f59e0b',background:'var(--pill-amber-bg)',padding:'.05rem .3rem',borderRadius:4,flexShrink:0}}>stub</span>`}
         <button onClick=${function(){setOpen(!open)}} style=${{...S_BTN,padding:'0 2px',background:'none',color:'var(--text-faint)',fontSize:'0.69rem'}}>${open?'▲':'▼'}</button>
         <button onClick=${function(){if(!confirm('Remove "'+m.name+'" from this project?'))return;d({t:A.DEL_MODEL,id:m.id});idbDeleteFile(m.id);idbDeleteGeoCache(m.id);}} style=${{...S_BTN,padding:'0 2px',background:'none',color:'var(--text-faint)',fontSize:'0.69rem'}}>✕</button>

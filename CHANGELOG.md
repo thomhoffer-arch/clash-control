@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.13 (2026-03-26)
+- Make popups scroll internally instead of scrolling the page
+
 ## v3.2.12 (2026-03-26)
 - Fix Standards tab not rendering — add sidebar button and standalone mount
 
