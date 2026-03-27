@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.67',hash:'b700e0a',date:'2026-03-27T13:25:57Z'};
+  var CC_VERSION = {v:'3.2.68',hash:'60b3997',date:'2026-03-27T13:30:37Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -13412,6 +13412,8 @@ function startApp() {
     // ─── 1. Clashes tab — show all detected clashes + NL command typing ───
     at(2500, function() {
       d({t:'TAB', v:'clashes'});
+      d({t:'CLASH_GROUP_BY', v:'none'});
+      d({t:'CLASH_SORT_BY', v:'none'});
       d({t:'ACTIVE', id:null});
       if (_unghostAll) _unghostAll();
       invalidate(10);
@@ -13440,21 +13442,21 @@ function startApp() {
     // ─── 2. Click first clash — fly to it ───
     at(3000, function() {
       showCaption('Click a clash to inspect it');
-      var c = getClash(0);
+      var c = getClash(8);
       if (c) { d({t:'ACTIVE', id:c.id}); flyToClash(c); }
     });
 
     // ─── 3. Orbit around the clash elements as center ───
     at(2500, function() {
       showCaption('Orbit to inspect from every angle');
-      var c = getClash(0);
+      var c = getClash(8);
       orbitAround(c && c.point ? c.point : null, 80, 3000);
     });
 
     // ─── 4. Click another clash — camera flies there ───
     at(3500, function() {
       showCaption('Navigate between clashes');
-      var c = getClash(4);
+      var c = getClash(20);
       if (c) { d({t:'ACTIVE', id:c.id}); flyToClash(c); }
     });
     // Orbit around the second clash too
@@ -13465,7 +13467,7 @@ function startApp() {
     // ─── 5. Confirm the clash — show it becoming an issue ───
     at(2500, function() {
       showCaption('Confirm a clash to create an issue');
-      var c = getClash(0);
+      var c = getClash(8);
       if (c) {
         d({t:'ACTIVE', id:c.id});
         flyToClash(c);
@@ -13473,7 +13475,7 @@ function startApp() {
     });
     // Wait for expanded panel to render, then click the Confirm button
     at(2000, function() {
-      var c = getClash(0);
+      var c = getClash(8);
       if (!c) return;
       // Find the active row and click its Confirm button
       var row = document.querySelector('[data-item-id="'+c.id+'"]');
@@ -13625,8 +13627,8 @@ function startApp() {
           pill.style.transform = '';
         }, 1200);
       }
-      // Start one long orbit for training + CTA
-      smoothOrbit(60, 8000);
+      // Start orbit from a more leftward angle
+      smoothOrbit(80, 8000);
       // After 3.5s, open NL panel and type CTA while still orbiting
       setTimeout(function() {
         hideCaption();

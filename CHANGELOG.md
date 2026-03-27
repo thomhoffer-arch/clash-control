@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.68 (2026-03-27)
+- Pre-warm render style materials at tour start for smooth switching
+
 ## v3.2.67 (2026-03-27)
 - Fix clash list scroll, remove measurement step, combine ending orbit
 
