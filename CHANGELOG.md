@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.39 (2026-03-27)
+- Remove Confirmed status from issues tab
+
 ## v3.2.38 (2026-03-27)
 - Bump version via pre-commit hook
 

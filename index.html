@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.38',hash:'e4183dc',date:'2026-03-27T08:33:03Z'};
+  var CC_VERSION = {v:'3.2.39',hash:'7a4577e',date:'2026-03-27T09:11:16Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -296,7 +296,7 @@ function startApp() {
     closed:      { label:'Closed',      bg:'#64748b' },
     accepted_needs_check: { label:'Accepted · Check', bg:'#0ea5e9' },
   };
-  var EDITABLE_STATUSES = Object.keys(STAT).filter(function(k){return k!=='auto_resolved'&&k!=='denied';});
+  var EDITABLE_STATUSES = Object.keys(STAT).filter(function(k){return k!=='auto_resolved'&&k!=='denied'&&k!=='confirmed';});
 
   function uid()  { return Math.random().toString(36).slice(2,10).toUpperCase(); }
   function guid() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16)}); }
@@ -543,7 +543,7 @@ function startApp() {
               id:'iss_'+Date.now()+'_'+Math.random().toString(36).substr(2,6),
               title:cClash.title,
               description:cClash.description,
-              status:'confirmed',
+              status:'open',
               priority:cClash.priority||'normal',
               source:'clash',
               clashId:cClash.id,
@@ -13168,7 +13168,7 @@ function startApp() {
   else { ReactDOM.render(h(ErrorBoundary, null, h(App, null)), rootEl); }
 
   // ── Demo Tour (console-only: window._ccDemoTour()) ─────────────
-  // Self-running 45-second feature showcase for screen recording.
+  // Self-running feature showcase for screen recording (~50s).
   // Trigger from browser console: _ccDemoTour()
   window._ccDemoTour = function() {
     var d = window._ccDispatch;
@@ -13224,78 +13224,18 @@ function startApp() {
       setTimeout(function() { step.fn(); run(); }, step.delay);
     }
 
-    // ── STEP 1 (0-4s): Orbit around model ──
+    // ── STEP 1: Open clashes tab — all clashes visible ──
     at(300, function() {
-      showCaption('Load & explore IFC models in your browser');
-      if (_resetView) _resetView();
-    });
-    at(1200, function() {
-      smoothOrbit(90, 2800);
-    });
-
-    // ── STEP 2 (4-8s): Models panel — toggle visibility ──
-    at(3000, function() {
-      showCaption('Manage models, toggle visibility');
-      d({t:'TAB', v:'models'});
-    });
-    at(1500, function() {
-      // Toggle first model off
-      var models = window._ccDispatch && document.querySelectorAll('[data-model-id]');
-      var s = window._ccLatestState;
-      if (s && s.models.length > 0) {
-        d({t:'UPD_MODEL', id: s.models[0].id, u:{visible:false}});
-        invalidate(10);
-      }
-    });
-    at(1200, function() {
-      // Toggle it back on
-      var s = window._ccLatestState;
-      if (s && s.models.length > 0) {
-        d({t:'UPD_MODEL', id: s.models[0].id, u:{visible:true}});
-        invalidate(10);
-      }
-    });
-
-    // ── STEP 3 (8-11s): Render mode switch ──
-    at(1000, function() {
-      showCaption('Switch rendering styles');
-      d({t:'UPD_PREFS', u:{renderStyle:'wireframe'}});
-      invalidate(10);
-    });
-    at(1500, function() {
-      d({t:'UPD_PREFS', u:{renderStyle:'shaded'}});
-      invalidate(10);
-    });
-    at(1200, function() {
-      d({t:'UPD_PREFS', u:{renderStyle:'standard'}});
-      invalidate(10);
-    });
-
-    // ── STEP 4 (11-17s): Run clash detection ──
-    at(800, function() {
-      showCaption('One-click clash detection');
       d({t:'TAB', v:'clashes'});
-    });
-    at(800, function() {
-      // Trigger detection
-      var s = window._ccLatestState;
-      if (s && s.models.length > 0 && !s.detecting) {
-        d({t:'DETECTING'});
-        d({t:'TAB', v:'clashes'});
-        detectClashesAsync(s.models, s.rules).then(function(result) {
-          d({t:'MERGE_CLASHES', v: result});
-        });
-      }
-    });
-    at(4500, function() {
-      var s = window._ccLatestState;
-      var n = s ? s.clashes.length : 0;
-      showCaption('Found ' + n + ' clashes');
+      d({t:'ACTIVE', id:null});
+      if (_unghostAll) _unghostAll();
+      if (_resetView) _resetView();
+      showCaption('Detected clashes appear instantly');
     });
 
-    // ── STEP 5 (17-22s): Browse clashes & fly-to ──
-    at(1800, function() {
-      showCaption('Click any clash to fly to it');
+    // ── STEP 2: Click first clash — fly to it ──
+    at(2500, function() {
+      showCaption('Click a clash to inspect it');
       var s = window._ccLatestState;
       if (s && s.clashes.length > 0) {
         var c = s.clashes[0];
@@ -13304,96 +13244,140 @@ function startApp() {
         if (c.elemA && c.elemB && _ghostOthers) _ghostOthers([c.elemA, c.elemB]);
       }
     });
+
+    // ── STEP 3: Orbit around the clash ──
     at(2500, function() {
+      showCaption('Orbit to inspect from every angle');
+      smoothOrbit(70, 2500);
+    });
+
+    // ── STEP 4: Click second clash — camera flies there ──
+    at(3000, function() {
+      showCaption('Navigate between clashes');
       var s = window._ccLatestState;
-      if (s && s.clashes.length > 2) {
-        var c = s.clashes[2];
+      if (s && s.clashes.length > 1) {
+        var c = s.clashes[Math.min(2, s.clashes.length - 1)];
         d({t:'ACTIVE', id: c.id});
         if (c.point && _flyTo) _flyTo(c.point, 8);
         if (c.elemA && c.elemB && _ghostOthers) _ghostOthers([c.elemA, c.elemB]);
       }
     });
 
-    // ── STEP 6 (22-26s): Section box on clash ──
-    at(2500, function() {
-      showCaption('Section box to isolate clashes');
+    // ── STEP 5: Confirm/accept the clash — moves to issues ──
+    at(2800, function() {
+      showCaption('Confirm a clash to create an issue');
       var s = window._ccLatestState;
       if (s && s.clashes.length > 0) {
-        var c = s.clashes[Math.min(2, s.clashes.length - 1)];
-        var eids = [c.elemA, c.elemB].filter(Boolean);
-        if (eids.length && _sboxAroundElements) _sboxAroundElements(eids);
+        var c = s.clashes[0];
+        d({t:'UPD_CLASH', id: c.id, u:{status:'confirmed'}});
       }
     });
-    at(2000, function() {
-      smoothOrbit(45, 1800);
-    });
 
-    // ── STEP 7 (26-30s): Create issue from clash ──
-    at(2200, function() {
-      // Clear section box first
-      d({t:'SECTION_BOX', v:null});
-      if (_unghostAll) _unghostAll();
-      invalidate(10);
-      showCaption('Create issues from clashes');
+    // ── STEP 6: Switch to issues tab, click the issue ──
+    at(2000, function() {
+      showCaption('Track issues with status management');
       d({t:'TAB', v:'issues'});
     });
-    at(800, function() {
-      // Open the new issue modal
+    at(1200, function() {
+      var s = window._ccLatestState;
+      if (s && s.issues.length > 0) {
+        var iss = s.issues[s.issues.length - 1]; // newest issue (just confirmed)
+        d({t:'ACTIVE', id: iss.id});
+        if (iss.point && _flyTo) _flyTo(iss.point, 8);
+        if (iss.elemA && iss.elemB && _ghostOthers) _ghostOthers([iss.elemA, iss.elemB]);
+      }
+    });
+
+    // ── STEP 7: Set issue status to "In progress" ──
+    at(2000, function() {
+      showCaption('Update status — In progress');
+      var s = window._ccLatestState;
+      if (s && s.issues.length > 0) {
+        var iss = s.issues[s.issues.length - 1];
+        d({t:'UPD_ISSUE', id: iss.id, u:{status:'in_progress'}});
+      }
+    });
+
+    // ── STEP 8: Create issue from viewer (open modal) ──
+    at(2200, function() {
+      if (_unghostAll) _unghostAll();
+      if (_resetView) _resetView();
+      invalidate(10);
+      showCaption('Create issues directly in the viewer');
+    });
+    at(1000, function() {
       var s = window._ccLatestState;
       var el = null;
-      if (s && s.clashes.length > 0) el = {expressId: s.clashes[0].elemA, name: s.clashes[0].titleA || 'Element'};
+      if (s && s.models.length > 0) {
+        // Try to pick an element from a model for context
+        var m = s.models[0];
+        if (m.meshes && m.meshes.length > 0) el = {expressId: m.meshes[0].expressId, name: m.meshes[0].name || 'Element'};
+      }
       d({t:'MODAL', v:true, el: el});
     });
     at(2500, function() {
-      // Close modal without saving (just showing it)
       d({t:'MODAL', v:false});
     });
 
-    // ── STEP 8 (30-33s): Measurements ──
+    // ── STEP 9: Measurement tools ──
     at(500, function() {
       showCaption('Built-in measurement tools');
       d({t:'MEASURE_MODE', v:'length'});
-      if (_resetView) _resetView();
     });
     at(2200, function() {
       d({t:'MEASURE_MODE', v:null});
     });
 
-    // ── STEP 9 (33-37s): Export BCF ──
+    // ── STEP 10: Export BCF ──
     at(500, function() {
       showCaption('Export to BCF for any BIM tool');
       d({t:'TAB', v:'clashes'});
-      // Flash the export button area — we won't actually download, just show caption
     });
 
-    // ── STEP 10 (37-39s): Theme toggle ──
+    // ── STEP 11: Toggle view modes ──
     at(2500, function() {
-      showCaption('Light & dark themes');
-      d({t:'UPD_PREFS', u:{theme:'light'}});
+      showCaption('Switch rendering styles');
+      d({t:'UPD_PREFS', u:{renderStyle:'wireframe'}});
+      invalidate(10);
     });
-    at(1800, function() {
-      d({t:'UPD_PREFS', u:{theme:'dark'}});
+    at(1500, function() {
+      d({t:'UPD_PREFS', u:{renderStyle:'shaded'}});
+      invalidate(10);
+    });
+    at(1500, function() {
+      d({t:'UPD_PREFS', u:{renderStyle:'rendered'}});
+      invalidate(10);
+    });
+    at(1500, function() {
+      d({t:'UPD_PREFS', u:{renderStyle:'standard'}});
+      invalidate(10);
     });
 
-    // ── STEP 11 (39-45s): End card ──
+    // ── STEP 12: LLM training mode teaser ──
     at(1500, function() {
       if (_resetView) _resetView();
       if (_unghostAll) _unghostAll();
+      showCaption('AI-powered clash analysis — train your own model');
+      d({t:'TRAINING_MODE', v:true});
+      d({t:'TAB', v:'clashes'});
+    });
+    at(3500, function() {
+      d({t:'TRAINING_MODE', v:false});
       showCaption('Free. Open source. No install.');
     });
-    at(4500, function() {
+    at(3500, function() {
       hideCaption();
     });
     at(800, function() {
       // Final cleanup
       d({t:'SECTION_BOX', v:null});
       d({t:'MEASURE_MODE', v:null});
-      d({t:'TAB', v:'models'});
+      d({t:'TAB', v:'clashes'});
       invalidate(10);
     });
 
     // Go!
-    console.log('%c Demo tour started — recording 45s ', 'background:#2563eb;color:#fff;font-weight:bold;padding:2px 8px;border-radius:4px');
+    console.log('%c Demo tour started ', 'background:#2563eb;color:#fff;font-weight:bold;padding:2px 8px;border-radius:4px');
     run();
   };
 
