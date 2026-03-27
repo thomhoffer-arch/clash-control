@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.61 (2026-03-27)
+- Tour: show 'AI loaded' in purple, keep training mode on at end, faster modal open
+
 ## v3.2.60 (2026-03-27)
 - Tour: show models tab at start, faster modal typing, remove duplicate model tree step
 
