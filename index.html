@@ -296,7 +296,7 @@ function startApp() {
     closed:      { label:'Closed',      bg:'#64748b' },
     accepted_needs_check: { label:'Accepted · Check', bg:'#0ea5e9' },
   };
-  var EDITABLE_STATUSES = Object.keys(STAT).filter(function(k){return k!=='auto_resolved'&&k!=='denied';});
+  var EDITABLE_STATUSES = Object.keys(STAT).filter(function(k){return k!=='auto_resolved'&&k!=='denied'&&k!=='confirmed';});
 
   function uid()  { return Math.random().toString(36).slice(2,10).toUpperCase(); }
   function guid() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16)}); }
@@ -543,7 +543,7 @@ function startApp() {
               id:'iss_'+Date.now()+'_'+Math.random().toString(36).substr(2,6),
               title:cClash.title,
               description:cClash.description,
-              status:'confirmed',
+              status:'open',
               priority:cClash.priority||'normal',
               source:'clash',
               clashId:cClash.id,
