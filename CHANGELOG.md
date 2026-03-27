@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.46 (2026-03-27)
+- Tour: orbit around clash point in step 3, zoom-all for steps 9+
+
 ## v3.2.45 (2026-03-27)
 - Add typewriter effect to tour step 12 — type in AI command line
 

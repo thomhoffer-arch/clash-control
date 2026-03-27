@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.45',hash:'52cf618',date:'2026-03-27T10:28:12Z'};
+  var CC_VERSION = {v:'3.2.46',hash:'c44ce13',date:'2026-03-27T10:38:06Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -13206,6 +13206,7 @@ function startApp() {
     function smoothOrbit(degrees, duration, cb) {
       var sph = S.orbit.sph;
       if (!sph) { if (cb) cb(); return; }
+      S.orbit.sync(); // recalc sph from current camera position
       var startTheta = sph.theta;
       var delta = degrees * Math.PI / 180;
       var start = performance.now();
@@ -13248,7 +13249,8 @@ function startApp() {
     // Helper: set orbit target to a specific point, then orbit
     function orbitAround(point, degrees, duration, cb) {
       if (point) {
-        S.orbit.target.copy(point);
+        if (Array.isArray(point)) S.orbit.target.set(point[0], point[1], point[2]);
+        else S.orbit.target.copy(point);
         S.orbit.sync();
         S.orbit.apply();
         invalidate();
