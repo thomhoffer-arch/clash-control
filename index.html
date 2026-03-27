@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.72',hash:'fd7823d',date:'2026-03-27T13:42:47Z'};
+  var CC_VERSION = {v:'3.2.73',hash:'2064dc7',date:'2026-03-27T13:45:14Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -13373,10 +13373,18 @@ function startApp() {
       if (_flyToElements && eids.length) _flyToElements(eids, c.point);
       else if (c.point && _flyTo) _flyTo(c.point);
     }
-    // Helper: get clash by index (clamped to first 50 for virtualized list visibility)
+    // Helper: get clash by index from the visible DOM rows (matches what VirtualList renders)
     function getClash(idx) {
       var s = window._ccLatestState;
       if (!s || !s.clashes.length) return null;
+      // Read visible row IDs from the DOM to match the filtered/sorted list
+      var rows = document.querySelectorAll('[data-item-id]');
+      if (rows.length > 0 && idx < rows.length) {
+        var targetId = rows[Math.min(idx, rows.length - 1)].getAttribute('data-item-id');
+        var found = s.clashes.find(function(c){ return c.id === targetId; });
+        if (found) return found;
+      }
+      // Fallback to state array
       var maxIdx = Math.min(49, s.clashes.length - 1);
       return s.clashes[Math.min(idx, maxIdx)];
     }
@@ -13450,24 +13458,26 @@ function startApp() {
     // Helper: click a clash row in the list (triggers highlight, fly-to, ghost)
     function clickClashRow(c) {
       if (!c) return;
-      // First dispatch ACTIVE so VirtualList scrolls the row into view
+      // Try to click row immediately if it's already in DOM
+      var row = document.querySelector('[data-item-id="'+c.id+'"]');
+      if (row) { row.click(); return; }
+      // Row not in DOM — dispatch ACTIVE to trigger VirtualList scroll,
+      // then poll for the row to appear after React re-renders
       d({t:'ACTIVE', id:c.id});
-      // Then wait for render + scroll, and click the actual row
-      function tryClick(attempts) {
+      var _pollCount = 0;
+      var _pollId = setInterval(function() {
         var row = document.querySelector('[data-item-id="'+c.id+'"]');
+        _pollCount++;
         if (row) {
+          clearInterval(_pollId);
           row.click();
-          console.log('%c Clicked row: '+c.id, 'color:#60a5fa');
-        } else if (attempts > 0) {
-          requestAnimationFrame(function(){ tryClick(attempts - 1); });
-        } else {
-          // Final fallback
-          console.log('%c Row not found, using flyTo fallback: '+c.id, 'color:#f59e0b');
+          console.log('%c Clicked row after '+_pollCount+' polls: '+c.id, 'color:#60a5fa');
+        } else if (_pollCount > 20) {
+          clearInterval(_pollId);
+          console.log('%c Row not found after 20 polls, fallback: '+c.id, 'color:#f59e0b');
           flyToClash(c);
         }
-      }
-      // Give VirtualList time to scroll + render the row
-      requestAnimationFrame(function(){ requestAnimationFrame(function(){ tryClick(5); }); });
+      }, 50);
     }
 
     // ─── 2. Click first clash — fly to it ───
