@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.33',hash:'0653428',date:'2026-03-27T05:26:35Z'};
+  var CC_VERSION = {v:'3.2.34',hash:'835352b',date:'2026-03-27T05:30:55Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -1412,11 +1412,11 @@ function startApp() {
 
   var _ccLoadGeneration = 0; // incremented each load to cancel stale in-progress loads
 
-  function loadIFC(buffer, fallbackColor, onProgress) {
+  function loadIFC(buffer, fallbackColor, onProgress, _parentGen) {
     var loadStart = performance.now();
     var _lp = { t0: loadStart, phases: {} };
     function _lmark(name) { _lp.phases[name] = performance.now() - _lp.t0; }
-    var _myGen = ++_ccLoadGeneration;
+    var _myGen = _parentGen || ++_ccLoadGeneration;
 
     return getIfcAPI().then(function(api) {
       _lmark('WASM ready');
@@ -2269,7 +2269,7 @@ function startApp() {
       try {
         // Run synchronous detection but yield between chunks
         var result = _detectClashesCore(models, rules, onProgress, function(r) {
-          if (gen === _ccDetectGeneration) resolve(r); // only resolve if still current
+          resolve(gen === _ccDetectGeneration ? r : []); // discard stale results
         });
         if (result !== undefined) resolve(result); // fell through synchronously (small dataset)
       } catch(e) {
@@ -2756,7 +2756,7 @@ function startApp() {
     var chunkIdx = 0;
     var _myGen = _ccDetectGeneration; // snapshot generation at start
     function _runChunk() {
-      if (_myGen !== _ccDetectGeneration) return; // cancelled by newer detection
+      if (_myGen !== _ccDetectGeneration) { resolveAsync([]); return; } // cancelled by newer detection
       try {
       var end = Math.min(chunkIdx + _DETECT_CHUNK_SIZE, totalCandidates);
       for (var i=chunkIdx; i<end; i++) { try { _processCandidate(candidates[i]); } catch(e) { /* skip bad candidate */ } }
@@ -3570,6 +3570,7 @@ function startApp() {
     var _tmpVec = new THREE.Vector3();
     var _tmpDir = new THREE.Vector3();
     var _tmpRight = new THREE.Vector3();
+    var _up = new THREE.Vector3(0,1,0);
 
     function sync() {
       var o = _tmpVec.copy(camera.position).sub(target);
@@ -3602,7 +3603,7 @@ function startApp() {
       if(panning){
         var sp=sph.r*0.0008;
         orbit.camera.getWorldDirection(_tmpDir);
-        _tmpRight.set(0,1,0); _tmpRight.crossVectors(_tmpDir,_tmpRight).normalize();
+        _tmpRight.crossVectors(_tmpDir, _up).normalize();
         target.addScaledVector(_tmpRight,-dx*sp); target.y+=dy*sp; orbit.apply(); invalidate();
       }
     });
@@ -3677,7 +3678,7 @@ function startApp() {
         var pdx=mx-touchState.lx, pdy=my-touchState.ly;
         var sp=sph.r*0.0008;
         orbit.camera.getWorldDirection(_tmpDir);
-        _tmpRight.set(0,1,0); _tmpRight.crossVectors(_tmpDir,_tmpRight).normalize();
+        _tmpRight.crossVectors(_tmpDir, _up).normalize();
         target.addScaledVector(_tmpRight,-pdx*sp); target.y+=pdy*sp;
         // Pinch zoom
         if(touchState.dist>0) {
@@ -4061,8 +4062,7 @@ function startApp() {
       };
       window._ccRemoveActiveClashMarker = function() {
         if(_activeClashMarker) {
-          _activeClashMarker.traverse(function(obj){if(obj.isMesh){if(obj.geometry)obj.geometry.dispose();if(obj.material)obj.material.dispose();}});
-          scene.remove(_activeClashMarker);
+          _disposeGroup(_activeClashMarker);
           _activeClashMarker = null;
           invalidate();
         }
@@ -4100,14 +4100,18 @@ function startApp() {
         clashMarkersRef.current = grp;
         invalidate();
       };
+      // Dispose all unique geometries/materials in a group, then remove from scene
+      function _disposeGroup(grp) {
+        var g={},m={};
+        grp.traverse(function(o){if(o.isMesh){
+          if(o.geometry&&!g[o.geometry.id]){g[o.geometry.id]=1;o.geometry.dispose();}
+          if(o.material&&!m[o.material.id]){m[o.material.id]=1;o.material.dispose();}
+        }});
+        scene.remove(grp);
+      }
       _clearClashMarkers = function() {
         if(clashMarkersRef.current){
-          var _dg={}, _dm={};
-          clashMarkersRef.current.traverse(function(obj){if(obj.isMesh){
-            if(obj.geometry&&!_dg[obj.geometry.id]){_dg[obj.geometry.id]=1;obj.geometry.dispose();}
-            if(obj.material&&!_dm[obj.material.id]){_dm[obj.material.id]=1;obj.material.dispose();}
-          }});
-          scene.remove(clashMarkersRef.current);
+          _disposeGroup(clashMarkersRef.current);
           clashMarkersRef.current = null;
           invalidate();
         }
@@ -4141,12 +4145,7 @@ function startApp() {
       };
       _clearIssueMarkers = function() {
         if(issueMarkersRef.current){
-          var _dg={}, _dm={};
-          issueMarkersRef.current.traverse(function(obj){if(obj.isMesh){
-            if(obj.geometry&&!_dg[obj.geometry.id]){_dg[obj.geometry.id]=1;obj.geometry.dispose();}
-            if(obj.material&&!_dm[obj.material.id]){_dm[obj.material.id]=1;obj.material.dispose();}
-          }});
-          scene.remove(issueMarkersRef.current);
+          _disposeGroup(issueMarkersRef.current);
           issueMarkersRef.current = null;
           invalidate();
         }
@@ -6313,7 +6312,7 @@ function startApp() {
             if(cached && cached.v >= 1) return _geoDeserialize(cached);
             return loadIFC(entry.buffer, DISC[0].c, function(){})
               .then(function(result) {
-                idbSaveGeoCache(entry.id, _geoSerialize(result));
+                if (result) idbSaveGeoCache(entry.id, _geoSerialize(result));
                 return result;
               });
           }).then(function(result){
@@ -6718,9 +6717,11 @@ function startApp() {
           return f.arrayBuffer().then(function(buf) {
             var disc='structural', col=DISC[0].c;
             var _onProg = function(msg){ setLoadMsg(f.name + ': ' + msg); };
-            var _loadP = loadIFCWorker(buf, col, _onProg).catch(function(workerErr) {
+            var _loadP = loadIFCWorker(buf, col, _onProg);
+            var _workerGen = _ccLoadGeneration; // capture generation assigned by loadIFCWorker
+            _loadP = _loadP.catch(function(workerErr) {
               console.warn('[IFC Worker fallback]', workerErr.message || workerErr);
-              return loadIFC(buf, col, _onProg);
+              return loadIFC(buf, col, _onProg, _workerGen);
             });
             return _loadP.then(function(result) {
               if (!result) return; // load was cancelled by a newer load

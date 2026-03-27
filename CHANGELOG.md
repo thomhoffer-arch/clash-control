@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.34 (2026-03-27)
+- Bug fixes & performance: race conditions, memory leaks, allocation reduction
+
 ## v3.2.33 (2026-03-27)
 - Fix mobile layout: command line above tabs, training pill smaller/lower
 
