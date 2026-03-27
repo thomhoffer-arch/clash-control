@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.56 (2026-03-27)
+- Tour: caption centered in viewer, fix duplicate clash, slower modal/typing/orbit
+
 ## v3.2.55 (2026-03-27)
 - Tour: caption at top, fill modal text, real measurement, continuous orbit
 

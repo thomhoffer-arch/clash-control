@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.55',hash:'4c3a23a',date:'2026-03-27T12:41:30Z'};
+  var CC_VERSION = {v:'3.2.56',hash:'8b05e02',date:'2026-03-27T12:45:08Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -13218,6 +13218,10 @@ function startApp() {
     var d = window._ccDispatch;
     var S = window._ccState3d;
     if (!d || !S) { console.error('App not ready'); return; }
+
+    // Override AI status to appear loaded during tour
+    _nlModelStatus = 'ready';
+    _nlBackend = 'browser';
 
     // Remove any previous tour overlay
     var prev = document.getElementById('_ccTourOverlay');
