@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.64 (2026-03-27)
+- Fix 'AI loaded' not showing — force React state via _ccNLSetStatus
+
 ## v3.2.63 (2026-03-27)
 - Tour: fix NL typing lag, scroll clash into view, static render cycle
 

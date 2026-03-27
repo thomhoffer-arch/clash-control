@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.63',hash:'6ba7ef5',date:'2026-03-27T13:11:31Z'};
+  var CC_VERSION = {v:'3.2.64',hash:'18b7b47',date:'2026-03-27T13:17:22Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -13402,7 +13402,15 @@ function startApp() {
     at(3000, function() {
       showCaption('Click a clash to inspect it');
       var c = getClash(0);
-      if (c) { d({t:'ACTIVE', id:c.id}); flyToClash(c); }
+      if (c) {
+        d({t:'ACTIVE', id:c.id});
+        flyToClash(c);
+        // Ensure it scrolls into view after render
+        setTimeout(function() {
+          var el = document.querySelector('[data-item-id="'+c.id+'"]');
+          if (el) el.scrollIntoView({behavior:'smooth', block:'nearest'});
+        }, 200);
+      }
     });
 
     // ─── 3. Orbit around the clash elements as center ───
@@ -13416,7 +13424,14 @@ function startApp() {
     at(3500, function() {
       showCaption('Navigate between clashes');
       var c = getClash(4);
-      if (c) { d({t:'ACTIVE', id:c.id}); flyToClash(c); }
+      if (c) {
+        d({t:'ACTIVE', id:c.id});
+        flyToClash(c);
+        setTimeout(function() {
+          var el = document.querySelector('[data-item-id="'+c.id+'"]');
+          if (el) el.scrollIntoView({behavior:'smooth', block:'nearest'});
+        }, 200);
+      }
     });
     // Orbit around the second clash too
     at(2000, function() {
@@ -13426,22 +13441,37 @@ function startApp() {
     // ─── 5. Confirm the clash — show it becoming an issue ───
     at(2500, function() {
       showCaption('Confirm a clash to create an issue');
-      // Fly back to first clash and select it
+      // Select the clash so the confirm/deny buttons are visible
       var c = getClash(0);
       if (c) {
         d({t:'ACTIVE', id:c.id});
         flyToClash(c);
-        // Scroll the list item into view
-        setTimeout(function() {
-          var el = document.querySelector('[data-item-id="'+c.id+'"]');
-          if (el) el.scrollIntoView({behavior:'smooth', block:'center'});
-        }, 300);
       }
     });
-    at(2000, function() {
-      // Now confirm it — user sees the status change in the panel
+    // Scroll to it and let the expanded panel render
+    at(800, function() {
       var c = getClash(0);
-      if (c) d({t:'UPD_CLASH', id:c.id, u:{status:'confirmed'}});
+      if (c) {
+        var el = document.querySelector('[data-item-id="'+c.id+'"]');
+        if (el) el.scrollIntoView({behavior:'smooth', block:'start'});
+      }
+    });
+    // Now click the confirm button visually
+    at(1500, function() {
+      var c = getClash(0);
+      if (c) {
+        // Find and "click" the Confirm button to trigger the visual animation
+        var row = document.querySelector('[data-item-id="'+c.id+'"]');
+        if (row) {
+          var btns = row.querySelectorAll('button');
+          for (var i = 0; i < btns.length; i++) {
+            if (btns[i].textContent.trim() === 'Confirm') {
+              btns[i].click();
+              break;
+            }
+          }
+        }
+      }
     });
 
     // ─── 6. Issues tab — fly to the new issue ───
@@ -13479,7 +13509,7 @@ function startApp() {
       showCaption('Create issues directly in the viewer');
       zoomAll();
     });
-    at(1200, function() {
+    at(1800, function() {
       d({t:'MODAL', v:true});
       // Start typing after modal renders (300ms settle)
       setTimeout(function() {
@@ -13551,11 +13581,17 @@ function startApp() {
       d({t:'MEASURE_MODE', v:null});
     });
 
-    // ─── 11. Show standards tab for clearances ───
+    // ─── 11. Explorer tab ───
+    at(2000, function() {
+      showCaption('Search and explore all elements');
+      d({t:'TAB', v:'explorer'});
+      setTimeout(function() { smoothOrbit(20, 2000); }, 300);
+    });
+
+    // ─── 11b. Standards tab for clearances ───
     at(3000, function() {
       showCaption('Set default clearances per discipline');
       d({t:'TAB', v:'standards'});
-      // Let the tab render settle before orbiting
       setTimeout(function() { smoothOrbit(20, 2500); }, 300);
     });
 
