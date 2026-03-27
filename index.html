@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.36',hash:'cfc830b',date:'2026-03-27T06:32:49Z'};
+  var CC_VERSION = {v:'3.2.38',hash:'e4183dc',date:'2026-03-27T08:33:03Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -4706,7 +4706,6 @@ function startApp() {
               hitNormal = [fn.x, fn.y, fn.z];
             }
             setSelectedEl(found ? {props:found.el.props||{}, modelName:found.model.name, expressId:eid, point:hitPt, box:hitBox, normal:hitNormal} : {props:{expressId:eid}, modelName:'Unknown', expressId:eid, point:hitPt, box:hitBox, normal:hitNormal});
-            ghostOthers([eid]);
             if(outlineRef.current){scene.remove(outlineRef.current);outlineRef.current=null;}
             // Fly to element on click (if autoFlyTo enabled)
             if(prefsRef.current.autoFlyTo!==false && _flyTo) {
@@ -11147,7 +11146,7 @@ function startApp() {
       [['filter','reset','clear'],function(){d({t:A.RESET_FILTERS});return 'Filters cleared.';}, 2],
       [['export','bcf','download'],function(){if(!s.issues.length&&!s.clashes.length)return 'Nothing to export.';exportBCF(s.issues.length?s.issues:s.clashes,'2.1',s.viewpoints);return 'BCF exported.';}, 2],
       [['import','bcf'],          function(){importBCF(d);return 'BCF picker opened.';}, 2],
-      [['load','open','ifc'],     function(){if(window._ccOpenIFC)window._ccOpenIFC();else{window._ccPendingOpen='ifc';d({t:A.TAB,v:'models'});}return 'IFC picker opened.';}, 2],
+      [['load','open','ifc'],     function(){if(window._ccOpenIFC)window._ccOpenIFC();else{window._ccPendingOpen='ifc';d({t:A.TAB,v:'models'});}return 'IFC picker opened.';}, 1],
       [['bridge','revit'],        function(){d({t:A.REVIT_BRIDGE,v:true});return 'Bridge opened.';}, 1],
       [['color','type'],          function(){d({t:A.COLOR_BY_CLASS,v:'byType'});return 'Colored by type.';}, 2],
       [['color','storey','floor'],function(){d({t:A.COLOR_BY_CLASS,v:'byStorey'});return 'Colored by storey.';}, 2],

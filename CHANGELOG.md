@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.2.38 (2026-03-27)
+- Bump version via pre-commit hook
+
+## v3.2.37 (2026-03-27)
+- Fix _lodBoxGeo not defined error when loading IFC via worker
+
 ## v3.2.36 (2026-03-27)
 - Beacon sends labeled clash records from store, not live state
 
