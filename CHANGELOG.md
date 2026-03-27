@@ -1,5 +1,14 @@
 # Changelog
 
+## v3.2.72 (2026-03-27)
+- Tour: use clash 5 for second selection (more visible in list)
+
+## v3.2.71 (2026-03-27)
+- Fix clash list: click actual DOM rows, normalize issue orbit axis
+
+## v3.2.70 (2026-03-27)
+- Fix orbit jump, use clash 10, cached mesh list, reverse ending orbit
+
 ## v3.2.69 (2026-03-27)
 - Fix clash list scroll: use mid-list indices, reset sort/group in tour
 
