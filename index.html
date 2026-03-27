@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.52',hash:'e96601b',date:'2026-03-27T12:15:11Z'};
+  var CC_VERSION = {v:'3.2.53',hash:'3bbc091',date:'2026-03-27T12:20:40Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -13308,15 +13308,29 @@ function startApp() {
       if (cb) setTimeout(cb, 800);
     }
 
-    // ─── 1. Clashes tab — show all detected clashes ───
+    // ─── 1. Clashes tab — show all detected clashes + NL command typing ───
     at(300, function() {
       d({t:'TAB', v:'clashes'});
       d({t:'ACTIVE', id:null});
       if (_unghostAll) _unghostAll();
       invalidate(10);
       showCaption('Detected clashes appear instantly');
-      // Slow orbit while viewing the list
+      // Open NL panel and type command
+      if (window._ccNLOpen) window._ccNLOpen();
+      var phrase = 'show all structural vs MEP clashes';
+      var i = 0;
+      (function typeChar() {
+        if (i <= phrase.length) {
+          if (window._ccNLSetInput) window._ccNLSetInput(phrase.substring(0, i));
+          i++;
+          setTimeout(typeChar, 30);
+        }
+      })();
       smoothOrbit(30, 2500);
+    });
+    // Clear the NL input after showing it
+    at(1500, function() {
+      if (window._ccNLSetInput) window._ccNLSetInput('');
     });
 
     // ─── 2. Click first clash — fly to it ───
@@ -13380,16 +13394,13 @@ function startApp() {
       }
     });
 
-    // ─── 8. Create issue from viewer (show modal) ───
+    // ─── 8. Zoom all, then create issue from viewer ───
     at(2000, function() {
       if (_unghostAll) _unghostAll();
-      invalidate(10);
       showCaption('Create issues directly in the viewer');
-      // Fly to a different clash location for context
-      var c = getClash(3);
-      if (c && c.point && _flyTo) _flyTo(c.point, 10);
+      zoomAll();
     });
-    at(1500, function() {
+    at(2000, function() {
       d({t:'MODAL', v:true});
     });
     at(2500, function() {
@@ -13442,23 +13453,8 @@ function startApp() {
       invalidate(10);
     });
 
-    // ─── 13. AI command line + training mode teaser ───
+    // ─── 13. Training mode teaser ───
     at(1500, function() {
-      showCaption('Natural language commands');
-      if (window._ccNLOpen) window._ccNLOpen();
-      var phrase = 'show all structural vs MEP clashes';
-      var i = 0;
-      (function typeChar() {
-        if (i <= phrase.length) {
-          if (window._ccNLSetInput) window._ccNLSetInput(phrase.substring(0, i));
-          i++;
-          setTimeout(typeChar, 30);
-        }
-      })();
-      smoothOrbit(30, 3500);
-    });
-    at(4000, function() {
-      if (window._ccNLSetInput) window._ccNLSetInput('');
       showCaption('AI-powered clash analysis — train your own model');
       d({t:'TRAINING_MODE', v:true});
       d({t:'TAB', v:'clashes'});
@@ -13475,15 +13471,30 @@ function startApp() {
       }
       smoothOrbit(40, 3500);
     });
+
+    // ─── 14. End — zoom all, type CTA in NL input ───
     at(4000, function() {
       d({t:'TRAINING_MODE', v:false});
       if (_unghostAll) _unghostAll();
-      if (_resetView) _resetView();
-      showCaption('Drop your IFC files in and see what happens. Link in the comments');
+      hideCaption();
+      zoomAll();
+    });
+    at(1500, function() {
+      // Type the CTA in the NL command input
+      if (window._ccNLOpen) window._ccNLOpen();
+      var phrase = 'Drop your IFC files in and see what happens. Link in the comments';
+      var i = 0;
+      (function typeChar() {
+        if (i <= phrase.length) {
+          if (window._ccNLSetInput) window._ccNLSetInput(phrase.substring(0, i));
+          i++;
+          setTimeout(typeChar, 25);
+        }
+      })();
       smoothOrbit(30, 4500);
     });
     at(5000, function() {
-      hideCaption();
+      if (window._ccNLSetInput) window._ccNLSetInput('');
     });
     at(800, function() {
       d({t:'SECTION_BOX', v:null});

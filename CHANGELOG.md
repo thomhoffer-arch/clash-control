@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.53 (2026-03-27)
+- Fix app not loading — undefined nextIdx variable in _ccAdvanceToNext
+
 ## v3.2.52 (2026-03-27)
 - Auto-advance to next clash on confirm/deny/accept, gate training data
 
