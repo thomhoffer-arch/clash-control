@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.63 (2026-03-27)
+- Tour: fix NL typing lag, scroll clash into view, static render cycle
+
 ## v3.2.62 (2026-03-27)
 - Tour: optimize FPS for steps 0, 11-13 — settle before orbit
 

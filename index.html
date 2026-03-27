@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.62',hash:'14462eb',date:'2026-03-27T13:10:02Z'};
+  var CC_VERSION = {v:'3.2.63',hash:'6ba7ef5',date:'2026-03-27T13:11:31Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -11381,6 +11381,7 @@ function startApp() {
     var stOpen = useState(false), open = stOpen[0], setOpen = stOpen[1];
     window._ccNLOpen = function(){ setOpen(true); if(inputRef.current) setTimeout(function(){inputRef.current&&inputRef.current.focus();},50); };
     window._ccNLSetInput = function(text){ setInput(text); };
+    window._ccNLSetStatus = function(status, back){ setLLMStatus(status); setBackend(back); };
     var stMsgs = useState([{role:'assistant', text:'Control ClashControl with plain English — try "load ifc", "structural vs MEP", "switch to light", "analyze clashes", or "help" for all commands.'}]);
     var msgs = stMsgs[0], setMsgs = stMsgs[1];
     var stInput = useState(''), input = stInput[0], setInput = stInput[1];
@@ -13376,8 +13377,9 @@ function startApp() {
       if (_unghostAll) _unghostAll();
       invalidate(10);
       showCaption('Detected clashes appear instantly');
-      // Open NL panel first, let it render, then start typing
+      // Open NL panel first, force AI status, let it render, then start typing
       if (window._ccNLOpen) window._ccNLOpen();
+      if (window._ccNLSetStatus) window._ccNLSetStatus('ready', 'browser');
       setTimeout(function() {
         var phrase = 'show all structural vs MEP clashes';
         var i = 0;
@@ -13613,6 +13615,7 @@ function startApp() {
     at(1500, function() {
       // Type the CTA in the NL command input
       if (window._ccNLOpen) window._ccNLOpen();
+      if (window._ccNLSetStatus) window._ccNLSetStatus('ready', 'browser');
       var phrase = 'Drop your IFC files in and see what happens. Link in the comments';
       var i = 0;
       (function typeChar() {
