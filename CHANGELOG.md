@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.49 (2026-03-27)
+- Tour: update end caption to call-to-action text
+
 ## v3.2.48 (2026-03-27)
 - Tour: separate zoom-all step before features, consistent orbit direction
 

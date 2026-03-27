@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.48',hash:'10466cf',date:'2026-03-27T11:37:21Z'};
+  var CC_VERSION = {v:'3.2.49',hash:'e151776',date:'2026-03-27T12:03:45Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -13426,6 +13426,17 @@ function startApp() {
       showCaption('AI-powered clash analysis — train your own model');
       d({t:'TRAINING_MODE', v:true});
       d({t:'TAB', v:'clashes'});
+      // Flash the training pill
+      var pill = document.querySelector('.cc-training-btn-3d');
+      if (pill) {
+        pill.style.transition = 'box-shadow .3s, transform .3s';
+        pill.style.boxShadow = '0 0 30px rgba(124,58,237,.8), 0 0 60px rgba(124,58,237,.4)';
+        pill.style.transform = 'scale(1.15)';
+        setTimeout(function() {
+          pill.style.boxShadow = '';
+          pill.style.transform = '';
+        }, 1200);
+      }
       smoothOrbit(40, 3500);
     });
     at(4000, function() {
