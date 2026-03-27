@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.51',hash:'197f98c',date:'2026-03-27T12:12:44Z'};
+  var CC_VERSION = {v:'3.2.52',hash:'e96601b',date:'2026-03-27T12:15:11Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -8418,27 +8418,23 @@ function startApp() {
     };
     window._ccAdvanceToNext = function(currentId) {
       if (!flatItems.length) return;
-      // After re-render the confirmed/denied item may be gone from flatItems
-      // Use the stored index to pick the item now at that position
       var idx = window._ccAdvanceIdx != null ? window._ccAdvanceIdx : 0;
       if (idx >= flatItems.length) idx = flatItems.length - 1;
-      // If the item at idx is the same one we just actioned, try next
       if (flatItems[idx] && flatItems[idx].id === currentId) idx++;
       if (idx >= flatItems.length) idx = Math.max(0, flatItems.length - 1);
       if (idx < 0 || idx >= flatItems.length || (flatItems[idx] && flatItems[idx].id === currentId)) return;
-        var nxt = flatItems[nextIdx];
-        d({t:A.ACTIVE, id:nxt.id});
-        var hIds = _itemEids(nxt);
-        if (hIds.length && _ghostOthers) _ghostOthers(hIds);
-        if (nxt.elemA && _highlightById) _highlightById(nxt.elemA, false);
-        if (nxt.elementId && _highlightById) _highlightById(nxt.elementId, false);
-        if (nxt.point && window._ccShowActiveClashMarker) window._ccShowActiveClashMarker(nxt.point);
-        if (_flyToElements && hIds.length) _flyToElements(hIds, nxt.point);
-        else if (nxt.point && _flyTo) _flyTo(nxt.point);
-        if (scrollRef.current) {
-          var rows = scrollRef.current.querySelectorAll('[data-item-id]');
-          rows.forEach(function(row) { if (row.dataset.itemId === nxt.id) row.scrollIntoView({block:'nearest'}); });
-        }
+      var nxt = flatItems[idx];
+      d({t:A.ACTIVE, id:nxt.id});
+      var hIds = _itemEids(nxt);
+      if (hIds.length && _ghostOthers) _ghostOthers(hIds);
+      if (nxt.elemA && _highlightById) _highlightById(nxt.elemA, false);
+      if (nxt.elementId && _highlightById) _highlightById(nxt.elementId, false);
+      if (nxt.point && window._ccShowActiveClashMarker) window._ccShowActiveClashMarker(nxt.point);
+      if (_flyToElements && hIds.length) _flyToElements(hIds, nxt.point);
+      else if (nxt.point && _flyTo) _flyTo(nxt.point);
+      if (scrollRef.current) {
+        var rows = scrollRef.current.querySelectorAll('[data-item-id]');
+        rows.forEach(function(row) { if (row.dataset.itemId === nxt.id) row.scrollIntoView({block:'nearest'}); });
       }
     };
 

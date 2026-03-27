@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.52 (2026-03-27)
+- Auto-advance to next clash on confirm/deny/accept, gate training data
+
 ## v3.2.51 (2026-03-27)
 - Tour: better clash zoom, slower issue transition, faster typing, longer end caption
 
