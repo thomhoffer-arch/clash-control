@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.39',hash:'7a4577e',date:'2026-03-27T09:11:16Z'};
+  var CC_VERSION = {v:'3.2.41',hash:'14dcff5',date:'2026-03-27T09:44:00Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -13168,112 +13168,109 @@ function startApp() {
   else { ReactDOM.render(h(ErrorBoundary, null, h(App, null)), rootEl); }
 
   // ── Demo Tour (console-only: window._ccDemoTour()) ─────────────
-  // Self-running feature showcase for screen recording (~50s).
-  // Trigger from browser console: _ccDemoTour()
+  // Hidden feature showcase. Trigger from browser console: _ccDemoTour()
+  // Assumes models are loaded and clashes have been detected.
   window._ccDemoTour = function() {
     var d = window._ccDispatch;
     var S = window._ccState3d;
     if (!d || !S) { console.error('App not ready'); return; }
 
-    // Overlay for captions
+    // Remove any previous tour overlay
+    var prev = document.getElementById('_ccTourOverlay');
+    if (prev) prev.parentNode.removeChild(prev);
+
+    // Caption overlay
     var overlay = document.createElement('div');
     overlay.id = '_ccTourOverlay';
     overlay.style.cssText = 'position:fixed;bottom:48px;left:50%;transform:translateX(-50%);z-index:99999;pointer-events:none;text-align:center;';
     document.body.appendChild(overlay);
-
     var caption = document.createElement('div');
     caption.style.cssText = 'display:inline-block;background:rgba(0,0,0,0.75);color:#fff;font-family:system-ui,sans-serif;font-size:1.15rem;font-weight:500;padding:10px 28px;border-radius:12px;backdrop-filter:blur(8px);letter-spacing:0.01em;transition:opacity 0.4s;opacity:0;';
     overlay.appendChild(caption);
-
     function showCaption(text) { caption.textContent = text; caption.style.opacity = '1'; }
     function hideCaption() { caption.style.opacity = '0'; }
 
-    // Smooth orbit: rotate camera around target
+    // Smooth orbit helper
     function smoothOrbit(degrees, duration, cb) {
-      var startTheta = S.orbit.sph ? S.orbit.sph.theta : 0;
-      // Access sph through the orbit object stored on S
       var sph = S.orbit.sph;
       if (!sph) { if (cb) cb(); return; }
+      var startTheta = sph.theta;
       var delta = degrees * Math.PI / 180;
       var start = performance.now();
-      function tick() {
+      (function tick() {
         var t = Math.min((performance.now() - start) / duration, 1);
-        var e = t < 0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2; // easeInOut
+        var e = t < 0.5 ? 2*t*t : 1-Math.pow(-2*t+2,2)/2;
         sph.theta = startTheta + delta * e;
         S.orbit.apply();
         invalidate();
         if (t < 1) requestAnimationFrame(tick);
-        else { if (cb) cb(); }
-      }
-      tick();
+        else if (cb) cb();
+      })();
     }
 
-    // Sequence runner
-    var steps = [];
-    var currentStep = 0;
-    function at(delay, fn) { steps.push({delay: delay, fn: fn}); }
+    // Step sequencer
+    var steps = [], cur = 0;
+    function at(delay, fn) { steps.push({delay:delay, fn:fn}); }
     function run() {
-      if (currentStep >= steps.length) {
-        // Cleanup
+      if (cur >= steps.length) {
         hideCaption();
-        setTimeout(function() { if (overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 600);
+        setTimeout(function(){ if(overlay.parentNode) overlay.parentNode.removeChild(overlay); }, 600);
         console.log('%c Demo tour complete! ', 'background:#10b981;color:#fff;font-weight:bold;padding:2px 8px;border-radius:4px');
         return;
       }
-      var step = steps[currentStep++];
-      setTimeout(function() { step.fn(); run(); }, step.delay);
+      var s = steps[cur++];
+      setTimeout(function(){ s.fn(); run(); }, s.delay);
     }
 
-    // ── STEP 1: Open clashes tab — all clashes visible ──
+    // ─── 1. Clashes tab — show all detected clashes ───
     at(300, function() {
       d({t:'TAB', v:'clashes'});
       d({t:'ACTIVE', id:null});
       if (_unghostAll) _unghostAll();
-      if (_resetView) _resetView();
+      invalidate(10);
       showCaption('Detected clashes appear instantly');
     });
 
-    // ── STEP 2: Click first clash — fly to it ──
+    // ─── 2. Click first clash — fly to it ───
     at(2500, function() {
       showCaption('Click a clash to inspect it');
       var s = window._ccLatestState;
       if (s && s.clashes.length > 0) {
         var c = s.clashes[0];
-        d({t:'ACTIVE', id: c.id});
+        d({t:'ACTIVE', id:c.id});
         if (c.point && _flyTo) _flyTo(c.point, 8);
         if (c.elemA && c.elemB && _ghostOthers) _ghostOthers([c.elemA, c.elemB]);
       }
     });
 
-    // ── STEP 3: Orbit around the clash ──
+    // ─── 3. Orbit around the clash ───
     at(2500, function() {
       showCaption('Orbit to inspect from every angle');
       smoothOrbit(70, 2500);
     });
 
-    // ── STEP 4: Click second clash — camera flies there ──
+    // ─── 4. Click another clash — camera flies there ───
     at(3000, function() {
       showCaption('Navigate between clashes');
       var s = window._ccLatestState;
       if (s && s.clashes.length > 1) {
-        var c = s.clashes[Math.min(2, s.clashes.length - 1)];
-        d({t:'ACTIVE', id: c.id});
+        var c = s.clashes[Math.min(2, s.clashes.length-1)];
+        d({t:'ACTIVE', id:c.id});
         if (c.point && _flyTo) _flyTo(c.point, 8);
         if (c.elemA && c.elemB && _ghostOthers) _ghostOthers([c.elemA, c.elemB]);
       }
     });
 
-    // ── STEP 5: Confirm/accept the clash — moves to issues ──
+    // ─── 5. Confirm the clash — it becomes an issue ───
     at(2800, function() {
       showCaption('Confirm a clash to create an issue');
       var s = window._ccLatestState;
       if (s && s.clashes.length > 0) {
-        var c = s.clashes[0];
-        d({t:'UPD_CLASH', id: c.id, u:{status:'confirmed'}});
+        d({t:'UPD_CLASH', id:s.clashes[0].id, u:{status:'confirmed'}});
       }
     });
 
-    // ── STEP 6: Switch to issues tab, click the issue ──
+    // ─── 6. Issues tab — click the new issue ───
     at(2000, function() {
       showCaption('Track issues with status management');
       d({t:'TAB', v:'issues'});
@@ -13281,45 +13278,34 @@ function startApp() {
     at(1200, function() {
       var s = window._ccLatestState;
       if (s && s.issues.length > 0) {
-        var iss = s.issues[s.issues.length - 1]; // newest issue (just confirmed)
-        d({t:'ACTIVE', id: iss.id});
-        if (iss.point && _flyTo) _flyTo(iss.point, 8);
-        if (iss.elemA && iss.elemB && _ghostOthers) _ghostOthers([iss.elemA, iss.elemB]);
+        var iss = s.issues[s.issues.length-1];
+        d({t:'ACTIVE', id:iss.id});
       }
     });
 
-    // ── STEP 7: Set issue status to "In progress" ──
+    // ─── 7. Set issue status to "In progress" ───
     at(2000, function() {
       showCaption('Update status — In progress');
       var s = window._ccLatestState;
       if (s && s.issues.length > 0) {
-        var iss = s.issues[s.issues.length - 1];
-        d({t:'UPD_ISSUE', id: iss.id, u:{status:'in_progress'}});
+        d({t:'UPD_ISSUE', id:s.issues[s.issues.length-1].id, u:{status:'in_progress'}});
       }
     });
 
-    // ── STEP 8: Create issue from viewer (open modal) ──
+    // ─── 8. Create issue from viewer (show modal) ───
     at(2200, function() {
       if (_unghostAll) _unghostAll();
-      if (_resetView) _resetView();
       invalidate(10);
       showCaption('Create issues directly in the viewer');
     });
     at(1000, function() {
-      var s = window._ccLatestState;
-      var el = null;
-      if (s && s.models.length > 0) {
-        // Try to pick an element from a model for context
-        var m = s.models[0];
-        if (m.meshes && m.meshes.length > 0) el = {expressId: m.meshes[0].expressId, name: m.meshes[0].name || 'Element'};
-      }
-      d({t:'MODAL', v:true, el: el});
+      d({t:'MODAL', v:true});
     });
     at(2500, function() {
       d({t:'MODAL', v:false});
     });
 
-    // ── STEP 9: Measurement tools ──
+    // ─── 9. Measurement tools ───
     at(500, function() {
       showCaption('Built-in measurement tools');
       d({t:'MEASURE_MODE', v:'length'});
@@ -13328,13 +13314,13 @@ function startApp() {
       d({t:'MEASURE_MODE', v:null});
     });
 
-    // ── STEP 10: Export BCF ──
+    // ─── 10. Export BCF ───
     at(500, function() {
       showCaption('Export to BCF for any BIM tool');
       d({t:'TAB', v:'clashes'});
     });
 
-    // ── STEP 11: Toggle view modes ──
+    // ─── 11. Toggle render styles ───
     at(2500, function() {
       showCaption('Switch rendering styles');
       d({t:'UPD_PREFS', u:{renderStyle:'wireframe'}});
@@ -13353,10 +13339,10 @@ function startApp() {
       invalidate(10);
     });
 
-    // ── STEP 12: LLM training mode teaser ──
+    // ─── 12. LLM training mode teaser + end ───
     at(1500, function() {
-      if (_resetView) _resetView();
       if (_unghostAll) _unghostAll();
+      invalidate(10);
       showCaption('AI-powered clash analysis — train your own model');
       d({t:'TRAINING_MODE', v:true});
       d({t:'TAB', v:'clashes'});
@@ -13369,7 +13355,6 @@ function startApp() {
       hideCaption();
     });
     at(800, function() {
-      // Final cleanup
       d({t:'SECTION_BOX', v:null});
       d({t:'MEASURE_MODE', v:null});
       d({t:'TAB', v:'clashes'});
