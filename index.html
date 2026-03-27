@@ -10,7 +10,7 @@
 
   <!-- CSP: restrict resource loading to known CDN origins -->
   <!-- 'unsafe-eval' required by pdf.js v3 for custom font rendering (CFF/Type1 font programs) -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://huggingface.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.huggingface.co https://*.hf.co http://localhost:11434 https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com https://docs.google.com http://localhost:* ws://localhost:* blob:; frame-src https://docs.google.com; worker-src blob:; img-src 'self' blob: data:;">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdnjs.cloudflare.com https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline'; connect-src https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://huggingface.co https://cdn-lfs.huggingface.co https://cdn-lfs-us-1.huggingface.co https://*.hf.co http://localhost:11434 https://api.anthropic.com https://api.openai.com https://generativelanguage.googleapis.com http://localhost:* ws://localhost:* blob:; worker-src blob:; img-src 'self' blob: data:;">
 
   <!-- CDN deps: React, Three.js, JSZip — all UMD, all cdnjs -->
   <!-- SRI hashes: regenerate with `node scripts/generate-sri.js` if you change versions -->
@@ -171,8 +171,8 @@
       .cc-viewcube-wrap{width:100px!important;height:100px!important}
       .cc-viewcube-wrap canvas{width:80px!important;height:80px!important;top:10px!important;left:10px!important}
       /* Chatbox full width — above mobile nav bar */
-      .cc-nlpanel{width:calc(100vw - 1rem)!important;bottom:5rem!important}
-      .cc-nlpanel-closed{bottom:5rem!important}
+      .cc-nlpanel{width:calc(100vw - 1rem)!important;bottom:calc(3.75rem + env(safe-area-inset-bottom, 0px))!important}
+      .cc-nlpanel-closed{bottom:calc(3.75rem + env(safe-area-inset-bottom, 0px))!important}
       /* Training pill: smaller on mobile + pushed down to avoid FPS overlay */
       .cc-training-btn-3d{padding:.25rem .5rem!important;font-size:0.7rem!important}
       .cc-training-pill-wrap{top:2.2rem!important}
@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.3.4',hash:'be498b4',date:'2026-03-27T16:04:41Z'};
+  var CC_VERSION = {v:'3.3.6',hash:'d05358e',date:'2026-03-27T16:19:49Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -6869,13 +6869,18 @@ function startApp() {
       processFiles(Array.prototype.slice.call(e.target.files||[]));
       e.target.value='';
     }
-    // Expose globals so LeftRail buttons can trigger file pickers regardless of which tab is active
-    window._ccOpenIFC = function(){setErr('');fileRef.current&&fileRef.current.click();};
-    window._ccOpen2D  = function(){setErr('');file2dRef.current&&file2dRef.current.click();};
-    // If LeftRail triggered a pending open before this component mounted, honour it now
+    // Pick up files queued by the global file picker (App-level hidden inputs)
     useEffect(function(){
-      if(window._ccPendingOpen==='ifc'){window._ccPendingOpen=null;window._ccOpenIFC&&window._ccOpenIFC();}
-      if(window._ccPendingOpen==='2d') {window._ccPendingOpen=null;window._ccOpen2D&&window._ccOpen2D();}
+      function onPending(){
+        if(window._ccPendingFiles){
+          var f=window._ccPendingFiles; window._ccPendingFiles=null;
+          processFiles(f);
+        }
+      }
+      // Check immediately on mount (files may already be queued)
+      onPending();
+      window.addEventListener('cc-pending-files', onPending);
+      return function(){ window.removeEventListener('cc-pending-files', onPending); };
     },[]);
     function onDrop(e) {
       e.preventDefault(); e.stopPropagation();
@@ -11873,12 +11878,10 @@ function startApp() {
     // ── File Loading ─────────────────────────────────────────────
     if (/(?:load|open|import|add)\s+(?:an?\s+)?ifc|ifc\s+(?:file|model)/.test(text)) {
       if(window._ccOpenIFC) window._ccOpenIFC();
-      else { window._ccPendingOpen='ifc'; d({t:A.TAB,v:'models'}); }
       return 'Opening IFC file picker...';
     }
     if (/(?:load|open|import|add)\s+(?:an?\s+)?(?:2d|dxf|pdf|dwg|underlay|drawing)/.test(text)) {
       if(window._ccOpen2D) window._ccOpen2D();
-      else { window._ccPendingOpen='2d'; d({t:A.TAB,v:'models'}); }
       return 'Opening 2D file picker...';
     }
     if (/(?:import|load|open)\s+(?:a\s+)?bcf/.test(text)) {
@@ -12007,7 +12010,7 @@ function startApp() {
       [['filter','reset','clear'],function(){d({t:A.RESET_FILTERS});return 'Filters cleared.';}, 2],
       [['export','bcf','download'],function(){if(!s.issues.length&&!s.clashes.length)return 'Nothing to export.';exportBCF(s.issues.length?s.issues:s.clashes,'2.1',s.viewpoints);return 'BCF exported.';}, 2],
       [['import','bcf'],          function(){importBCF(d);return 'BCF picker opened.';}, 2],
-      [['load','open','ifc'],     function(){if(window._ccOpenIFC)window._ccOpenIFC();else{window._ccPendingOpen='ifc';d({t:A.TAB,v:'models'});}return 'IFC picker opened.';}, 1],
+      [['load','open','ifc'],     function(){if(window._ccOpenIFC)window._ccOpenIFC();return 'IFC picker opened.';}, 1],
       [['bridge','revit'],        function(){d({t:A.REVIT_BRIDGE,v:true});return 'Bridge opened.';}, 1],
       [['color','type'],          function(){d({t:A.COLOR_BY_CLASS,v:'byType'});return 'Colored by type.';}, 2],
       [['color','storey','floor'],function(){d({t:A.COLOR_BY_CLASS,v:'byStorey'});return 'Colored by storey.';}, 2],
@@ -12868,14 +12871,12 @@ function startApp() {
       </div>
       <div style=${{flex:1}}></div>
       ${iconBtn(function(){
-          if(window._ccOpenIFC){window._ccOpenIFC();}
-          else{window._ccPendingOpen='ifc';d({t:A.TAB,v:'models'});}
+          if(window._ccOpenIFC) window._ccOpenIFC();
         },
         html`<span style=${{fontWeight:700,fontSize:'0.8rem',letterSpacing:'.03em'}}>IFC</span>`,
         'Load IFC model')}
       ${iconBtn(function(){
-          if(window._ccOpen2D){window._ccOpen2D();}
-          else{window._ccPendingOpen='2d';d({t:A.TAB,v:'models'});}
+          if(window._ccOpen2D) window._ccOpen2D();
         },
         html`<span style=${{fontWeight:700,fontSize:'0.8rem',letterSpacing:'.03em'}}>2D</span>`,
         'Load DXF / PDF / DWG')}
@@ -14036,8 +14037,29 @@ function startApp() {
       return function(){window.removeEventListener('keydown', gk);};
     },[s.showSettings, s.showModal, s.showRevitBridge, s.measureMode, s.sectionAxis, s.prefs.showGrid, s.prefs.renderStyle, s.viewpoints, s.measurements, s.activeId, s.floorPlan, s.clashes, s.issues]);
 
+    // ── Persistent file picker (always mounted so _ccOpenIFC works from any tab) ──
+    var _gFileRef = useRef(null);
+    var _gFile2dRef = useRef(null);
+    useEffect(function(){
+      window._ccOpenIFC = function(){_gFileRef.current&&_gFileRef.current.click();};
+      window._ccOpen2D  = function(){_gFile2dRef.current&&_gFile2dRef.current.click();};
+      return function(){window._ccOpenIFC=null;window._ccOpen2D=null;};
+    },[]);
+    function _gOnFiles(e){
+      var files = Array.prototype.slice.call(e.target.files||[]);
+      e.target.value='';
+      if(!files.length) return;
+      // Store files globally and switch to models tab — ModelSidebar picks them up
+      window._ccPendingFiles = files;
+      d({t:A.TAB,v:'models'});
+      // If ModelSidebar is already mounted, notify it immediately
+      window.dispatchEvent(new CustomEvent('cc-pending-files'));
+    }
+
     var is2D = s.underlayMode === 'view2d' || s.underlayMode === 'compare';
     return html`<div style=${{height:'100vh',display:'flex',flexDirection:'row',overflow:'hidden'}}>
+      <input ref=${_gFileRef} type="file" accept=".ifc" multiple style=${{display:'none'}} onChange=${_gOnFiles} />
+      <input ref=${_gFile2dRef} type="file" accept=".dxf,.pdf,.dwg" multiple style=${{display:'none'}} onChange=${_gOnFiles} />
       <${LeftRail} s=${s} d=${d} />
       <div style=${{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',position:'relative',minWidth:0}}>
         <${Header} s=${s} d=${d} />

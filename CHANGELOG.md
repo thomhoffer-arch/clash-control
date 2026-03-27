@@ -1,5 +1,11 @@
 # Changelog
 
+## v3.3.6 (2026-03-27)
+- Fix IFC loading from chatbox not responding on non-models tab
+
+## v3.3.5 (2026-03-27)
+- Add *.hf.co to CSP connect-src for HuggingFace WASM fetches
+
 ## v3.3.4 (2026-03-27)
 - Fix worker error, add loading progress to chatbox, move clash rules to Standards, show IDS failures in clashes
 
