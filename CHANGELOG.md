@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.62 (2026-03-27)
+- Tour: optimize FPS for steps 0, 11-13 — settle before orbit
+
 ## v3.2.61 (2026-03-27)
 - Tour: show 'AI loaded' in purple, keep training mode on at end, faster modal open
 
