@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.73',hash:'2064dc7',date:'2026-03-27T13:45:14Z'};
+  var CC_VERSION = {v:'3.2.74',hash:'2cd34cd',date:'2026-03-27T14:02:38Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -13232,6 +13232,8 @@ function startApp() {
   // Hidden feature showcase. Trigger from browser console: _ccDemoTour()
   // Assumes models are loaded and clashes have been detected.
   window._ccDemoTour = function() {
+    console.log('Demo tour temporarily disabled');
+    return;
     var d = window._ccDispatch;
     var S = window._ccState3d;
     if (!d || !S) { console.error('App not ready'); return; }

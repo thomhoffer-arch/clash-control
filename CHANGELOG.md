@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.74 (2026-03-27)
+- Fix clickClashRow: poll with setInterval, getClash reads from DOM rows
+
 ## v3.2.73 (2026-03-27)
 - Tour: robust clickClashRow — dispatch ACTIVE first, retry finding row
 
