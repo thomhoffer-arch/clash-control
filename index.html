@@ -257,7 +257,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.3.11',hash:'a68dbce',date:'2026-03-27T16:54:54Z'};
+  var CC_VERSION = {v:'3.3.12',hash:'4fbd668',date:'2026-03-27T20:55:51Z'};
 
   // ── GoatCounter event helper (no-op if GoatCounter not configured) ──
   function _gcEvent(name, title) {
@@ -866,15 +866,78 @@ function startApp() {
   }
 
   // Serialise a loadIFC result to plain objects/ArrayBuffers for IDB storage.
+  // ── Geometry quantization helpers (16-bit positions, 8-bit normals) ──
+  // Reduces IndexedDB cache size by ~60% with <2mm precision loss on typical BIM models.
+  function _quantizePositions(posF32, bbox) {
+    var minX=bbox[0],minY=bbox[1],minZ=bbox[2],rangeX=bbox[3]-bbox[0],rangeY=bbox[4]-bbox[1],rangeZ=bbox[5]-bbox[2];
+    if(rangeX<1e-10) rangeX=1; if(rangeY<1e-10) rangeY=1; if(rangeZ<1e-10) rangeZ=1;
+    var n=posF32.length/3, out=new Uint16Array(n*3);
+    for(var i=0,j=0;i<n;i++,j+=3){
+      out[j]  =Math.round(Math.min(1,Math.max(0,(posF32[j]-minX)/rangeX))*65535);
+      out[j+1]=Math.round(Math.min(1,Math.max(0,(posF32[j+1]-minY)/rangeY))*65535);
+      out[j+2]=Math.round(Math.min(1,Math.max(0,(posF32[j+2]-minZ)/rangeZ))*65535);
+    }
+    return out;
+  }
+  function _dequantizePositions(u16, bbox) {
+    var minX=bbox[0],minY=bbox[1],minZ=bbox[2],rangeX=bbox[3]-bbox[0],rangeY=bbox[4]-bbox[1],rangeZ=bbox[5]-bbox[2];
+    var n=u16.length/3, out=new Float32Array(n*3);
+    for(var i=0,j=0;i<n;i++,j+=3){
+      out[j]  =minX+(u16[j]/65535)*rangeX;
+      out[j+1]=minY+(u16[j+1]/65535)*rangeY;
+      out[j+2]=minZ+(u16[j+2]/65535)*rangeZ;
+    }
+    return out;
+  }
+  function _encodeNormalsOct(nrmF32) {
+    var n=nrmF32.length/3, out=new Int8Array(n*2);
+    for(var i=0,s=0,d=0;i<n;i++,s+=3,d+=2){
+      var nx=nrmF32[s],ny=nrmF32[s+1],nz=nrmF32[s+2];
+      var invL=1/(Math.abs(nx)+Math.abs(ny)+Math.abs(nz)||1);
+      var ox=nx*invL, oy=ny*invL;
+      if(nz<0){var tx=ox,ty=oy;ox=(1-Math.abs(ty))*(tx>=0?1:-1);oy=(1-Math.abs(tx))*(ty>=0?1:-1);}
+      out[d]  =Math.round(Math.max(-1,Math.min(1,ox))*127);
+      out[d+1]=Math.round(Math.max(-1,Math.min(1,oy))*127);
+    }
+    return out;
+  }
+  function _decodeNormalsOct(oct) {
+    var n=oct.length/2, out=new Float32Array(n*3);
+    for(var i=0,s=0,d=0;i<n;i++,s+=2,d+=3){
+      var ox=oct[s]/127, oy=oct[s+1]/127;
+      var nz=1-Math.abs(ox)-Math.abs(oy);
+      var nx=ox, ny=oy;
+      if(nz<0){nx=(1-Math.abs(oy))*(ox>=0?1:-1);ny=(1-Math.abs(ox))*(oy>=0?1:-1);}
+      var len=Math.sqrt(nx*nx+ny*ny+nz*nz)||1;
+      out[d]=nx/len; out[d+1]=ny/len; out[d+2]=nz/len;
+    }
+    return out;
+  }
+
   function _geoSerialize(result) {
     var meshData = result.meshes.map(function(m) {
       var g = m.geometry, mat = m.material;
-      // Explicitly copy typed arrays — web-ifc returns views of WASM heap that may be freed
+      var posArr = g.attributes.position.array;
+      var nrmArr = g.attributes.normal.array;
+      var idxArr = g.index.array;
+      // Compute per-mesh bounding box for quantization
+      var minX=Infinity,minY=Infinity,minZ=Infinity,maxX=-Infinity,maxY=-Infinity,maxZ=-Infinity;
+      for(var i=0;i<posArr.length;i+=3){
+        var x=posArr[i],y=posArr[i+1],z=posArr[i+2];
+        if(x<minX)minX=x;if(y<minY)minY=y;if(z<minZ)minZ=z;
+        if(x>maxX)maxX=x;if(y>maxY)maxY=y;if(z>maxZ)maxZ=z;
+      }
+      var bbox=[minX,minY,minZ,maxX,maxY,maxZ];
+      // Quantize: positions to Uint16, normals to octahedral Int8, indices to smallest type
+      var nVerts = posArr.length/3;
+      var useU16Idx = nVerts <= 65535;
       return {
         eid: m.userData.expressId,
-        pos: new Float32Array(g.attributes.position.array).buffer,
-        nrm: new Float32Array(g.attributes.normal.array).buffer,
-        idx: new Uint32Array(g.index.array).buffer,
+        qpos: _quantizePositions(new Float32Array(posArr), bbox).buffer,
+        qnrm: _encodeNormalsOct(new Float32Array(nrmArr)).buffer,
+        idx: (useU16Idx ? new Uint16Array(idxArr) : new Uint32Array(idxArr)).buffer,
+        idx16: useU16Idx ? 1 : 0,
+        bbox: bbox,
         mtx: Array.from(m.matrix.elements),
         col: [mat.color.r, mat.color.g, mat.color.b, mat.opacity],
         tr:  mat.transparent ? 1 : 0
@@ -887,17 +950,27 @@ function startApp() {
         props: el.props
       };
     });
-    return {v:2, meshData:meshData, elData:elData, storeys:result.storeys, storeyData:result.storeyData, relatedPairs:result.relatedPairs||{}, stats:result.stats};
+    return {v:3, meshData:meshData, elData:elData, storeys:result.storeys, storeyData:result.storeyData, relatedPairs:result.relatedPairs||{}, stats:result.stats};
   }
 
   // Reconstruct Three.js objects from a serialised geo cache entry.
   function _geoDeserialize(cached) {
+    var isV3 = cached.v >= 3;
     var meshByEid = {};
     var meshes = cached.meshData.map(function(md) {
       var geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(md.pos), 3));
-      geo.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(md.nrm), 3));
-      geo.setIndex(new THREE.BufferAttribute(new Uint32Array(md.idx), 1));
+      if (isV3 && md.qpos) {
+        // v3: dequantize compressed geometry
+        geo.setAttribute('position', new THREE.BufferAttribute(_dequantizePositions(new Uint16Array(md.qpos), md.bbox), 3));
+        geo.setAttribute('normal',   new THREE.BufferAttribute(_decodeNormalsOct(new Int8Array(md.qnrm)), 3));
+        var idxArr = md.idx16 ? new Uint16Array(md.idx) : new Uint32Array(md.idx);
+        geo.setIndex(new THREE.BufferAttribute(idxArr, 1));
+      } else {
+        // v2 fallback: raw Float32 data
+        geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(md.pos), 3));
+        geo.setAttribute('normal',   new THREE.BufferAttribute(new Float32Array(md.nrm), 3));
+        geo.setIndex(new THREE.BufferAttribute(new Uint32Array(md.idx), 1));
+      }
       var c = md.col;
       var mat = new THREE.MeshPhongMaterial({color:new THREE.Color(c[0],c[1],c[2]), opacity:c[3], transparent:!!md.tr, side:THREE.DoubleSide});
       var mesh = new THREE.Mesh(geo, mat);

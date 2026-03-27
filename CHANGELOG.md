@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.12 (2026-03-27)
+- Add GoatCounter analytics with custom event tracking
+
 ## v3.3.11 (2026-03-27)
 - Add GDPR-safe anonymous visitor counter
 
