@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.61',hash:'d4f1881',date:'2026-03-27T13:03:47Z'};
+  var CC_VERSION = {v:'3.2.63',hash:'6ba7ef5',date:'2026-03-27T13:11:31Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -11381,6 +11381,7 @@ function startApp() {
     var stOpen = useState(false), open = stOpen[0], setOpen = stOpen[1];
     window._ccNLOpen = function(){ setOpen(true); if(inputRef.current) setTimeout(function(){inputRef.current&&inputRef.current.focus();},50); };
     window._ccNLSetInput = function(text){ setInput(text); };
+    window._ccNLSetStatus = function(status, back){ setLLMStatus(status); setBackend(back); };
     var stMsgs = useState([{role:'assistant', text:'Control ClashControl with plain English — try "load ifc", "structural vs MEP", "switch to light", "analyze clashes", or "help" for all commands.'}]);
     var msgs = stMsgs[0], setMsgs = stMsgs[1];
     var stInput = useState(''), input = stInput[0], setInput = stInput[1];
@@ -13376,21 +13377,24 @@ function startApp() {
       if (_unghostAll) _unghostAll();
       invalidate(10);
       showCaption('Detected clashes appear instantly');
-      // Open NL panel and type command
+      // Open NL panel first, force AI status, let it render, then start typing
       if (window._ccNLOpen) window._ccNLOpen();
-      var phrase = 'show all structural vs MEP clashes';
-      var i = 0;
-      (function typeChar() {
-        if (i <= phrase.length) {
-          if (window._ccNLSetInput) window._ccNLSetInput(phrase.substring(0, i));
-          i++;
-          setTimeout(typeChar, 30);
-        }
-      })();
+      if (window._ccNLSetStatus) window._ccNLSetStatus('ready', 'browser');
+      setTimeout(function() {
+        var phrase = 'show all structural vs MEP clashes';
+        var i = 0;
+        (function typeChar() {
+          if (i <= phrase.length) {
+            if (window._ccNLSetInput) window._ccNLSetInput(phrase.substring(0, i));
+            i++;
+            setTimeout(typeChar, 30);
+          }
+        })();
+      }, 200);
       smoothOrbit(30, 2500);
     });
     // Clear the NL input after showing it
-    at(1500, function() {
+    at(2000, function() {
       if (window._ccNLSetInput) window._ccNLSetInput('');
     });
 
@@ -13422,13 +13426,19 @@ function startApp() {
     // ─── 5. Confirm the clash — show it becoming an issue ───
     at(2500, function() {
       showCaption('Confirm a clash to create an issue');
+      // Fly back to first clash and select it
       var c = getClash(0);
       if (c) {
-        // First select it so the detail panel is visible
         d({t:'ACTIVE', id:c.id});
+        flyToClash(c);
+        // Scroll the list item into view
+        setTimeout(function() {
+          var el = document.querySelector('[data-item-id="'+c.id+'"]');
+          if (el) el.scrollIntoView({behavior:'smooth', block:'center'});
+        }, 300);
       }
     });
-    at(1500, function() {
+    at(2000, function() {
       // Now confirm it — user sees the status change in the panel
       var c = getClash(0);
       if (c) d({t:'UPD_CLASH', id:c.id, u:{status:'confirmed'}});
@@ -13469,40 +13479,40 @@ function startApp() {
       showCaption('Create issues directly in the viewer');
       zoomAll();
     });
-    at(1500, function() {
+    at(1200, function() {
       d({t:'MODAL', v:true});
-    });
-    at(500, function() {
-      // Type title character by character
-      var title = 'Pipe clashes with structural beam — Level 2';
-      var ti = 0;
-      (function typeTitle() {
-        var titleInput = document.querySelector('[role="dialog"] input[type="text"]');
-        if (titleInput && ti <= title.length) {
-          var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
-          nativeSet.call(titleInput, title.substring(0, ti));
-          titleInput.dispatchEvent(new Event('input', {bubbles:true}));
-          ti++;
-          setTimeout(typeTitle, 35);
-        }
-      })();
-      // Type description after title finishes
+      // Start typing after modal renders (300ms settle)
       setTimeout(function() {
-        var desc = 'MEP pipe penetrates concrete beam at grid B3. Needs rerouting or sleeve.';
-        var di = 0;
-        (function typeDesc() {
-          var descInput = document.querySelector('[role="dialog"] textarea');
-          if (descInput && di <= desc.length) {
-            var nativeSetTA = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
-            nativeSetTA.call(descInput, desc.substring(0, di));
-            descInput.dispatchEvent(new Event('input', {bubbles:true}));
-            di++;
-            setTimeout(typeDesc, 20);
+        var title = 'Pipe clashes with structural beam — Level 2';
+        var ti = 0;
+        (function typeTitle() {
+          var titleInput = document.querySelector('[role="dialog"] input[type="text"]');
+          if (titleInput && ti <= title.length) {
+            var nativeSet = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set;
+            nativeSet.call(titleInput, title.substring(0, ti));
+            titleInput.dispatchEvent(new Event('input', {bubbles:true}));
+            ti++;
+            setTimeout(typeTitle, 35);
           }
         })();
-      }, title.length * 35 + 200);
+        // Type description after title finishes
+        setTimeout(function() {
+          var desc = 'MEP pipe penetrates concrete beam at grid B3. Needs rerouting or sleeve.';
+          var di = 0;
+          (function typeDesc() {
+            var descInput = document.querySelector('[role="dialog"] textarea');
+            if (descInput && di <= desc.length) {
+              var nativeSetTA = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value').set;
+              nativeSetTA.call(descInput, desc.substring(0, di));
+              descInput.dispatchEvent(new Event('input', {bubbles:true}));
+              di++;
+              setTimeout(typeDesc, 20);
+            }
+          })();
+        }, title.length * 35 + 200);
+      }, 300);
     });
-    at(3500, function() {
+    at(4500, function() {
       d({t:'MODAL', v:false});
     });
 
@@ -13549,41 +13559,32 @@ function startApp() {
       setTimeout(function() { smoothOrbit(20, 2500); }, 300);
     });
 
-    // ─── 12. Toggle render styles — pause orbit during material swap ───
+    // ─── 12. Toggle render styles — static camera, cycle through styles ───
     at(3000, function() {
       showCaption('Switch rendering styles');
-      // Switch to clashes tab first (lighter than standards)
       d({t:'TAB', v:'clashes'});
-      invalidate(10);
+      // Zoom all so the full model is visible for style comparison
+      zoomAll();
     });
-    // Let tab settle, then start style cycling
-    at(500, function() {
-      // Apply wireframe and wait for material swap to finish before orbiting
+    at(1500, function() {
       d({t:'UPD_PREFS', u:{renderStyle:'wireframe'}});
       invalidate(20);
-      requestAnimationFrame(function() {
-        requestAnimationFrame(function() {
-          // Start one continuous slow orbit after materials are swapped
-          smoothOrbit(80, 10000);
-        });
-      });
-      // Switch styles at intervals — pause orbit briefly around each swap
-      setTimeout(function() {
-        d({t:'UPD_PREFS', u:{renderStyle:'shaded'}});
-        invalidate(20);
-      }, 2500);
-      setTimeout(function() {
-        d({t:'UPD_PREFS', u:{renderStyle:'rendered'}});
-        invalidate(20);
-      }, 5000);
-      setTimeout(function() {
-        d({t:'UPD_PREFS', u:{renderStyle:'standard'}});
-        invalidate(20);
-      }, 7500);
+    });
+    at(2000, function() {
+      d({t:'UPD_PREFS', u:{renderStyle:'shaded'}});
+      invalidate(20);
+    });
+    at(2000, function() {
+      d({t:'UPD_PREFS', u:{renderStyle:'rendered'}});
+      invalidate(20);
+    });
+    at(2000, function() {
+      d({t:'UPD_PREFS', u:{renderStyle:'standard'}});
+      invalidate(20);
     });
 
     // ─── 13. Training mode teaser ───
-    at(10500, function() {
+    at(2000, function() {
       // Switch tab first, let it settle
       d({t:'TAB', v:'clashes'});
       d({t:'TRAINING_MODE', v:true});
@@ -13614,6 +13615,7 @@ function startApp() {
     at(1500, function() {
       // Type the CTA in the NL command input
       if (window._ccNLOpen) window._ccNLOpen();
+      if (window._ccNLSetStatus) window._ccNLSetStatus('ready', 'browser');
       var phrase = 'Drop your IFC files in and see what happens. Link in the comments';
       var i = 0;
       (function typeChar() {
