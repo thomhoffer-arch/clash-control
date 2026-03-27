@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.49',hash:'e151776',date:'2026-03-27T12:03:45Z'};
+  var CC_VERSION = {v:'3.2.50',hash:'3a20462',date:'2026-03-27T12:05:29Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -13235,10 +13235,14 @@ function startApp() {
       setTimeout(function(){ s.fn(); run(); }, s.delay);
     }
 
-    // Helper: fly to a clash and ghost other elements
+    // Helper: fly to a clash and ghost other elements (mirrors click handler)
     function flyToClash(c) {
-      if (c.point && _flyTo) _flyTo(c.point, 8);
-      if (c.elemA && c.elemB && _ghostOthers) _ghostOthers([c.elemA, c.elemB]);
+      var eids = [c.elemA, c.elemB, c.elementId].filter(Boolean);
+      if (eids.length && _ghostOthers) _ghostOthers(eids);
+      if (c.elemA && _highlightById) _highlightById(c.elemA, false);
+      if (c.point && window._ccShowActiveClashMarker) window._ccShowActiveClashMarker(c.point);
+      if (_flyToElements && eids.length) _flyToElements(eids, c.point);
+      else if (c.point && _flyTo) _flyTo(c.point);
     }
     // Helper: get clash by index (clamped)
     function getClash(idx) {
@@ -13316,11 +13320,11 @@ function startApp() {
     });
 
     // ─── 6. Issues tab — fly to the new issue ───
-    at(2000, function() {
+    at(3000, function() {
       showCaption('Track issues with status management');
       d({t:'TAB', v:'issues'});
     });
-    at(1200, function() {
+    at(2000, function() {
       var s = window._ccLatestState;
       if (s && s.issues.length > 0) {
         var iss = s.issues[s.issues.length - 1];
@@ -13416,7 +13420,7 @@ function startApp() {
         if (i <= phrase.length) {
           if (window._ccNLSetInput) window._ccNLSetInput(phrase.substring(0, i));
           i++;
-          setTimeout(typeChar, 60);
+          setTimeout(typeChar, 30);
         }
       })();
       smoothOrbit(30, 3500);
@@ -13441,10 +13445,12 @@ function startApp() {
     });
     at(4000, function() {
       d({t:'TRAINING_MODE', v:false});
+      if (_unghostAll) _unghostAll();
+      if (_resetView) _resetView();
       showCaption('Drop your IFC files in and see what happens. Link in the comments');
-      smoothOrbit(30, 3000);
+      smoothOrbit(30, 4500);
     });
-    at(3500, function() {
+    at(5000, function() {
       hideCaption();
     });
     at(800, function() {

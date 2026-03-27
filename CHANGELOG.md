@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.50 (2026-03-27)
+- Tour: flash training mode pill with glow + scale in step 13
+
 ## v3.2.49 (2026-03-27)
 - Tour: update end caption to call-to-action text
 
