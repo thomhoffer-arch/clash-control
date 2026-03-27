@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.66 (2026-03-27)
+- Fix VirtualList scroll: double-rAF, clamp tour to first 50 items
+
 ## v3.2.65 (2026-03-27)
 - Tour: fix clash list visibility, click confirm button, add explorer tab
 
