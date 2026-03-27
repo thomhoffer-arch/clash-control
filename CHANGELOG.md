@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.2 (2026-03-27)
+- Add model version diffing with visual change tracking
+
 ## v3.3.1 (2026-03-27)
 - Add Navigator spatial tree, IDS validation, property inspector, glTF export, and BCF enhancements
 

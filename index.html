@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.3.1',hash:'32c4e9b',date:'2026-03-27T15:49:07Z'};
+  var CC_VERSION = {v:'3.3.2',hash:'7c6c981',date:'2026-03-27T15:59:09Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -4424,18 +4424,6 @@ function startApp() {
           };
           if(hitMesh.material.emissive) hitMesh.material.emissive.set(0x1e3a5f);
           hitMesh.material.needsUpdate = true;
-          // Add a subtle wireframe overlay (skip for large meshes)
-          try {
-            var hfc = hitMesh.geometry.index ? hitMesh.geometry.index.count/3 : (hitMesh.geometry.attributes.position?hitMesh.geometry.attributes.position.count/3:0);
-            if(hfc < 20000) {
-              var wfGeo = new THREE.WireframeGeometry(hitMesh.geometry);
-              var wfMat = new THREE.LineBasicMaterial({color:0x60a5fa, transparent:true, opacity:0.3});
-              var wf = new THREE.LineSegments(wfGeo, wfMat);
-              wf.applyMatrix4(hitMesh.matrixWorld);
-              scene.add(wf);
-              hoverRef.current = wf;
-            }
-          } catch(e){}
           renderer.domElement.style.cursor = 'pointer';
         } else {
           lastHoverOriginals = null;
