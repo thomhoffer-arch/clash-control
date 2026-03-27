@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.65',hash:'2e9e666',date:'2026-03-27T13:19:31Z'};
+  var CC_VERSION = {v:'3.2.67',hash:'b700e0a',date:'2026-03-27T13:25:57Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -5588,28 +5588,35 @@ function startApp() {
         var orig = obj.userData._origMaterial;
         // Skip if currently ghosted
         if(obj.material === S._ghostMat) return;
-        // Dispose the current non-original material before replacing to prevent leaks
-        if(obj.material !== orig) { if(obj.material.map) obj.material.map.dispose(); obj.material.dispose(); }
-        if(style==='wireframe'){
-          obj.material = new THREE.MeshBasicMaterial({
-            color: orig.color ? orig.color.clone() : new THREE.Color(0x64748b),
-            wireframe:true, transparent:true, opacity:0.6
-          });
-        } else if(style==='shaded'){
-          obj.material = new THREE.MeshLambertMaterial({
-            color: orig.color ? orig.color.clone() : new THREE.Color(0xcccccc),
-            transparent: orig.transparent, opacity: orig.opacity,
-            side: THREE.DoubleSide
-          });
-        } else if(style==='rendered'){
-          obj.material = new THREE.MeshStandardMaterial({
-            color: orig.color ? orig.color.clone() : new THREE.Color(0xcccccc),
-            roughness:0.45, metalness:0.05,
-            transparent: orig.transparent, opacity: orig.opacity,
-            side: THREE.DoubleSide, envMapIntensity:0.5
-          });
+        // Use pre-warmed cached materials if available
+        var cache = obj.userData._styleMats;
+        if(cache && cache[style]) {
+          if(obj.material !== cache[style] && obj.material !== orig) { if(obj.material.map) obj.material.map.dispose(); obj.material.dispose(); }
+          obj.material = style==='standard' ? orig : cache[style];
         } else {
-          obj.material = orig;
+          // Dispose the current non-original material before replacing to prevent leaks
+          if(obj.material !== orig) { if(obj.material.map) obj.material.map.dispose(); obj.material.dispose(); }
+          if(style==='wireframe'){
+            obj.material = new THREE.MeshBasicMaterial({
+              color: orig.color ? orig.color.clone() : new THREE.Color(0x64748b),
+              wireframe:true, transparent:true, opacity:0.6
+            });
+          } else if(style==='shaded'){
+            obj.material = new THREE.MeshLambertMaterial({
+              color: orig.color ? orig.color.clone() : new THREE.Color(0xcccccc),
+              transparent: orig.transparent, opacity: orig.opacity,
+              side: THREE.DoubleSide
+            });
+          } else if(style==='rendered'){
+            obj.material = new THREE.MeshStandardMaterial({
+              color: orig.color ? orig.color.clone() : new THREE.Color(0xcccccc),
+              roughness:0.45, metalness:0.05,
+              transparent: orig.transparent, opacity: orig.opacity,
+              side: THREE.DoubleSide, envMapIntensity:0.5
+            });
+          } else {
+            obj.material = orig;
+          }
         }
       });
       invalidate();
@@ -8467,8 +8474,8 @@ function startApp() {
           setTimeout(function(){
             if(!scrollRef.current) return;
             var row = scrollRef.current.querySelector('[data-item-id="'+activeId+'"]');
-            if(row) row.scrollIntoView({block:'nearest',behavior:'smooth'});
-          }, 50);
+            if(row) row.scrollIntoView({block:'center',behavior:'smooth'});
+          }, 80);
           return;
         }
       }
@@ -8485,7 +8492,7 @@ function startApp() {
       requestAnimationFrame(function(){ requestAnimationFrame(function(){
         if(!scrollRef.current) return;
         var row = scrollRef.current.querySelector('[data-item-id="'+activeId+'"]');
-        if(row) row.scrollIntoView({block:'nearest',behavior:'smooth'});
+        if(row) row.scrollIntoView({block:'center',behavior:'smooth'});
       }); });
     }, [activeId]);
 
@@ -13256,6 +13263,36 @@ function startApp() {
     invalidate(5);
     if (S._ghostMat) S._ghostMat.needsUpdate = true;
 
+    // ── Pre-warm render style materials for all meshes ──
+    // Creates wireframe/shaded/rendered materials once so style switches are instant
+    if (S.mg) {
+      console.log('%c Pre-warming render style materials... ', 'color:#60a5fa');
+      var _warmCount = 0;
+      S.mg.traverse(function(obj) {
+        if (!obj.isMesh) return;
+        if (!obj.userData._origMaterial) obj.userData._origMaterial = obj.material;
+        var orig = obj.userData._origMaterial;
+        var col = orig.color ? orig.color.clone() : new THREE.Color(0xcccccc);
+        obj.userData._styleMats = {
+          wireframe: new THREE.MeshBasicMaterial({
+            color: col.clone(), wireframe:true, transparent:true, opacity:0.6
+          }),
+          shaded: new THREE.MeshLambertMaterial({
+            color: col.clone(), transparent: orig.transparent, opacity: orig.opacity,
+            side: THREE.DoubleSide
+          }),
+          rendered: new THREE.MeshStandardMaterial({
+            color: col.clone(), roughness:0.45, metalness:0.05,
+            transparent: orig.transparent, opacity: orig.opacity,
+            side: THREE.DoubleSide, envMapIntensity:0.5
+          }),
+          standard: orig
+        };
+        _warmCount++;
+      });
+      console.log('%c Pre-warmed ' + _warmCount + ' meshes ', 'color:#10b981');
+    }
+
     // Remove any previous tour overlay
     var prev = document.getElementById('_ccTourOverlay');
     if (prev) prev.parentNode.removeChild(prev);
@@ -13530,35 +13567,7 @@ function startApp() {
       zoomAll();
     });
 
-    // ─── 10. Measurement tools — add a real measurement ───
-    at(2500, function() {
-      showCaption('Built-in measurement tools');
-      d({t:'MEASURE_MODE', v:'length'});
-      // Create a measurement between two points on the model
-      var s = window._ccLatestState;
-      if (s && s.clashes.length >= 2) {
-        var p1 = s.clashes[0].point;
-        var p2 = s.clashes[Math.min(1, s.clashes.length - 1)].point;
-        if (p1 && p2) {
-          var dx = p1[0]-p2[0], dy = p1[1]-p2[1], dz = p1[2]-p2[2];
-          var dist = Math.sqrt(dx*dx+dy*dy+dz*dz);
-          var label = dist < 1 ? (dist*1000).toFixed(0)+'mm' : dist.toFixed(2)+'m';
-          d({t:A.ADD_MEASUREMENT, v:{id:uid(), type:'length', value:dist, label:label, points:[p1, p2]}});
-          invalidate(10);
-        }
-      }
-      smoothOrbit(40, 2500);
-    });
-    at(3000, function() {
-      // Remove the measurement and exit measure mode
-      var s = window._ccLatestState;
-      if (s && s.measurements.length > 0) {
-        d({t:A.DEL_MEASUREMENT, id:s.measurements[s.measurements.length - 1].id});
-      }
-      d({t:'MEASURE_MODE', v:null});
-    });
-
-    // ─── 11. Explorer tab ───
+    // ─── 10. Explorer tab ───
     at(2000, function() {
       showCaption('Search and explore all elements');
       d({t:'TAB', v:'explorer'});
@@ -13596,14 +13605,14 @@ function startApp() {
       invalidate(20);
     });
 
-    // ─── 13. Training mode teaser ───
+    // ─── 13. Training mode + CTA — one continuous orbit ───
     at(2000, function() {
-      // Switch tab first, let it settle
       d({t:'TAB', v:'clashes'});
       d({t:'TRAINING_MODE', v:true});
-      invalidate(10);
+      if (_unghostAll) _unghostAll();
+      zoomAll();
     });
-    at(500, function() {
+    at(1000, function() {
       showCaption('AI-powered clash analysis — train your own model');
       // Flash the training pill
       var pill = document.querySelector('.cc-training-btn-3d');
@@ -13616,31 +13625,25 @@ function startApp() {
           pill.style.transform = '';
         }, 1200);
       }
-      smoothOrbit(35, 3500);
+      // Start one long orbit for training + CTA
+      smoothOrbit(60, 8000);
+      // After 3.5s, open NL panel and type CTA while still orbiting
+      setTimeout(function() {
+        hideCaption();
+        if (window._ccNLOpen) window._ccNLOpen();
+        if (window._ccNLSetStatus) window._ccNLSetStatus('ready', 'browser');
+        var phrase = 'Drop your IFC files in and see what happens. Link in the comments';
+        var i = 0;
+        (function typeChar() {
+          if (i <= phrase.length) {
+            if (window._ccNLSetInput) window._ccNLSetInput(phrase.substring(0, i));
+            i++;
+            setTimeout(typeChar, 25);
+          }
+        })();
+      }, 3500);
     });
-
-    // ─── 14. End — zoom all, type CTA in NL input (keep training mode on) ───
-    at(4000, function() {
-      if (_unghostAll) _unghostAll();
-      hideCaption();
-      zoomAll();
-    });
-    at(1500, function() {
-      // Type the CTA in the NL command input
-      if (window._ccNLOpen) window._ccNLOpen();
-      if (window._ccNLSetStatus) window._ccNLSetStatus('ready', 'browser');
-      var phrase = 'Drop your IFC files in and see what happens. Link in the comments';
-      var i = 0;
-      (function typeChar() {
-        if (i <= phrase.length) {
-          if (window._ccNLSetInput) window._ccNLSetInput(phrase.substring(0, i));
-          i++;
-          setTimeout(typeChar, 25);
-        }
-      })();
-      smoothOrbit(30, 4500);
-    });
-    at(5000, function() {
+    at(9000, function() {
       if (window._ccNLSetInput) window._ccNLSetInput('');
     });
     at(800, function() {
@@ -13650,9 +13653,23 @@ function startApp() {
       invalidate(10);
     });
 
-    // Go!
-    console.log('%c Demo tour started ', 'background:#2563eb;color:#fff;font-weight:bold;padding:2px 8px;border-radius:4px');
-    run();
+    // Pre-compile: cycle through all styles once (off-screen) to trigger GPU shader compilation
+    showCaption('Preparing demo...');
+    var _preStyles = ['wireframe','shaded','rendered','standard'];
+    var _preIdx = 0;
+    function _preCompile() {
+      if (_preIdx >= _preStyles.length) {
+        hideCaption();
+        console.log('%c Demo tour started ', 'background:#2563eb;color:#fff;font-weight:bold;padding:2px 8px;border-radius:4px');
+        setTimeout(run, 500);
+        return;
+      }
+      d({t:'UPD_PREFS', u:{renderStyle:_preStyles[_preIdx]}});
+      invalidate(3);
+      _preIdx++;
+      setTimeout(_preCompile, 400);
+    }
+    _preCompile();
   };
 
 } // end startApp
