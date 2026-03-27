@@ -170,16 +170,18 @@
       /* Nav cube smaller */
       .cc-viewcube-wrap{width:100px!important;height:100px!important}
       .cc-viewcube-wrap canvas{width:80px!important;height:80px!important;top:10px!important;left:10px!important}
-      /* Chatbox full width */
-      .cc-nlpanel{width:calc(100vw - 1rem)!important;bottom:4.2rem!important}
-      .cc-nlpanel-closed{bottom:4.2rem!important}
+      /* Chatbox full width — above mobile nav bar */
+      .cc-nlpanel{width:calc(100vw - 1rem)!important;bottom:5rem!important}
+      .cc-nlpanel-closed{bottom:5rem!important}
+      /* Training pill: smaller on mobile + pushed down to avoid FPS overlay */
+      .cc-training-btn-3d{padding:.25rem .5rem!important;font-size:0.7rem!important}
+      .cc-training-pill-wrap{top:2.2rem!important}
+      .cc-training-pill-wrap .cc-training-expand{width:220px!important;font-size:0.55rem!important}
       /* Overlay buttons: wrap */
       .cc-overlay-top{flex-wrap:wrap!important;max-width:calc(100vw - 6rem)!important}
       .cc-overlay-top button{font-size:0.67rem!important;padding:.2rem .35rem!important}
       /* Tooltips: hide on touch */
       .cc-tip::after{display:none!important}
-      /* Training button on 3D view — compact on mobile */
-      .cc-training-btn-3d{padding:.3rem .7rem!important;font-size:0.75rem!important}
       /* Header actions: allow wrapping on mobile */
       .cc-header-actions{flex-wrap:wrap!important;overflow:visible!important}
     }
@@ -250,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.31',hash:'c2b4d39',date:'2026-03-26T21:51:00Z'};
+  var CC_VERSION = {v:'3.2.32',hash:'819deab',date:'2026-03-27T05:17:34Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -11995,7 +11997,7 @@ function startApp() {
     },[]);
 
     var _pillTop = props.topOffset ? '3.5rem' : '.75rem';
-    return html`<div style=${{position:'absolute',top:_pillTop,left:'50%',transform:'translateX(-50%)',
+    return html`<div class="cc-training-pill-wrap" style=${{position:'absolute',top:_pillTop,left:'50%',transform:'translateX(-50%)',
       zIndex:20,pointerEvents:'auto',display:'flex',flexDirection:'column',alignItems:'center',transition:'top .2s'}}>
       <div class="cc-training-btn-3d" style=${{display:'flex',alignItems:'center',
           borderRadius:999,
@@ -12021,7 +12023,7 @@ function startApp() {
       </div>
       ${s.trainingMode && isExpanded && function(){
         var anyData = hasData || nlN > 0 || clashN > 0 || runN > 0;
-        return html`<div style=${{marginTop:'.35rem',
+        return html`<div class="cc-training-expand" style=${{marginTop:'.35rem',
           background:'var(--overlay-bg-strong)',border:'1px solid rgba(124,58,237,.4)',borderRadius:10,
           boxShadow:'0 4px 16px rgba(0,0,0,.3)',width:260,padding:'.5rem'}}>
           <!-- Auto-share toggle -->
