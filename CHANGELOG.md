@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.73 (2026-03-27)
+- Tour: robust clickClashRow — dispatch ACTIVE first, retry finding row
+
 ## v3.2.72 (2026-03-27)
 - Tour: use clash 5 for second selection (more visible in list)
 
