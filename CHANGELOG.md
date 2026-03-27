@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.2.40 (2026-03-27)
+- Redesign demo tour to follow clash-to-issue workflow
+
 ## v3.2.39 (2026-03-27)
 - Remove Confirmed status from issues tab
 

@@ -252,7 +252,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.2.39',hash:'7a4577e',date:'2026-03-27T09:11:16Z'};
+  var CC_VERSION = {v:'3.2.40',hash:'8b1857a',date:'2026-03-27T09:41:15Z'};
 
   // ── AI Data Collection (Phase 0.5) ──
   var CLASH_DATA_ENDPOINT = 'https://your-server.com/api/clash-data';
@@ -13229,7 +13229,6 @@ function startApp() {
       d({t:'TAB', v:'clashes'});
       d({t:'ACTIVE', id:null});
       if (_unghostAll) _unghostAll();
-      if (_resetView) _resetView();
       showCaption('Detected clashes appear instantly');
     });
 
