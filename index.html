@@ -7888,6 +7888,64 @@ function startApp() {
             </div>
           </div>`;
         }())}
+        ${(m.elements&&m.elements.length>0) && (function(){
+          var els = m.elements, n = els.length;
+          var typeCounts={}, storeyN=0, psetsN=0, materialN=0, quantN=0;
+          els.forEach(function(el){
+            var p=el.props||{};
+            var t=p.ifcType||'Unknown';
+            typeCounts[t]=(typeCounts[t]||0)+1;
+            if(p.storey&&p.storey.trim()) storeyN++;
+            if(p.psets&&Object.keys(p.psets).some(function(g){var grp=p.psets[g];return grp&&typeof grp==='object'&&Object.keys(grp).length>0;})) psetsN++;
+            if(p.material&&p.material.trim()) materialN++;
+            if(p.quantities&&Object.keys(p.quantities).length>0) quantN++;
+          });
+          var topTypes = Object.keys(typeCounts).sort(function(a,b){return typeCounts[b]-typeCounts[a];}).slice(0,5);
+          var TYPE_COLORS = ['#3b82f6','#22c55e','#f59e0b','#a855f7','#ec4899'];
+          var completeness = [
+            {label:'Has storey / level',  n:storeyN},
+            {label:'Has property sets',   n:psetsN},
+            {label:'Has material',        n:materialN},
+            {label:'Has quantities',      n:quantN},
+          ];
+          function pct(v){return n>0?Math.round(v/n*100):0;}
+          function barColor(p){return p>=80?'#22c55e':p>=40?'#f59e0b':'#ef4444';}
+          return html`<div style=${{borderTop:'1px solid var(--border)',paddingTop:'.35rem',marginTop:'.1rem'}}>
+            <span style=${{fontSize:'0.63rem',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'.03em'}}>Element Data</span>
+            <div style=${{marginTop:'.3rem',display:'flex',flexDirection:'column',gap:'.25rem'}}>
+              <div style=${{display:'flex',justifyContent:'space-between'}}>
+                <span style=${{fontSize:'0.63rem',color:'var(--text-secondary)'}}>Total elements</span>
+                <span style=${{fontSize:'0.63rem',fontWeight:700,color:'var(--text-primary)',fontVariantNumeric:'tabular-nums'}}>${n}</span>
+              </div>
+              ${topTypes.map(function(t,i){
+                var p=pct(typeCounts[t]);
+                return html`<div key=${t}>
+                  <div style=${{display:'flex',justifyContent:'space-between',marginBottom:'2px'}}>
+                    <span style=${{fontSize:'0.6rem',color:'var(--text-faint)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',maxWidth:'65%'}}>${t}</span>
+                    <span style=${{fontSize:'0.6rem',color:'var(--text-faint)',fontVariantNumeric:'tabular-nums'}}>${typeCounts[t]} (${p}%)</span>
+                  </div>
+                  <div style=${{height:3,borderRadius:2,background:'var(--bg-tertiary)',overflow:'hidden'}}>
+                    <div style=${{height:'100%',width:p+'%',background:TYPE_COLORS[i]||'var(--accent)',borderRadius:2}}></div>
+                  </div>
+                </div>`;
+              })}
+              <div style=${{borderTop:'1px solid var(--border-subtle)',paddingTop:'.2rem',display:'flex',flexDirection:'column',gap:'.2rem'}}>
+                ${completeness.map(function(c){
+                  var p=pct(c.n);
+                  return html`<div key=${c.label}>
+                    <div style=${{display:'flex',justifyContent:'space-between',marginBottom:'2px'}}>
+                      <span style=${{fontSize:'0.6rem',color:'var(--text-faint)'}}>${c.label}</span>
+                      <span style=${{fontSize:'0.6rem',color:barColor(p),fontVariantNumeric:'tabular-nums',fontWeight:600}}>${c.n} (${p}%)</span>
+                    </div>
+                    <div style=${{height:3,borderRadius:2,background:'var(--bg-tertiary)',overflow:'hidden'}}>
+                      <div style=${{height:'100%',width:p+'%',background:barColor(p),borderRadius:2}}></div>
+                    </div>
+                  </div>`;
+                })}
+              </div>
+            </div>
+          </div>`;
+        }())}
         ${m._versionDiff && html`<div style=${{borderTop:'1px solid var(--border)',paddingTop:'.35rem',marginTop:'.1rem'}}>
           <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.25rem'}}>
             <span style=${{fontSize:'0.69rem',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'.03em'}}>Version Diff (v${(m._version-1)||1} → v${m._version})</span>
