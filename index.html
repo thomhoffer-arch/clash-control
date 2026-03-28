@@ -10284,7 +10284,7 @@ function startApp() {
 
   function SettingsModal(props) {
     var d=props.d, p=props.prefs, models=props.models||[], rules=props.rules||{};
-    var stTab = useState('general'), settingsTab=stTab[0], setSettingsTab=stTab[1];
+
     useEffect(function(){
       function onKey(e){if(e.key==='Escape')d({t:A.SETTINGS,v:false});}
       window.addEventListener('keydown',onKey);
@@ -10306,20 +10306,12 @@ function startApp() {
         <div style=${{width:18,height:18,borderRadius:9,background:'#fff',position:'absolute',top:2,left:on?18:2,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,.2)'}}></div>
       </div>`;
     }
-    var TAB_BTN=function(id,label){return html`<button onClick=${function(){setSettingsTab(id);}}
-      style=${{...S_BTN,padding:'.4rem .8rem',fontSize:'0.83rem',fontWeight:settingsTab===id?600:400,
-        background:settingsTab===id?'var(--accent)':'none',color:settingsTab===id?'#fff':'var(--text-muted)',
-        border:'none',borderRadius:6,cursor:'pointer'}}>${label}</button>`;};
     return html`<div style=${MS} role="dialog" aria-label="Settings" onClick=${function(){d({t:A.SETTINGS,v:false});}}><div style=${MX} onClick=${function(e){e.stopPropagation();}}>
       <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'1rem 1.2rem',borderBottom:'1px solid var(--border)'}}>
         <span style=${{fontWeight:600,fontSize:'1.03rem'}}>Settings</span>
         <button onClick=${function(){d({t:A.SETTINGS,v:false})}} style=${{...S_BTN,background:'none',color:'var(--text-muted)',fontSize:'1.26rem',padding:0}} aria-label="Close settings">✕</button>
       </div>
-      <div style=${{display:'flex',gap:'.3rem',padding:'.6rem 1.2rem',borderBottom:'1px solid var(--border-subtle)',background:'var(--bg-primary)'}}>
-        ${TAB_BTN('general','General')}
-        ${TAB_BTN('advanced','Advanced')}
-      </div>
-      ${settingsTab==='general' && html`<div style=${{padding:'.2rem 1.2rem 1rem 1.2rem'}}>
+      <div style=${{padding:'.2rem 1.2rem 1rem 1.2rem'}}>
         <div style=${SEC}>Viewer</div>
         <div style=${TROW}>
           <div><div style=${TLBL}>Auto fly-to on click</div><div style=${TSUB}>Camera moves to element when selecting a clash or issue</div></div>
@@ -10381,8 +10373,7 @@ function startApp() {
           <div style=${SEC}>Developer / Fine-Tuning</div>
           <${DevTrainingSection} models=${models} />
         </div>
-      </div>`}
-      ${settingsTab==='advanced' && html`<${AdvancedSettingsTab} d=${d} prefs=${p} models=${models} rules=${rules} SEC=${SEC} TROW=${TROW} TLBL=${TLBL} TSUB=${TSUB} LBL=${LBL} />`}
+      </div>
     </div></div>`;
   }
 
