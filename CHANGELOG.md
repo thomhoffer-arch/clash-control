@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.20 (2026-03-28)
+- Fix mobile logo popup visibility (z-index and positioning)
+
 ## v3.3.19 (2026-03-28)
 - Add tour/version popup on mobile logo tap and project collaboration tour step
 

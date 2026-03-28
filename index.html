@@ -260,7 +260,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.3.19',hash:'357c8a1',date:'2026-03-28T04:36:02Z'};
+  var CC_VERSION = {v:'3.3.20',hash:'9336d4d',date:'2026-03-28T04:41:45Z'};
 
   // ── GoatCounter event helper (no-op if GoatCounter not configured) ──
   function _gcEvent(name, title) {
@@ -10292,7 +10292,7 @@ function startApp() {
       style=${{...S_BTN,padding:'.4rem .8rem',fontSize:'0.83rem',fontWeight:settingsTab===id?600:400,
         background:settingsTab===id?'var(--accent)':'none',color:settingsTab===id?'#fff':'var(--text-muted)',
         border:'none',borderRadius:6,cursor:'pointer'}}>${label}</button>`;};
-    return html`<div style=${MS} role="dialog" aria-label="Settings"><div style=${MX}>
+    return html`<div style=${MS} role="dialog" aria-label="Settings" onClick=${function(){d({t:A.SETTINGS,v:false});}}><div style=${MX} onClick=${function(e){e.stopPropagation();}}>
       <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'1rem 1.2rem',borderBottom:'1px solid var(--border)'}}>
         <span style=${{fontWeight:600,fontSize:'1.03rem'}}>Settings</span>
         <button onClick=${function(){d({t:A.SETTINGS,v:false})}} style=${{...S_BTN,background:'none',color:'var(--text-muted)',fontSize:'1.26rem',padding:0}} aria-label="Close settings">✕</button>
@@ -13109,8 +13109,8 @@ function startApp() {
     var panelBorderCol = panelGlow ? 'rgba(96,165,250,.5)' : borderCol;
     var backendLabel = window._ccTourActive ? 'AI loaded' : backend === 'ollama' ? 'Ollama (' + _ollamaModel + ')' : backend === 'browser' ? 'In-browser (0.5B)' : null;
     var backendColor = window._ccTourActive ? '#a78bfa' : backend === 'ollama' ? '#22c55e' : backend === 'browser' ? '#f59e0b' : mutedCol;
-    return html`<div class="cc-nlpanel" style=${{
-      position:'absolute', bottom:'1rem', left:'50%', transform:'translateX(-50%)',
+    return html`<div style=${{position:'fixed',inset:0,zIndex:1199}} onClick=${function(){setOpen(false);}}><div class="cc-nlpanel" onClick=${function(e){e.stopPropagation();}} style=${{
+      position:'fixed', bottom:'1rem', left:'50%', transform:'translateX(-50%)',
       zIndex:1200, width:'min('+panelW+'px, calc(100% - 2rem))',
       background:panelBg, border:'1px solid '+panelBorderCol,
       borderRadius:12, boxShadow:'var(--shadow-lg)',
@@ -13253,7 +13253,7 @@ function startApp() {
           transition:'opacity .15s'
         }}>Send</button>
       </div>`}
-    </div>`;
+    </div></div>`;
   }
 
   // ── Left Rail (utility actions) ────────────────────────────────
