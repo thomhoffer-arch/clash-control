@@ -260,7 +260,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.3.23',hash:'c58e0d3',date:'2026-03-28T06:41:17Z'};
+  var CC_VERSION = {v:'3.3.24',hash:'1373634',date:'2026-03-28T06:44:56Z'};
 
   // ── GoatCounter event helper (no-op if GoatCounter not configured) ──
   function _gcEvent(name, title) {
@@ -6560,7 +6560,7 @@ function startApp() {
   // ── Guided Tour ──────────────────────────────────────────────
   var TOUR_STEPS = [
     {sel:'.cc-left-rail', pos:'right', title:'Sidebar',
-      text:'Your main navigation. Access models, project files, import/export, and settings from here.'},
+      text:'Your main navigation. Access models, project files, import/export, and settings from here. Load IFC files directly, or drop a GLB + IFC + .ifcmeta bundle for near-instant loading (create bundles with Ifc2Ifc: github.com/thomhoffer-arch/Ifc2Ifc).'},
     {sel:'.cc-header-brand-text', pos:'bottom', title:'Header Bar',
       text:'Shows the active project name. Click it to switch between projects or create new ones.'},
     {sel:'.cc-header-actions', pos:'bottom', title:'Quick Actions',
@@ -7435,7 +7435,7 @@ function startApp() {
         </div>
         <input ref=${fileRef} type="file" accept=".ifc,.glb,.gltf,.ifcmeta" multiple style=${{display:'none'}} onChange=${onFiles} />
         <input ref=${file2dRef} type="file" accept=".dxf,.pdf,.dwg" multiple style=${{display:'none'}} onChange=${onFiles} />
-        <button class="cc-tip cc-tip-left" data-tip=${dragging?'Drop to load':'Add IFC / GLB / DXF / PDF'} title=${'Load IFC, GLB, DXF, or PDF.\n\nFor fast Revit import: drop IFC + GLB + .ifcmeta together.\n• GLB = pre-tessellated geometry (fast)\n• IFC = properties, storeys, spatial hierarchy\n• .ifcmeta = Revit data (phase, workset, design option, layers, constraints)'} onClick=${function(){setErr('');fileRef.current&&fileRef.current.click()}} disabled=${loading}
+        <button class="cc-tip cc-tip-left" data-tip=${dragging?'Drop to load':'Add IFC / GLB / DXF / PDF'} title=${'Load IFC, GLB, DXF, or PDF.\n\nFor fast Revit import: drop IFC + GLB + .ifcmeta together.\n• GLB = pre-tessellated geometry (fast)\n• IFC = properties, storeys, spatial hierarchy\n• .ifcmeta = Revit data (phase, workset, design option, layers, constraints)\n\nCreate bundles with Ifc2Ifc:\ngithub.com/thomhoffer-arch/Ifc2Ifc'} onClick=${function(){setErr('');fileRef.current&&fileRef.current.click()}} disabled=${loading}
           style=${{...S_BTN,width:'100%',background:dragging?'#1e3a5f':'var(--bg-secondary)',color:dragging?'#93c5fd':'var(--text-secondary)',border:dragging?'2px dashed #3b82f6':'1px dashed var(--border)',display:'flex',alignItems:'center',justifyContent:'center',gap:'.3rem',transition:'all .15s'}}>
           ${loading?html`<span class="spin">⟳</span>`:html`<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>`}
         </button>
@@ -13754,7 +13754,7 @@ function startApp() {
             </div>
           </div>
           <div style=${{display:'flex',flexDirection:'column',gap:'.85rem',fontSize:'0.9rem',color:'var(--text-secondary)',lineHeight:1.6}}>
-            <div><div style=${{fontWeight:600,color:'var(--text-primary)',marginBottom:'.25rem'}}>1. Load models</div><div>Click the folder icon in the left sidebar or drag & drop IFC files onto the 3D view.</div></div>
+            <div><div style=${{fontWeight:600,color:'var(--text-primary)',marginBottom:'.25rem'}}>1. Load models</div><div>Click the folder icon in the left sidebar or drag & drop files onto the 3D view. Supports <b>IFC</b> files directly, or a fast-load <b>GLB + IFC + .ifcmeta</b> bundle — drop all three files together. Bundles can be created with <a href="https://github.com/thomhoffer-arch/Ifc2Ifc" target="_blank" rel="noopener" style=${{color:'#60a5fa'}}>Ifc2Ifc</a>.</div></div>
             <div><div style=${{fontWeight:600,color:'var(--text-primary)',marginBottom:'.25rem'}}>2. Detect clashes</div><div>Press <b>/</b> to open the AI chat and type something like "check structural vs MEP" or "find clashes within 50mm".</div></div>
             <div><div style=${{fontWeight:600,color:'var(--text-primary)',marginBottom:'.25rem'}}>3. Review results</div><div>Click any clash to fly to it in 3D. Change status, assign responsibility, or use the chat: "mark all open as resolved".</div></div>
             <div><div style=${{fontWeight:600,color:'var(--text-primary)',marginBottom:'.25rem'}}>4. Create issues & export</div><div>Create issues from clashes. Export as BCF 2.1/3.0 for Revit, Navisworks, Solibri, or BIMcollab.</div></div>
@@ -13869,7 +13869,7 @@ function startApp() {
       display:'flex',flexDirection:'column',overflow:'visible',userSelect:'none',position:'relative',zIndex:10
     }}>
       <div style=${{height:48,borderBottom:'1px solid var(--border-subtle)',flexShrink:0}}></div>
-      ${tabBtn('models',  SVG_MODELS,  'Models',   0)}
+      ${tabBtn('models',  SVG_MODELS,  'Models',   s.models.length)}
       ${tabBtn('clashes', SVG_CLASHES, 'Clashes',  clashN)}
       ${tabBtn('issues',  SVG_ISSUES,  'Issues',   issueN)}
       ${tabBtn('navigator',SVG_EXPLORE, 'Navigator', 0)}

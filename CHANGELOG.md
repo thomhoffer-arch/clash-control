@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.24 (2026-03-28)
+- Mention GLB+IFC+ifcmeta and Ifc2Ifc in guided tour, quick start guide, and upload tooltip
+
 ## v3.3.23 (2026-03-28)
 - Add GLB+IFC+ifcmeta info to import tooltip and chatbox welcome message
 
