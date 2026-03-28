@@ -7333,6 +7333,7 @@ function startApp() {
                     console.table(rows);
                     console.groupEnd();
                   }());
+                  consoleElementProfile(base, _loadType, result.elements);
                   var disc = detectDiscipline(result.elements);
                   var dObj = DISC.find(function(x){return x.id===disc;});
                   var col = dObj ? dObj.c : DISC[0].c;
@@ -7388,6 +7389,7 @@ function startApp() {
                 d({t:A.ADD_MODEL, v:{id:modelId, name:base, discipline:'architectural', color:DISC[2].c, visible:true, _version:1,
                   meshes:glbResult.meshes, elements:elements, storeys:[], storeyData:[], spatialHierarchy:{}, relatedPairs:{},
                   stats:{loadTime:Math.round(performance.now()-t0), fileSize:grp.glb.size, elementCount:elements.length, meshCount:glbResult.meshes.length}}});
+                consoleElementProfile(base, 'GLB', elements);
                 _gcEvent('glb-standalone', base);
               });
             }).catch(function(er) {
@@ -7496,6 +7498,7 @@ function startApp() {
                 modelId = uid();
                 d({t:A.ADD_MODEL, v:{id:modelId, name:baseName, discipline:disc, color:col, visible:true, _version:1, meshes:result.meshes, elements:result.elements, storeys:result.storeys||[], storeyData:result.storeyData||[], spatialHierarchy:result.spatialHierarchy||{}, relatedPairs:result.relatedPairs||{}, stats:result.stats||{fileSize:fSize}}});
               }
+              consoleElementProfile(baseName, (result.stats&&result.stats.loadType)||'IFC', result.elements);
               idbSaveFile(modelId, f.name, buf, s.activeProject||'default');
               idbSaveGeoCache(modelId, _geoSerialize(result)); // cache geometry for fast project-switch restore
             });
@@ -7702,6 +7705,41 @@ function startApp() {
         <${SectionBoxUI} s=${s} d=${d} />
       </div>
     </div>`;
+  }
+
+  function consoleElementProfile(modelName, loadType, elements) {
+    if (!elements || !elements.length) return;
+    var n = elements.length;
+    var GENERIC_RE = /^(basic\s+)?(wall|floor|ceiling|roof|column|beam|slab|door|window|generic model|furniture|curtain wall|curtain panel|railing|stair|ramp|mass|component)(\s+[\d\-]+)?$/i;
+    var typeCounts = {}, storeyCounts = {};
+    var storeyN=0, materialN=0, psetsN=0, quantN=0, proxyN=0, genericN=0;
+    elements.forEach(function(el) {
+      var p = el.props||{};
+      var t = p.ifcType||'Unknown';
+      typeCounts[t] = (typeCounts[t]||0)+1;
+      if (p.storey&&p.storey.trim()) { storeyN++; storeyCounts[p.storey]=(storeyCounts[p.storey]||0)+1; }
+      if (p.material&&p.material.trim()) materialN++;
+      if (p.psets&&Object.keys(p.psets).some(function(g){var grp=p.psets[g];return grp&&typeof grp==='object'&&Object.keys(grp).length>0;})) psetsN++;
+      if (p.quantities&&Object.keys(p.quantities).length>0) quantN++;
+      if (p.ifcType==='IfcBuildingElementProxy') proxyN++;
+      if (GENERIC_RE.test((p.name||'').trim())) genericN++;
+    });
+    var typeRows = Object.keys(typeCounts).sort(function(a,b){return typeCounts[b]-typeCounts[a];}).slice(0,12)
+      .map(function(t){return {'IFC Type':t, Count:typeCounts[t], Pct:Math.round(typeCounts[t]/n*100)+'%'};});
+    var completeness = [
+      {Field:'Has storey/level',    Count:storeyN,   Pct:Math.round(storeyN/n*100)+'%'},
+      {Field:'Has material',        Count:materialN, Pct:Math.round(materialN/n*100)+'%'},
+      {Field:'Has property sets',   Count:psetsN,    Pct:Math.round(psetsN/n*100)+'%'},
+      {Field:'Has quantities',      Count:quantN,    Pct:Math.round(quantN/n*100)+'%'},
+      {Field:'⚠ Generic name',     Count:genericN,  Pct:Math.round(genericN/n*100)+'%'},
+      {Field:'⚠ IfcProxy (uncl.)', Count:proxyN,    Pct:Math.round(proxyN/n*100)+'%'},
+    ];
+    console.groupCollapsed('%c['+loadType+' Element Profile] '+modelName+' — '+n+' elements ('+Object.keys(typeCounts).length+' types, '+Object.keys(storeyCounts).length+' levels)', 'color:#a78bfa;font-weight:bold');
+    console.log('%cType distribution (top 12)', 'color:#94a3b8');
+    console.table(typeRows);
+    console.log('%cData completeness', 'color:#94a3b8');
+    console.table(completeness);
+    console.groupEnd();
   }
 
   function runDataQualityChecks(elements) {
