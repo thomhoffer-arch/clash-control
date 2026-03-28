@@ -14,6 +14,7 @@ Built for architects, engineers, and BIM coordinators who are tired of paying th
 ## Features
 
 - **Load multiple IFC models** — drag & drop or browse, supports any IFC 2x3/4 file
+- **Fast GLB + IFC + .ifcmeta loading** — load a pre-exported GLB (geometry) alongside its matching IFC (properties) and optional `.ifcmeta` sidecar for near-instant model display without re-parsing heavy IFC geometry. Files must share the same base name (e.g. `building.glb`, `building.ifc`, `building.ifcmeta`). These bundles can be created with [Ifc2Ifc](https://github.com/thomhoffer-arch/Ifc2Ifc).
 - **Geometric clash detection** — hard clashes (intersections) and soft clashes (clearance violations) using OBB-based collision detection
 - **3D viewer** — orbit, pan, zoom, section planes, section boxes, floor plan cuts, measurement tools
 - **Model explorer** — browse elements by storey, IFC type, discipline, or material with visibility toggles and color-by-classification
@@ -53,7 +54,7 @@ ClashControl is not complete nor perfect and you should always verify results yo
 
 ## Tech
 
-Single-file app built with Preact, Three.js, and web-ifc. No build tools, no bundler — just open and go. See [CLAUDE.md](CLAUDE.md) for architecture details.
+Single-file app built with Preact, Three.js, and web-ifc. No build tools, no bundler — just open and go. See [CLAUDE.md](CLAUDE.md) for architecture details and [OPEN_SOURCE_COMPONENTS.md](OPEN_SOURCE_COMPONENTS.md) for all third-party libraries used.
 
 ## License
 

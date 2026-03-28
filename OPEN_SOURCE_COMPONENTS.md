@@ -31,10 +31,17 @@ ClashControl uses the following open source libraries and components:
 - **htm** is Apache-2.0. ClashControl includes a custom minimal reimplementation inspired by htm, not a direct copy.
 - All other dependencies (React, ReactDOM, Three.js) are MIT-licensed — fully compatible.
 
+## Related Open Source Tools
+
+| Tool | Link | Purpose |
+|------|------|---------|
+| Ifc2Ifc | [thomhoffer-arch/Ifc2Ifc](https://github.com/thomhoffer-arch/Ifc2Ifc) | Converts IFC files into the GLB + IFC + `.ifcmeta` bundle format that ClashControl uses for fast model loading |
+
 ## Notes
 
 - **web-ifc** is developed by [ThatOpen](https://github.com/ThatOpen) (formerly IFC.js). It provides the WebAssembly-based IFC parser that reads Industry Foundation Classes files and streams geometry data for 3D rendering.
 - **Three.js** handles all 3D rendering including mesh display, clipping planes, section boxes, orbit controls, raycasting, and the view cube.
 - **React** powers the entire UI with functional components using hooks (useState, useEffect, useRef, useReducer, useMemo).
 - **htm** is a lightweight alternative to JSX that works without a build step, enabling the single-file architecture.
+- **Ifc2Ifc** is an external preprocessing tool that produces the GLB + IFC + `.ifcmeta` file bundles accepted by ClashControl. The GLB carries pre-baked geometry (for fast load), the IFC carries the full property data, and the `.ifcmeta` sidecar carries additional element metadata. Node names in the GLB must match IFC GlobalIds for the join to work correctly.
 - All dependencies are loaded from CDNs (cdnjs, esm.sh, jsdelivr) — no build step or package manager required.
