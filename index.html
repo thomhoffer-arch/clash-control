@@ -9384,6 +9384,38 @@ function startApp() {
     var s = props && props.s, d = props && props.d;
     var st=useState(function(){return {defaultClearance:_getStandardDefaultClearance(),rules:_getStandardPairRules(),typeRules:_getStandardTypePairRules()};}),
       data=st[0],setData=st[1];
+    var importRef = useRef(null);
+    var importErr = useState(''), importErrMsg=importErr[0], setImportErr=importErr[1];
+
+    function exportRules() {
+      var payload = {version:1, defaultClearance:data.defaultClearance, typeRules:data.typeRules, rules:data.rules};
+      var blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a'); a.href=url; a.download='clash-rules.json'; a.click();
+      URL.revokeObjectURL(url);
+    }
+    function onImportFile(e) {
+      var file = e.target.files[0]; if(!file) return;
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        try {
+          var p = JSON.parse(ev.target.result);
+          var newData = {
+            defaultClearance: p.defaultClearance!=null ? p.defaultClearance : data.defaultClearance,
+            typeRules: Array.isArray(p.typeRules) ? p.typeRules : data.typeRules,
+            rules: Array.isArray(p.rules) ? p.rules : data.rules
+          };
+          _setStandardDefaultClearance(newData.defaultClearance);
+          _setStandardTypePairRules(newData.typeRules);
+          _setStandardPairRules(newData.rules);
+          setData(newData);
+          setImportErr('');
+        } catch(err) { setImportErr('Invalid file — could not parse clash-rules.json'); }
+        e.target.value='';
+      };
+      reader.readAsText(file);
+    }
+
     function updateDefault(val){
       var v=val===''?null:Number(val);
       _setStandardDefaultClearance(v);
@@ -9430,6 +9462,20 @@ function startApp() {
       ${s && d && html`<div style=${{marginBottom:'1rem',paddingBottom:'.8rem',borderBottom:'2px solid var(--border)'}}>
         <${ClashRulesPanel} s=${s} d=${d} />
       </div>`}
+
+      <input ref=${importRef} type="file" accept=".json" style=${{display:'none'}} onChange=${onImportFile} />
+      <div style=${{display:'flex',gap:'.4rem',marginBottom:'.8rem'}}>
+        <button onClick=${exportRules}
+          style=${{flex:1,fontSize:'0.69rem',padding:'.3rem .5rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',borderRadius:4,cursor:'pointer',fontWeight:600}}>
+          ↓ Export rules
+        </button>
+        <button onClick=${function(){importRef.current&&importRef.current.click();}}
+          style=${{flex:1,fontSize:'0.69rem',padding:'.3rem .5rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',borderRadius:4,cursor:'pointer',fontWeight:600}}>
+          ↑ Import rules
+        </button>
+      </div>
+      ${importErrMsg && html`<div style=${{fontSize:'0.63rem',color:'#fca5a5',marginBottom:'.5rem',padding:'.25rem .4rem',background:'rgba(239,68,68,.08)',borderRadius:4}}>${importErrMsg}</div>`}
+
       <div style=${{marginBottom:'.8rem'}}>
         <span style=${LS}>Default minimum clearance (mm)</span>
         <input type="number" min="0" step="1" placeholder="e.g. 50"
@@ -11084,7 +11130,7 @@ function startApp() {
           <div style=${{marginTop:'.6rem',padding:'.5rem',background:logBg,borderRadius:8,border:'1px solid var(--border)',fontSize:'0.69rem',color:'var(--text-secondary)',lineHeight:1.6}}>
             <strong style=${{color:'var(--text-primary)'}}>How it works:</strong><br/>
             1. Enter your AI API key (Anthropic, OpenAI, or Google) — stored locally only<br/>
-            2. Start your Revit MCP server (see REVIT_BRIDGE_GUIDE.md)<br/>
+            2. Start your Revit MCP server (see <a href="https://github.com/clashcontrol-io/clash-control/blob/main/REVIT_BRIDGE_GUIDE.md" target="_blank" rel="noopener" style=${{color:'#60a5fa',textDecoration:'underline'}}>REVIT_BRIDGE_GUIDE.md</a>)<br/>
             3. Click "Push to Revit" to send clashes/issues as markers in Revit<br/>
             4. After resolving in Revit, click "Pull from Revit" to sync status back<br/>
             <a href="https://github.com/mcp-servers-for-revit/mcp-server-for-revit-python" target="_blank" rel="noopener" style=${{color:'#60a5fa',textDecoration:'underline'}}>Recommended: mcp-server-for-revit-python</a>
@@ -13171,7 +13217,8 @@ function startApp() {
           <strong style=${{color:textCol}}>Speed tip:</strong> Install <a href="https://ollama.com" target="_blank" rel="noopener"
             style=${{color:'#60a5fa', textDecoration:'underline'}}>Ollama</a> and run
           <code style=${{background:'var(--tag-bg)', padding:'.1rem .25rem', borderRadius:3, fontSize:'0.67rem'}}>ollama pull qwen2.5:7b</code>
-          for a faster, smarter local AI — no cloud, runs on your machine.
+          for a faster, smarter local AI — no cloud, runs on your machine.<br/>
+          <span style=${{color:mutedCol}}>Or connect your own API key (Anthropic, OpenAI, Google) in the AI settings panel above.</span>
         </span>
         <button onClick=${function(){ setShowOllamaTip(false); }} style=${{
           background:'none', border:'none', cursor:'pointer', color:mutedCol, fontSize:'0.92rem', padding:'0 .1rem', lineHeight:1
@@ -13334,7 +13381,7 @@ function startApp() {
           <div style=${{padding:'.4rem .6rem',borderBottom:'1px solid var(--border-subtle)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
             <span style=${{fontSize:'0.75rem',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'.05em'}}>Projects</span>
             ${!_lrCreating && html`<button onClick=${function(){_setLrCreating(true);_setLrName('');}}
-              style=${{...S_BTN,fontSize:'0.69rem',padding:'.1rem .35rem',background:'#1e3a5f',color:'#93c5fd'}}>+ New</button>`}
+              style=${{...S_BTN,fontSize:'0.69rem',padding:'.1rem .35rem',background:'rgba(37,99,235,.15)',color:'var(--accent)'}}>+ New</button>`}
           </div>
           ${_lrCreating && html`<div style=${{padding:'.35rem .5rem',borderBottom:'1px solid var(--border-subtle)',display:'flex',gap:'.3rem',alignItems:'center'}}>
             <input type="text" value=${_lrName} autofocus placeholder="Project name…"
