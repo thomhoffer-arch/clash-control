@@ -151,7 +151,7 @@
     @keyframes nlBorderReady{0%{box-shadow:0 8px 32px rgba(0,0,0,.35),0 0 0 4px rgba(34,197,94,.5),0 0 20px rgba(34,197,94,.4)}100%{box-shadow:0 8px 32px rgba(0,0,0,.35),0 0 0 0 rgba(34,197,94,0),0 0 0 rgba(34,197,94,0)}}
     .lc2{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
     button{font-family:inherit}
-    .cc-tip{position:relative}.cc-tip::after{content:attr(data-tip);position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%) translateX(-4px);background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:.3rem .6rem;font-size:0.8rem;white-space:nowrap;pointer-events:none;opacity:0;transition:opacity .15s,transform .15s;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.2)}.cc-tip:hover::after{opacity:1;transform:translateY(-50%) translateX(0)}.cc-tip-delay::after{transition-delay:0s}.cc-tip-delay:hover::after{transition-delay:1s}.cc-tip-up::after{left:50%;top:auto;bottom:calc(100% + 7px);transform:translateX(-50%) translateY(4px)}.cc-tip-up:hover::after{transform:translateX(-50%) translateY(0)}.cc-tip-left::after{left:auto;right:calc(100% + 8px);transform:translateY(-50%) translateX(4px)}.cc-tip-left:hover::after{transform:translateY(-50%) translateX(0)}
+    .cc-tip{position:relative}.cc-tip::after{content:attr(data-tip);position:absolute;left:calc(100% + 8px);top:50%;transform:translateY(-50%) translateX(-4px);background:var(--bg-secondary);color:var(--text-primary);border:1px solid var(--border);border-radius:6px;padding:.3rem .6rem;font-size:0.8rem;white-space:pre-line;max-width:240px;pointer-events:none;opacity:0;transition:opacity .15s,transform .15s;z-index:9999;box-shadow:0 4px 12px rgba(0,0,0,.2)}.cc-tip:hover::after{opacity:1;transform:translateY(-50%) translateX(0)}.cc-tip-delay::after{transition-delay:0s}.cc-tip-delay:hover::after{transition-delay:1s}.cc-tip-up::after{left:50%;top:auto;bottom:calc(100% + 7px);transform:translateX(-50%) translateY(4px)}.cc-tip-up:hover::after{transform:translateX(-50%) translateY(0)}.cc-tip-left::after{left:auto;right:calc(100% + 8px);transform:translateY(-50%) translateX(4px)}.cc-tip-left:hover::after{transform:translateY(-50%) translateX(0)}
     button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
     input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent)}
     [role=switch]:focus-visible{outline:2px solid var(--accent);outline-offset:2px;border-radius:10px}
@@ -9384,6 +9384,38 @@ function startApp() {
     var s = props && props.s, d = props && props.d;
     var st=useState(function(){return {defaultClearance:_getStandardDefaultClearance(),rules:_getStandardPairRules(),typeRules:_getStandardTypePairRules()};}),
       data=st[0],setData=st[1];
+    var importRef = useRef(null);
+    var importErr = useState(''), importErrMsg=importErr[0], setImportErr=importErr[1];
+
+    function exportRules() {
+      var payload = {version:1, defaultClearance:data.defaultClearance, typeRules:data.typeRules, rules:data.rules};
+      var blob = new Blob([JSON.stringify(payload,null,2)],{type:'application/json'});
+      var url = URL.createObjectURL(blob);
+      var a = document.createElement('a'); a.href=url; a.download='clash-rules.json'; a.click();
+      URL.revokeObjectURL(url);
+    }
+    function onImportFile(e) {
+      var file = e.target.files[0]; if(!file) return;
+      var reader = new FileReader();
+      reader.onload = function(ev) {
+        try {
+          var p = JSON.parse(ev.target.result);
+          var newData = {
+            defaultClearance: p.defaultClearance!=null ? p.defaultClearance : data.defaultClearance,
+            typeRules: Array.isArray(p.typeRules) ? p.typeRules : data.typeRules,
+            rules: Array.isArray(p.rules) ? p.rules : data.rules
+          };
+          _setStandardDefaultClearance(newData.defaultClearance);
+          _setStandardTypePairRules(newData.typeRules);
+          _setStandardPairRules(newData.rules);
+          setData(newData);
+          setImportErr('');
+        } catch(err) { setImportErr('Invalid file — could not parse clash-rules.json'); }
+        e.target.value='';
+      };
+      reader.readAsText(file);
+    }
+
     function updateDefault(val){
       var v=val===''?null:Number(val);
       _setStandardDefaultClearance(v);
@@ -9430,6 +9462,20 @@ function startApp() {
       ${s && d && html`<div style=${{marginBottom:'1rem',paddingBottom:'.8rem',borderBottom:'2px solid var(--border)'}}>
         <${ClashRulesPanel} s=${s} d=${d} />
       </div>`}
+
+      <input ref=${importRef} type="file" accept=".json" style=${{display:'none'}} onChange=${onImportFile} />
+      <div style=${{display:'flex',gap:'.4rem',marginBottom:'.8rem'}}>
+        <button onClick=${exportRules}
+          style=${{flex:1,fontSize:'0.69rem',padding:'.3rem .5rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',borderRadius:4,cursor:'pointer',fontWeight:600}}>
+          ↓ Export rules
+        </button>
+        <button onClick=${function(){importRef.current&&importRef.current.click();}}
+          style=${{flex:1,fontSize:'0.69rem',padding:'.3rem .5rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',borderRadius:4,cursor:'pointer',fontWeight:600}}>
+          ↑ Import rules
+        </button>
+      </div>
+      ${importErrMsg && html`<div style=${{fontSize:'0.63rem',color:'#fca5a5',marginBottom:'.5rem',padding:'.25rem .4rem',background:'rgba(239,68,68,.08)',borderRadius:4}}>${importErrMsg}</div>`}
+
       <div style=${{marginBottom:'.8rem'}}>
         <span style=${LS}>Default minimum clearance (mm)</span>
         <input type="number" min="0" step="1" placeholder="e.g. 50"
@@ -10284,7 +10330,7 @@ function startApp() {
 
   function SettingsModal(props) {
     var d=props.d, p=props.prefs, models=props.models||[], rules=props.rules||{};
-    var stTab = useState('general'), settingsTab=stTab[0], setSettingsTab=stTab[1];
+
     useEffect(function(){
       function onKey(e){if(e.key==='Escape')d({t:A.SETTINGS,v:false});}
       window.addEventListener('keydown',onKey);
@@ -10306,20 +10352,12 @@ function startApp() {
         <div style=${{width:18,height:18,borderRadius:9,background:'#fff',position:'absolute',top:2,left:on?18:2,transition:'left .2s',boxShadow:'0 1px 3px rgba(0,0,0,.2)'}}></div>
       </div>`;
     }
-    var TAB_BTN=function(id,label){return html`<button onClick=${function(){setSettingsTab(id);}}
-      style=${{...S_BTN,padding:'.4rem .8rem',fontSize:'0.83rem',fontWeight:settingsTab===id?600:400,
-        background:settingsTab===id?'var(--accent)':'none',color:settingsTab===id?'#fff':'var(--text-muted)',
-        border:'none',borderRadius:6,cursor:'pointer'}}>${label}</button>`;};
     return html`<div style=${MS} role="dialog" aria-label="Settings" onClick=${function(){d({t:A.SETTINGS,v:false});}}><div style=${MX} onClick=${function(e){e.stopPropagation();}}>
       <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'1rem 1.2rem',borderBottom:'1px solid var(--border)'}}>
         <span style=${{fontWeight:600,fontSize:'1.03rem'}}>Settings</span>
         <button onClick=${function(){d({t:A.SETTINGS,v:false})}} style=${{...S_BTN,background:'none',color:'var(--text-muted)',fontSize:'1.26rem',padding:0}} aria-label="Close settings">✕</button>
       </div>
-      <div style=${{display:'flex',gap:'.3rem',padding:'.6rem 1.2rem',borderBottom:'1px solid var(--border-subtle)',background:'var(--bg-primary)'}}>
-        ${TAB_BTN('general','General')}
-        ${TAB_BTN('advanced','Advanced')}
-      </div>
-      ${settingsTab==='general' && html`<div style=${{padding:'.2rem 1.2rem 1rem 1.2rem'}}>
+      <div style=${{padding:'.2rem 1.2rem 1rem 1.2rem'}}>
         <div style=${SEC}>Viewer</div>
         <div style=${TROW}>
           <div><div style=${TLBL}>Auto fly-to on click</div><div style=${TSUB}>Camera moves to element when selecting a clash or issue</div></div>
@@ -10381,8 +10419,7 @@ function startApp() {
           <div style=${SEC}>Developer / Fine-Tuning</div>
           <${DevTrainingSection} models=${models} />
         </div>
-      </div>`}
-      ${settingsTab==='advanced' && html`<${AdvancedSettingsTab} d=${d} prefs=${p} models=${models} rules=${rules} SEC=${SEC} TROW=${TROW} TLBL=${TLBL} TSUB=${TSUB} LBL=${LBL} />`}
+      </div>
     </div></div>`;
   }
 
@@ -11093,7 +11130,7 @@ function startApp() {
           <div style=${{marginTop:'.6rem',padding:'.5rem',background:logBg,borderRadius:8,border:'1px solid var(--border)',fontSize:'0.69rem',color:'var(--text-secondary)',lineHeight:1.6}}>
             <strong style=${{color:'var(--text-primary)'}}>How it works:</strong><br/>
             1. Enter your AI API key (Anthropic, OpenAI, or Google) — stored locally only<br/>
-            2. Start your Revit MCP server (see REVIT_BRIDGE_GUIDE.md)<br/>
+            2. Start your Revit MCP server (see <a href="https://github.com/clashcontrol-io/clash-control/blob/main/REVIT_BRIDGE_GUIDE.md" target="_blank" rel="noopener" style=${{color:'#60a5fa',textDecoration:'underline'}}>REVIT_BRIDGE_GUIDE.md</a>)<br/>
             3. Click "Push to Revit" to send clashes/issues as markers in Revit<br/>
             4. After resolving in Revit, click "Pull from Revit" to sync status back<br/>
             <a href="https://github.com/mcp-servers-for-revit/mcp-server-for-revit-python" target="_blank" rel="noopener" style=${{color:'#60a5fa',textDecoration:'underline'}}>Recommended: mcp-server-for-revit-python</a>
@@ -13180,7 +13217,8 @@ function startApp() {
           <strong style=${{color:textCol}}>Speed tip:</strong> Install <a href="https://ollama.com" target="_blank" rel="noopener"
             style=${{color:'#60a5fa', textDecoration:'underline'}}>Ollama</a> and run
           <code style=${{background:'var(--tag-bg)', padding:'.1rem .25rem', borderRadius:3, fontSize:'0.67rem'}}>ollama pull qwen2.5:7b</code>
-          for a faster, smarter local AI — no cloud, runs on your machine.
+          for a faster, smarter local AI — no cloud, runs on your machine.<br/>
+          <span style=${{color:mutedCol}}>Or connect your own API key (Anthropic, OpenAI, Google) in the AI settings panel above.</span>
         </span>
         <button onClick=${function(){ setShowOllamaTip(false); }} style=${{
           background:'none', border:'none', cursor:'pointer', color:mutedCol, fontSize:'0.92rem', padding:'0 .1rem', lineHeight:1
@@ -13343,7 +13381,7 @@ function startApp() {
           <div style=${{padding:'.4rem .6rem',borderBottom:'1px solid var(--border-subtle)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
             <span style=${{fontSize:'0.75rem',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'.05em'}}>Projects</span>
             ${!_lrCreating && html`<button onClick=${function(){_setLrCreating(true);_setLrName('');}}
-              style=${{...S_BTN,fontSize:'0.69rem',padding:'.1rem .35rem',background:'#1e3a5f',color:'#93c5fd'}}>+ New</button>`}
+              style=${{...S_BTN,fontSize:'0.69rem',padding:'.1rem .35rem',background:'rgba(37,99,235,.15)',color:'var(--accent)'}}>+ New</button>`}
           </div>
           ${_lrCreating && html`<div style=${{padding:'.35rem .5rem',borderBottom:'1px solid var(--border-subtle)',display:'flex',gap:'.3rem',alignItems:'center'}}>
             <input type="text" value=${_lrName} autofocus placeholder="Project name…"
@@ -13399,7 +13437,7 @@ function startApp() {
           if(window._ccOpenIFC) window._ccOpenIFC();
         },
         html`<span style=${{fontWeight:700,fontSize:'0.8rem',letterSpacing:'.03em'}}>IFC</span>`,
-        'Load IFC model')}
+        'Load IFC model\nTip: drop GLB + .ifcmeta alongside for fast loading (create with Ifc2Ifc)')}
       ${iconBtn(function(){
           if(window._ccOpen2D) window._ccOpen2D();
         },
