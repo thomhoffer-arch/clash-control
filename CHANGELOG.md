@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.23 (2026-03-28)
+- Add GLB+IFC+ifcmeta info to import tooltip and chatbox welcome message
+
 ## v3.3.22 (2026-03-28)
 - Support GLB+IFC+ifcmeta triple file loading
 
