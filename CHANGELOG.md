@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.25 (2026-03-28)
+- feat: show loaded model count badge on Models tab
+
 ## v3.3.24 (2026-03-28)
 - Mention GLB+IFC+ifcmeta and Ifc2Ifc in guided tour, quick start guide, and upload tooltip
 
