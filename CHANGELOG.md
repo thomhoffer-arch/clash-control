@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.30 (2026-03-28)
+- fix: apply Z-up to Y-up rotation for GLB geometry from Revit/IFC exports
+
 ## v3.3.29 (2026-03-28)
 - fix: correct _getIfcAPI typo to getIfcAPI in loadIFCMetadataOnly
 
