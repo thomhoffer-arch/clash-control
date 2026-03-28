@@ -7230,7 +7230,25 @@ function startApp() {
                   _phases['Join'] = performance.now() - t0;
                   result.stats.loadTime = Math.round(performance.now() - t0);
                   result.stats.phases = _phases;
-                  result.stats.loadType = grp.ifc ? (grp.ifcmeta ? 'GLB+IFC+meta' : 'GLB+IFC') : 'GLB+meta';
+                  var _loadType = grp.ifc ? (grp.ifcmeta ? 'GLB+IFC+meta' : 'GLB+IFC') : 'GLB+meta';
+                  result.stats.loadType = _loadType;
+                  // Console profiler (matches IFC load profile output)
+                  (function() {
+                    var ph = _phases, prev = 0, total = result.stats.loadTime;
+                    var phaseOrder = ['GLB read','GLB parse','IFC file read','IFC metadata','Sidecar','Join'];
+                    var rows = [];
+                    phaseOrder.forEach(function(name) {
+                      if (ph[name] == null) return;
+                      var cum = Math.round(ph[name]), dt = Math.round(ph[name] - prev);
+                      rows.push({Phase:name, Time:dt+'ms', Pct:Math.round(dt/total*100)+'%', Cumulative:cum+'ms'});
+                      prev = ph[name];
+                    });
+                    rows.push({Phase:'TOTAL', Time:total+'ms', Pct:'100%', Cumulative:total+'ms'});
+                    var totalSizeMB = (result.stats.fileSize/1048576).toFixed(1);
+                    console.groupCollapsed('%c['+_loadType+' Load Profile] '+result.stats.elementCount+' elements · '+totalSizeMB+' MB · '+total+'ms total', 'color:#38bdf8;font-weight:bold');
+                    console.table(rows);
+                    console.groupEnd();
+                  }());
                   var totalSize = grp.glb.size;
                   if (grp.ifc) totalSize += grp.ifc.size;
                   if (grp.ifcmeta) totalSize += grp.ifcmeta.size;
@@ -7619,6 +7637,8 @@ function startApp() {
         <span style=${{color:'var(--text-primary)',fontSize:'0.86rem',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title=${m.name}>${m.name}</span>
         ${m._version>1 && html`<span style=${{fontSize:'0.57rem',color:'#60a5fa',background:'#1e3a5f',padding:'.05rem .25rem',borderRadius:3,flexShrink:0,fontWeight:600}}>v${m._version}</span>`}
         ${m._stub && html`<span style=${{fontSize:'0.63rem',color:'#f59e0b',background:'var(--pill-amber-bg)',padding:'.05rem .3rem',borderRadius:4,flexShrink:0}}>stub</span>`}
+        ${m.stats && m.stats.loadType && html`<span style=${{fontSize:'0.57rem',padding:'1px 4px',borderRadius:3,background:'rgba(37,99,235,.12)',color:'var(--accent)',fontWeight:600,flexShrink:0}}>${m.stats.loadType}</span>`}
+        ${m.stats && m.stats.loadTime && html`<span style=${{fontSize:'0.63rem',color:'var(--text-faint)',flexShrink:0}}>${(m.stats.loadTime/1000).toFixed(1)}s</span>`}
         <button onClick=${function(){setOpen(!open)}} style=${{...S_BTN,padding:'0 2px',background:'none',color:'var(--text-faint)',fontSize:'0.69rem'}}>${open?'▲':'▼'}</button>
         <button onClick=${function(){if(!confirm('Remove "'+m.name+'" from this project?'))return;d({t:A.DEL_MODEL,id:m.id});idbDeleteFile(m.id);idbDeleteGeoCache(m.id);}} style=${{...S_BTN,padding:'0 2px',background:'none',color:'var(--text-faint)',fontSize:'0.69rem'}}>✕</button>
       </div>
@@ -7634,12 +7654,8 @@ function startApp() {
           <span style=${{fontSize:'0.8rem',color:'var(--text-faint)'}}>Colour</span>
           <input type="color" value=${m.color} onChange=${function(e){d({t:A.UPD_MODEL,id:m.id,u:{color:e.target.value}})}} style=${{width:24,height:20,border:'none',padding:0,background:'none',cursor:'pointer'}} />
         </div>
-        <span style=${{fontSize:'0.75rem',color:'var(--text-faint)'}}>${(m.elements&&m.elements.length||0)} elements · ${(m.meshes&&m.meshes.length||0)} meshes</span>
-        ${m.stats && html`<div style=${{fontSize:'0.63rem',color:'var(--text-faint)',display:'flex',gap:'.4rem',flexWrap:'wrap',alignItems:'center'}}>
-          ${m.stats.fileSize && html`<span>${(m.stats.fileSize/1048576).toFixed(1)} MB</span>`}
-          ${m.stats.loadTime && html`<span>${(m.stats.loadTime/1000).toFixed(1)}s load</span>`}
-          ${m.stats.loadType && html`<span style=${{padding:'1px 5px',borderRadius:3,background:'rgba(37,99,235,.12)',color:'var(--accent)',fontWeight:600}}>${m.stats.loadType}</span>`}
-        </div>`}
+        ${m.stats && m.stats.fileSize && html`<span style=${{fontSize:'0.63rem',color:'var(--text-faint)'}}>${(m.stats.fileSize/1048576).toFixed(1)} MB · ${(m.elements&&m.elements.length||0)} elements · ${(m.meshes&&m.meshes.length||0)} meshes</span>`}
+        ${!(m.stats && m.stats.fileSize) && html`<span style=${{fontSize:'0.75rem',color:'var(--text-faint)'}}>${(m.elements&&m.elements.length||0)} elements · ${(m.meshes&&m.meshes.length||0)} meshes</span>`}
         ${m.stats && m.stats.phases && m.stats.loadTime && (function() {
           var ph = m.stats.phases;
           var total = m.stats.loadTime;
