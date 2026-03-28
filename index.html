@@ -260,7 +260,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'3.3.20',hash:'9336d4d',date:'2026-03-28T04:41:45Z'};
+  var CC_VERSION = {v:'3.3.21',hash:'e3fa18d',date:'2026-03-28T04:49:29Z'};
 
   // ── GoatCounter event helper (no-op if GoatCounter not configured) ──
   function _gcEvent(name, title) {
@@ -7165,26 +7165,44 @@ function startApp() {
             _onProg('Loading GLB geometry…');
             return grp.glb.arrayBuffer().then(function(glbBuf) {
               return loadGLB(glbBuf, base, _onProg).then(function(glbResult) {
-                // Load IFC metadata or sidecar
-                var metaPromise;
-                if (grp.ifc) {
-                  metaPromise = grp.ifc.arrayBuffer().then(function(ifcBuf) {
-                    return loadIFCMetadataOnly(ifcBuf, _onProg);
-                  });
-                } else {
-                  metaPromise = grp.ifcmeta.text().then(function(txt) {
-                    return JSON.parse(txt);
-                  });
-                }
-                return metaPromise.then(function(meta) {
+                // Load IFC metadata and/or sidecar
+                var ifcPromise = grp.ifc ? grp.ifc.arrayBuffer().then(function(ifcBuf) {
+                  return loadIFCMetadataOnly(ifcBuf, _onProg);
+                }) : Promise.resolve(null);
+                var sidecarPromise = grp.ifcmeta ? grp.ifcmeta.text().then(function(txt) {
+                  return JSON.parse(txt);
+                }) : Promise.resolve(null);
+                return Promise.all([ifcPromise, sidecarPromise]).then(function(results) {
+                  var ifcMeta = results[0], sidecar = results[1];
                   var result;
-                  if (grp.ifc) {
-                    result = joinGLBWithIFC(glbResult, meta, base, _onProg);
+                  if (ifcMeta) {
+                    result = joinGLBWithIFC(glbResult, ifcMeta, base, _onProg);
+                    // Overlay Revit sidecar data on top of IFC properties
+                    if (sidecar && sidecar.elements) {
+                      var sc = sidecar.elements;
+                      result.elements.forEach(function(el) {
+                        var gid = el.props.globalId;
+                        if (gid && sc[gid]) {
+                          var rd = sc[gid];
+                          if (rd.phase) el.props.phase = rd.phase;
+                          if (rd.workset) el.props.workset = rd.workset;
+                          if (rd.designOption) el.props.designOption = rd.designOption;
+                          if (rd.hostId) el.props.hostId = rd.hostId;
+                          if (rd.layers) el.props.layers = rd.layers;
+                          if (rd.flipState) el.props.flipState = rd.flipState;
+                          if (rd.constraints) el.props.constraints = rd.constraints;
+                          if (rd.hostRelationships) el.props.hostRelationships = rd.hostRelationships;
+                        }
+                      });
+                    }
                   } else {
-                    result = joinGLBWithSidecar(glbResult, meta, _onProg);
+                    result = joinGLBWithSidecar(glbResult, sidecar, _onProg);
                   }
                   result.stats.loadTime = Math.round(performance.now() - t0);
-                  result.stats.fileSize = grp.glb.size + (grp.ifc ? grp.ifc.size : grp.ifcmeta.size);
+                  var totalSize = grp.glb.size;
+                  if (grp.ifc) totalSize += grp.ifc.size;
+                  if (grp.ifcmeta) totalSize += grp.ifcmeta.size;
+                  result.stats.fileSize = totalSize;
                   var disc = detectDiscipline(result.elements);
                   var dObj = DISC.find(function(x){return x.id===disc;});
                   var col = dObj ? dObj.c : DISC[0].c;

@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.21 (2026-03-28)
+- Add background dismiss (click outside to close) for Settings modal and chatbox
+
 ## v3.3.20 (2026-03-28)
 - Fix mobile logo popup visibility (z-index and positioning)
 
