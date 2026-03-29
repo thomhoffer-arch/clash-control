@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.54 (2026-03-29)
+- Cap revitBridge log and tour frame timer arrays
+
 ## v3.3.53 (2026-03-29)
 - Ollama off by default — enable via Settings > AI / Natural Language
 
