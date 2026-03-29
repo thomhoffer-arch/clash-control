@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.45 (2026-03-29)
+- Fix 2D button tooltip wrapping — remove spaces around slashes
+
 ## v3.3.44 (2026-03-29)
 - Include empty GLB nodes and props/sidecar-only elements in element list
 
