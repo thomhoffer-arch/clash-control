@@ -1640,6 +1640,23 @@ function startApp() {
         }
       });
 
+      // IfcSpace: include even when no geometry (Revit often exports rooms as spatial containers only)
+      var _rawEids = {};
+      rawElements.forEach(function(e) { _rawEids[e.expressId] = true; });
+      try {
+        var spaceIds = api.GetLineIDsWithType(modelID, IFC.IFCSPACE);
+        for (var si = 0; si < spaceIds.size(); si++) {
+          var sid = spaceIds.get(si);
+          if (_rawEids[sid]) continue; // already picked up by StreamAllMeshes
+          var spProps = extractProperties(api, modelID, sid);
+          spProps.storey = storeyMap[sid] || '';
+          spProps.material = matMap[sid] || '';
+          var spPm = propMap[sid];
+          if (spPm) { spProps.quantities = spPm.quantities; spProps.psets = spPm.psets; }
+          rawElements.push({expressId:sid, meshes:[], box:new THREE.Box3(), props:spProps, _lodProxy:null});
+        }
+      } catch(e) {}
+
       // Close WASM model immediately — all data is now in JavaScript memory
       api.CloseModel(modelID);
       _lmark('Geometry stream');
@@ -6971,6 +6988,24 @@ function startApp() {
         if (props.globalId) propsByGlobalId[props.globalId] = props;
         propsByExpressId[eid] = props;
       });
+
+      // IfcSpace: include even when no geometry (Revit often exports rooms without solid mesh)
+      var _eidSet = {};
+      elementIds.forEach(function(e) { _eidSet[e] = true; });
+      try {
+        var spaceIds2 = api.GetLineIDsWithType(modelID, IFC.IFCSPACE);
+        for (var si2 = 0; si2 < spaceIds2.size(); si2++) {
+          var sid2 = spaceIds2.get(si2);
+          if (_eidSet[sid2]) continue;
+          var spProps2 = extractProperties(api, modelID, sid2);
+          spProps2.storey = storeyResult.map[sid2] || '';
+          spProps2.material = matMap[sid2] || '';
+          var spPm2 = propMap[sid2];
+          if (spPm2) { spProps2.quantities = spPm2.quantities; spProps2.psets = spPm2.psets; }
+          if (spProps2.globalId) propsByGlobalId[spProps2.globalId] = spProps2;
+          propsByExpressId[sid2] = spProps2;
+        }
+      } catch(e) {}
 
       api.CloseModel(modelID);
       if (onProgress) onProgress('IFC metadata ready (' + elementIds.length + ' elements)');
@@ -14905,6 +14940,8 @@ function startApp() {
       }
       var shared = a.elements.length - onlyInA.length;
       console.log('%c✓ Shared elements (matched by GlobalId): '+shared+' / '+Math.max(a.elements.length,b.elements.length), 'color:#94a3b8');
+      var spaceCount = onlyInA.concat(onlyInB).filter(function(e){return (e.props.ifcType||'')==='IfcSpace';}).length;
+      if (spaceCount > 0) console.log('%cℹ '+spaceCount+' IfcSpace mismatch(es) expected — Revit Room GlobalIds differ from IFC export GlobalIds by design', 'color:#94a3b8;font-style:italic');
       console.groupEnd();
     };
     // Apply theme to document and persist to localStorage
