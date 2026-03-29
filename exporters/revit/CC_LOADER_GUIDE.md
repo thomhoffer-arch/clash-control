@@ -5,6 +5,60 @@ from the files Ifc2Ifc produces. Use this as a reference when changing the expor
 
 ---
 
+## How to import files
+
+### Drag and drop
+The easiest method. Select all files for a model in your file explorer and drag them
+onto the ClashControl window. You can drop multiple models at once — ClashControl
+loads them sequentially and adds each as a separate model layer.
+
+### File picker
+Click the **Load IFC** button in the left sidebar. The file dialog accepts `.ifc`
+files. To load a GLB bundle, drag and drop is the recommended approach since the
+file picker is currently filtered to `.ifc` only.
+
+### Grouping rule
+Files are grouped by **base name** (everything before the last `.`). All files
+in a group are loaded together as one model:
+
+```
+Building.glb        ┐
+Building.ifcprops   ├─ loaded as one model named "Building"
+Building.ifcmeta    ┘
+
+Structure.glb       ┐
+Structure.ifcprops  ├─ loaded as one model named "Structure"
+Structure.ifcmeta   ┘
+```
+
+You can drop both groups at the same time — ClashControl will correctly separate
+them by base name.
+
+### What to drop for the Ifc2Ifc bundle
+Drop all three files together:
+
+```
+MyModel.glb
+MyModel.ifcprops
+MyModel.ifcmeta     (optional but recommended)
+```
+
+All three files must share exactly the same base name. If the names differ,
+ClashControl will not recognise them as a bundle and will try to load each file
+independently.
+
+### Multiple models
+Clash detection works across models. The typical workflow is:
+
+1. Drop the architectural model → it loads as model A
+2. Drop the MEP model → it loads as model B
+3. Open the **Clashes** tab → run detection between A and B
+
+Each model gets an auto-detected discipline (Architectural / Structural / MEP)
+and a color assigned on load. Both can be changed in the model sidebar.
+
+---
+
 ## Load paths
 
 ClashControl detects which load path to use based on which files are dropped together.
