@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.51 (2026-03-29)
+- Remove Export Model section from settings panel
+
 ## v3.3.50 (2026-03-29)
 - Remove load profiler from model card UI
 
