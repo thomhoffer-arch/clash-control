@@ -1653,6 +1653,21 @@ function startApp() {
         console.log('%c[IFC] Filtered ' + _openingCount + ' IfcOpeningElement (void cutters)', 'color:#94a3b8');
       }
 
+      // IfcSpace: strip geometry — shown in element list but not rendered (spatial containers, not physical)
+      var _spaceEids = {};
+      rawElements.forEach(function(el) {
+        if (el.props.ifcType === 'IfcSpace') {
+          _spaceEids[el.expressId] = true;
+          el.meshes = [];
+          el.box = new THREE.Box3();
+          el._lodProxy = null;
+        }
+      });
+      if (Object.keys(_spaceEids).length > 0) {
+        meshes = meshes.filter(function(m) { return !_spaceEids[m.userData.expressId]; });
+        console.log('%c[IFC] Stripped geometry for ' + Object.keys(_spaceEids).length + ' IfcSpace (spatial containers)', 'color:#94a3b8');
+      }
+
       // IfcSpace: include even when no geometry (Revit often exports rooms as spatial containers only)
       var _rawEids = {};
       rawElements.forEach(function(e) { _rawEids[e.expressId] = true; });
