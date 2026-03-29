@@ -696,7 +696,7 @@ function startApp() {
       case A.BATCH_UPD_ISSUE:  return Object.assign({},s,{issues:s.issues.map(function(i){return s.selected[i.id]?Object.assign({},i,a.u):i;}),selected:{}});
       // Revit Bridge
       case A.UPD_BRIDGE:      return Object.assign({},s,{revitBridge:Object.assign({},s.revitBridge,a.u)});
-      case A.BRIDGE_LOG:      return Object.assign({},s,{revitBridge:Object.assign({},s.revitBridge,{log:s.revitBridge.log.concat([{ts:Date.now(),type:a.logType||'info',text:a.text}])})});
+      case A.BRIDGE_LOG:      return Object.assign({},s,{revitBridge:Object.assign({},s.revitBridge,{log:s.revitBridge.log.concat([{ts:Date.now(),type:a.logType||'info',text:a.text}]).slice(-100)})});
       case A.CLEAR_BRIDGE_LOG:return Object.assign({},s,{revitBridge:Object.assign({},s.revitBridge,{log:[]})});
       case A.REVIT_BRIDGE:    return Object.assign({},s,{showRevitBridge:a.v});
       case A.IDS_SET_RESULTS: return Object.assign({},s,{idsValidation:Object.assign({},s.idsValidation,{results:a.results,summary:a.summary,running:false})});
@@ -15528,6 +15528,7 @@ function startApp() {
     function _trackFrames() {
       var now = performance.now();
       _frameTimes.push(now - _lastFrame);
+      if (_frameTimes.length > 600) _frameTimes.shift(); // cap at ~10s of frames at 60fps
       _lastFrame = now;
       _frameRafId = requestAnimationFrame(_trackFrames);
     }
