@@ -14549,6 +14549,7 @@ function startApp() {
   function MemoryWarningModal(props) {
     var onDismiss = props.onDismiss, s = props.s;
     var mem = performance.memory || {};
+    var hasMem = !!performance.memory;
     var usedMB = mem.usedJSHeapSize ? Math.round(mem.usedJSHeapSize / 1048576) : 0;
     var totalMB = mem.totalJSHeapSize ? Math.round(mem.totalJSHeapSize / 1048576) : 0;
     var limitMB = mem.jsHeapSizeLimit ? Math.round(mem.jsHeapSizeLimit / 1048576) : 0;
@@ -14562,9 +14563,13 @@ function startApp() {
       lines.push('Date: ' + new Date().toISOString());
       lines.push('');
       lines.push('--- Memory ---');
-      lines.push('Used JS Heap: ' + (usedMB / 1024).toFixed(2) + ' GB (' + usedMB + ' MB)');
-      lines.push('Total JS Heap: ' + (totalMB / 1024).toFixed(2) + ' GB (' + totalMB + ' MB)');
-      if (limitMB) lines.push('Heap Limit: ' + (limitMB / 1024).toFixed(2) + ' GB');
+      if (hasMem) {
+        lines.push('Used JS Heap: ' + (usedMB / 1024).toFixed(2) + ' GB (' + usedMB + ' MB)');
+        lines.push('Total JS Heap: ' + (totalMB / 1024).toFixed(2) + ' GB (' + totalMB + ' MB)');
+        if (limitMB) lines.push('Heap Limit: ' + (limitMB / 1024).toFixed(2) + ' GB');
+      } else {
+        lines.push('Memory stats not available (browser does not support performance.memory)');
+      }
       lines.push('');
       lines.push('--- Models (' + (s.models||[]).length + ') ---');
       (s.models||[]).forEach(function(m, i) {
@@ -14600,10 +14605,19 @@ function startApp() {
     return html`<div onClick=${function(e){if(e.target===e.currentTarget)onDismiss()}} style=${{position:'fixed',inset:0,background:'rgba(0,0,0,.65)',zIndex:10000,display:'flex',alignItems:'center',justifyContent:'center',padding:'2rem',backdropFilter:'blur(4px)'}}>
       <div style=${{background:'var(--bg-primary)',border:'1px solid #f87171',borderRadius:12,padding:'1.5rem',maxWidth:500,width:'100%',boxShadow:'0 16px 48px rgba(0,0,0,.5)'}}>
         <div style=${{display:'flex',alignItems:'flex-start',gap:'.75rem',marginBottom:'1rem'}}>
-          <span style=${{fontSize:'1.6rem',lineHeight:1}}>⚠️</span>
+          <span style=${{fontSize:'1.6rem',lineHeight:1}}>${hasMem && usedMB > 0 ? '⚠️' : '📊'}</span>
           <div>
-            <div style=${{fontSize:'1.1rem',fontWeight:700,color:'#f87171',marginBottom:'.2rem'}}>High Memory Usage Detected</div>
-            <div style=${{fontSize:'0.88rem',color:'var(--text-secondary)'}}>ClashControl is using <b style=${{color:'#fbbf24'}}>${(usedMB/1024).toFixed(1)} GB</b> of memory. This may cause your browser to slow down or crash.</div>
+            <div style=${{fontSize:'1.1rem',fontWeight:700,color:hasMem && usedMB > 0 ? '#f87171' : 'var(--text-primary)',marginBottom:'.2rem'}}>
+              ${hasMem && usedMB > 0 ? 'High Memory Usage Detected' : 'Send Memory Report'}
+            </div>
+            <div style=${{fontSize:'0.88rem',color:'var(--text-secondary)'}}>
+              ${hasMem && usedMB > 0
+                ? html`ClashControl is using <b style=${{color:'#fbbf24'}}>${(usedMB/1024).toFixed(1)} GB</b> of memory. This may cause your browser to slow down or crash.`
+                : hasMem
+                  ? html`Currently using <b>${(usedMB/1024).toFixed(1)} GB</b> of memory.`
+                  : html`Memory stats are not available in this browser, but model and clash data can still be included.`
+              }
+            </div>
           </div>
         </div>
         <div style=${{background:'rgba(248,113,113,.07)',border:'1px solid rgba(248,113,113,.2)',borderRadius:8,padding:'.75rem',marginBottom:'1rem',fontSize:'0.83rem',color:'var(--text-secondary)',lineHeight:1.6}}>
@@ -14613,7 +14627,7 @@ function startApp() {
         <div style=${{display:'flex',flexDirection:'column',gap:'.4rem',marginBottom:'1rem',fontSize:'0.83rem',color:'var(--text-secondary)'}}>
           <label style=${{display:'flex',alignItems:'center',gap:'.5rem',cursor:'pointer'}}>
             <input type="checkbox" checked disabled style=${{accentColor:'var(--accent)'}} />
-            <span>Memory usage (<b>${(usedMB/1024).toFixed(1)} GB</b> used of ${(limitMB/1024).toFixed(1)} GB limit)</span>
+            <span>${hasMem ? html`Memory usage (<b>${(usedMB/1024).toFixed(1)} GB</b> used${limitMB ? ' of ' + (limitMB/1024).toFixed(1) + ' GB limit' : ''})` : 'Memory usage (not available in this browser)'}</span>
           </label>
           <label style=${{display:'flex',alignItems:'center',gap:'.5rem',cursor:'pointer'}}>
             <input type="checkbox" checked disabled style=${{accentColor:'var(--accent)'}} />
@@ -14756,6 +14770,10 @@ function startApp() {
               style=${{...S_BTN,flex:1,padding:'.4rem .6rem',borderRadius:6,fontSize:'0.8rem',fontWeight:600,
                 background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',
                 textDecoration:'none',textAlign:'center',cursor:'pointer'}}>Request a Feature</a>
+            <button onClick=${function(){if(window._ccShowMemReport)window._ccShowMemReport();}}
+              style=${{...S_BTN,flex:1,padding:'.4rem .6rem',borderRadius:6,fontSize:'0.8rem',fontWeight:600,
+                background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)',
+                cursor:'pointer',textAlign:'center',justifyContent:'center'}}>Send Memory Report</button>
           </div>
           <div style=${{fontSize:'0.72rem',color:'var(--text-faint)',marginTop:'.6rem',textAlign:'center'}}>
             ClashControl v${CC_VERSION.v} \u2014 Free & open source
@@ -15377,6 +15395,7 @@ function startApp() {
     });
     // ── Memory usage monitor (warn at 5 GB) ──
     var memWarnSt = useState(false), showMemWarn=memWarnSt[0], setShowMemWarn=memWarnSt[1];
+    window._ccShowMemReport = function(){ setShowMemWarn(true); };
     var _memWarnFiredRef = useRef(false);
     useEffect(function(){
       if (!performance.memory) return; // only Chrome/Edge support this API
