@@ -6879,7 +6879,7 @@ function startApp() {
           var mat = new THREE.MeshPhongMaterial({
             color: col, opacity: opacity,
             transparent: opacity < 0.99,
-            side: THREE.DoubleSide
+            side: opacity < 0.99 ? THREE.DoubleSide : THREE.FrontSide
           });
           if (Array.isArray(child.material)) { child.material.forEach(function(m){if(m&&m.dispose)m.dispose();}); }
           else if (rawMat && rawMat.dispose) rawMat.dispose();
@@ -6887,8 +6887,7 @@ function startApp() {
           // Bake world transform so mesh works independently of glTF scene hierarchy
           child.updateWorldMatrix(true, false);
           var m = new THREE.Mesh(child.geometry.clone(), mat);
-          // Compute normals if the GLB didn't include them (needed for Phong shading)
-          if (!m.geometry.attributes.normal) m.geometry.computeVertexNormals();
+          m.geometry.computeVertexNormals(); // recompute from face winding — GLB normals may be flipped
           m.applyMatrix4(child.matrixWorld);
           if (gid) {
             m.userData.globalId = gid;
