@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.4.0 (2026-03-29)
+- Revert Ifc2Ifc references back to thomhoffer-arch
+
 ## v3.3.54 (2026-03-29)
 - Cap revitBridge log and tour frame timer arrays
 
