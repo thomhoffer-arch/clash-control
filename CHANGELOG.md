@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.47 (2026-03-29)
+- Revert GLB materials to DoubleSide — FrontSide caused black faces
+
 ## v3.3.46 (2026-03-29)
 - Switch GLB materials to FrontSide; keep DoubleSide only for transparent
 
