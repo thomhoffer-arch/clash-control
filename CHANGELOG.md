@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.46 (2026-03-29)
+- Switch GLB materials to FrontSide; keep DoubleSide only for transparent
+
 ## v3.3.45 (2026-03-29)
 - Fix 2D button tooltip wrapping — remove spaces around slashes
 
