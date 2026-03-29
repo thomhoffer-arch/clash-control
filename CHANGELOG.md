@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.52 (2026-03-29)
+- Add GLB sidecar UX: standalone warnings, unmatched element feedback, and metadata attach
+
 ## v3.3.51 (2026-03-29)
 - Remove Export Model section from settings panel
 
