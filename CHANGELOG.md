@@ -1,5 +1,8 @@
 # Changelog
 
+## v3.3.48 (2026-03-29)
+- Strip IfcVirtualElement, IfcAnnotation, IfcGrid geometry from viewer
+
 ## v3.3.47 (2026-03-29)
 - Revert GLB materials to DoubleSide — FrontSide caused black faces
 
