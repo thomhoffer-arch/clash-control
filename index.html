@@ -450,6 +450,16 @@ function startApp() {
       log:[]             // [{ts,type:'push'|'pull'|'info'|'error',text}]
     },
     showRevitBridge:false,
+    // Revit Direct Connector (WebSocket live link)
+    revitDirect:{
+      port:19780,
+      connected:false,
+      documentName:'',
+      loading:false,
+      progress:0,        // 0-1 during model load
+      elementCount:0,
+      lastPush:null
+    },
     lastDeltaSummary: null, // {new, persisting, autoResolved, ts} — set after each merge run
     // IDS Validation
     idsValidation: {
@@ -492,6 +502,7 @@ function startApp() {
     SELECT_NONE:'SELECT_NONE', SELECT_MODE:'SELECT_MODE',
     REVIT_BRIDGE:'REVIT_BRIDGE', UPD_BRIDGE:'UPD_BRIDGE',
     BRIDGE_LOG:'BRIDGE_LOG', CLEAR_BRIDGE_LOG:'CLEAR_BRIDGE_LOG',
+    UPD_REVIT_DIRECT:'UPD_REVIT_DIRECT',
     IDS_SET_RESULTS:'IDS_SET_RESULTS', IDS_SET_SPECS:'IDS_SET_SPECS', IDS_RUNNING:'IDS_RUNNING'
   };
   // Collect all element IDs from a clash/issue item
@@ -720,6 +731,7 @@ function startApp() {
       case A.BRIDGE_LOG:      return Object.assign({},s,{revitBridge:Object.assign({},s.revitBridge,{log:s.revitBridge.log.concat([{ts:Date.now(),type:a.logType||'info',text:a.text}]).slice(-100)})});
       case A.CLEAR_BRIDGE_LOG:return Object.assign({},s,{revitBridge:Object.assign({},s.revitBridge,{log:[]})});
       case A.REVIT_BRIDGE:    return Object.assign({},s,{showRevitBridge:a.v});
+      case A.UPD_REVIT_DIRECT: return Object.assign({},s,{revitDirect:Object.assign({},s.revitDirect,a.u)});
       case A.IDS_SET_RESULTS: return Object.assign({},s,{idsValidation:Object.assign({},s.idsValidation,{results:a.results,summary:a.summary,running:false})});
       case A.IDS_SET_SPECS:   return Object.assign({},s,{idsValidation:Object.assign({},s.idsValidation,{specs:a.specs})});
       case A.IDS_RUNNING:     return Object.assign({},s,{idsValidation:Object.assign({},s.idsValidation,{running:a.v})});
@@ -11676,6 +11688,266 @@ function startApp() {
     } catch(e) { return null; }
   }
 
+  // ── Revit Direct Connector (WebSocket live link) ──────────────
+  // Connects to the ClashControl Connector Revit plugin via WebSocket on localhost.
+  // Receives geometry + properties, converts to Three.js meshes, dispatches ADD_MODEL.
+  // Also pushes clash/issue data back to Revit for highlighting.
+
+  var _revitWs = null;        // WebSocket instance
+  var _revitBuf = null;       // accumulator during chunked model load
+  var _revitReconnect = null; // reconnect timer
+
+  function _revitDirectConnect(port, d) {
+    if (_revitWs && _revitWs.readyState <= 1) { _revitWs.close(); }
+    clearTimeout(_revitReconnect);
+    var url = 'ws://localhost:' + (port || 19780);
+    d({t:A.BRIDGE_LOG, logType:'info', text:'Connecting to Revit at ' + url + '...'});
+    d({t:A.UPD_REVIT_DIRECT, u:{connected:false, loading:false, progress:0}});
+    try { _revitWs = new WebSocket(url); } catch(e) {
+      d({t:A.BRIDGE_LOG, logType:'error', text:'WebSocket error: ' + e.message});
+      return;
+    }
+    _revitWs.binaryType = 'arraybuffer';
+
+    _revitWs.onopen = function() {
+      d({t:A.UPD_REVIT_DIRECT, u:{connected:true}});
+      d({t:A.BRIDGE_LOG, logType:'info', text:'Connected to Revit plugin.'});
+      _revitWs.send(JSON.stringify({type:'ping'}));
+    };
+
+    _revitWs.onclose = function() {
+      d({t:A.UPD_REVIT_DIRECT, u:{connected:false, loading:false}});
+      d({t:A.BRIDGE_LOG, logType:'info', text:'Revit connection closed.'});
+      _revitWs = null;
+    };
+
+    _revitWs.onerror = function() {
+      d({t:A.UPD_REVIT_DIRECT, u:{connected:false, loading:false}});
+      d({t:A.BRIDGE_LOG, logType:'error', text:'Could not connect to Revit. Is the plugin running?'});
+      _revitWs = null;
+    };
+
+    _revitWs.onmessage = function(ev) {
+      var msg;
+      try { msg = JSON.parse(ev.data); } catch(e) { return; }
+      _handleRevitMessage(msg, d);
+    };
+  }
+
+  function _revitDirectDisconnect(d) {
+    clearTimeout(_revitReconnect);
+    if (_revitWs) { _revitWs.close(); _revitWs = null; }
+    _revitBuf = null;
+    d({t:A.UPD_REVIT_DIRECT, u:{connected:false, loading:false, progress:0, documentName:''}});
+  }
+
+  function _revitDirectExport(categories) {
+    if (!_revitWs || _revitWs.readyState !== 1) return;
+    _revitWs.send(JSON.stringify({type:'export', categories: categories || ['all']}));
+  }
+
+  // Push clash/issue data to Revit for highlighting
+  function _revitDirectPushClashes(s, d) {
+    if (!_revitWs || _revitWs.readyState !== 1) {
+      d({t:A.BRIDGE_LOG, logType:'error', text:'Not connected to Revit.'});
+      return;
+    }
+    var clashData = s.clashes.filter(function(c){ return c.status === 'open' || c.status === 'confirmed' || c.status === 'in_progress'; }).map(function(c) {
+      var elA = null, elB = null;
+      s.models.forEach(function(m) {
+        m.elements.forEach(function(el) {
+          if (el.expressId === c.elemA) elA = el;
+          if (el.expressId === c.elemB) elB = el;
+        });
+      });
+      return {
+        id: c.id,
+        status: c.status,
+        priority: c.priority || 'normal',
+        type: c.type || 'hard',
+        point: c.point ? {x:c.point.x, y:c.point.y, z:c.point.z} : null,
+        elementA: elA ? {globalId:elA.props.globalId, name:elA.props.name, ifcType:elA.props.ifcType, revitId:elA.props.revitId||null} : null,
+        elementB: elB ? {globalId:elB.props.globalId, name:elB.props.name, ifcType:elB.props.ifcType, revitId:elB.props.revitId||null} : null
+      };
+    });
+    var issueData = s.issues.filter(function(i){ return i.status === 'open' || i.status === 'in_progress'; }).map(function(i) {
+      return {
+        id: i.id,
+        title: i.title,
+        status: i.status,
+        priority: i.priority || 'normal',
+        description: i.description || '',
+        elementIds: (i.elementIds || []).map(function(eid) {
+          var found = null;
+          s.models.forEach(function(m) { m.elements.forEach(function(el) { if (el.expressId === eid) found = el; }); });
+          return found ? {globalId:found.props.globalId, name:found.props.name, revitId:found.props.revitId||null} : null;
+        }).filter(Boolean)
+      };
+    });
+    _revitWs.send(JSON.stringify({
+      type:'push-clashes',
+      clashes: clashData,
+      issues: issueData
+    }));
+    d({t:A.UPD_REVIT_DIRECT, u:{lastPush:Date.now()}});
+    d({t:A.BRIDGE_LOG, logType:'push', text:'Pushed ' + clashData.length + ' clashes + ' + issueData.length + ' issues to Revit.'});
+  }
+
+  // Decode base64 to typed array
+  function _b64ToFloat32(b64) {
+    var bin = atob(b64), n = bin.length, buf = new ArrayBuffer(n), u8 = new Uint8Array(buf);
+    for (var i = 0; i < n; i++) u8[i] = bin.charCodeAt(i);
+    return new Float32Array(buf);
+  }
+  function _b64ToUint32(b64) {
+    var bin = atob(b64), n = bin.length, buf = new ArrayBuffer(n), u8 = new Uint8Array(buf);
+    for (var i = 0; i < n; i++) u8[i] = bin.charCodeAt(i);
+    return new Uint32Array(buf);
+  }
+
+  // Convert a Revit Direct element into a Three.js mesh + ClashControl element
+  function _revitElementToMesh(el, nextId) {
+    var meshes = [], box = new THREE.Box3();
+    if (el.geometry && el.geometry.positions) {
+      var positions = _b64ToFloat32(el.geometry.positions);
+      var indices = _b64ToUint32(el.geometry.indices);
+      var geom = new THREE.BufferGeometry();
+      geom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      geom.setIndex(new THREE.BufferAttribute(indices, 1));
+      if (el.geometry.normals) {
+        geom.setAttribute('normal', new THREE.BufferAttribute(_b64ToFloat32(el.geometry.normals), 3));
+      } else {
+        geom.computeVertexNormals();
+      }
+      geom.computeBoundingBox();
+      var c = el.geometry.color || [0.65, 0.65, 0.65, 1.0];
+      var mat = new THREE.MeshPhongMaterial({
+        color: new THREE.Color(c[0], c[1], c[2]),
+        opacity: c[3] != null ? c[3] : 1,
+        transparent: c[3] != null && c[3] < 0.99,
+        side: THREE.DoubleSide
+      });
+      var mesh = new THREE.Mesh(geom, mat);
+      mesh.name = el.globalId || '';
+      mesh._expressId = el.expressId || nextId;
+      meshes.push(mesh);
+      box.copy(geom.boundingBox);
+    }
+    var mats = el.materials;
+    if (Array.isArray(mats)) mats = mats.join(', ');
+    return {
+      expressId: el.expressId || nextId,
+      meshes: meshes,
+      box: box,
+      props: {
+        globalId: el.globalId || '',
+        ifcType: el.category || 'IfcBuildingElementProxy',
+        name: el.name || '',
+        description: el.description || '',
+        objectType: el.type || '',
+        storey: el.level || '',
+        material: mats || '',
+        quantities: el.quantities || {},
+        psets: el.parameters || {},
+        revitId: el.revitId || null,
+        hostId: el.hostId || null,
+        hostRelationships: el.hostRelationships || null
+      }
+    };
+  }
+
+  function _handleRevitMessage(msg, d) {
+    switch (msg.type) {
+      case 'pong':
+      case 'status':
+        if (msg.documentName) d({t:A.UPD_REVIT_DIRECT, u:{documentName:msg.documentName}});
+        if (msg.connected != null) d({t:A.UPD_REVIT_DIRECT, u:{connected:msg.connected}});
+        break;
+
+      case 'model-start':
+        _revitBuf = {name: msg.name || 'Revit Model', elements:[], meshes:[], count:msg.elementCount||0, received:0};
+        d({t:A.UPD_REVIT_DIRECT, u:{loading:true, progress:0, elementCount:msg.elementCount||0}});
+        d({t:A.BRIDGE_LOG, logType:'pull', text:'Receiving model "' + msg.name + '" (' + (msg.elementCount||'?') + ' elements)...'});
+        break;
+
+      case 'element-batch':
+        if (!_revitBuf) break;
+        var nextId = _revitBuf.elements.length + 1;
+        (msg.elements || []).forEach(function(el) {
+          var converted = _revitElementToMesh(el, nextId++);
+          _revitBuf.elements.push(converted);
+          converted.meshes.forEach(function(m) { _revitBuf.meshes.push(m); });
+        });
+        _revitBuf.received += (msg.elements || []).length;
+        var prog = _revitBuf.count > 0 ? _revitBuf.received / _revitBuf.count : 0;
+        d({t:A.UPD_REVIT_DIRECT, u:{progress: Math.min(prog, 0.99)}});
+        break;
+
+      case 'model-end':
+        if (!_revitBuf) break;
+        var storeys = msg.storeys || [];
+        var storeyData = msg.storeyData || [];
+        var relatedPairs = msg.relatedPairs || {};
+        // Derive storeys from elements if not provided
+        if (storeys.length === 0) {
+          var seen = {};
+          _revitBuf.elements.forEach(function(el) {
+            if (el.props.storey && !seen[el.props.storey]) { storeys.push(el.props.storey); seen[el.props.storey] = true; }
+          });
+        }
+        // Derive relatedPairs from hostId/hostRelationships if not provided
+        if (Object.keys(relatedPairs).length === 0) {
+          _revitBuf.elements.forEach(function(el) {
+            if (el.props.hostId) {
+              relatedPairs[el.props.hostId + ':' + el.props.globalId] = true;
+            }
+            if (el.props.hostRelationships) {
+              el.props.hostRelationships.forEach(function(childGid) {
+                relatedPairs[el.props.globalId + ':' + childGid] = true;
+              });
+            }
+          });
+        }
+        var disc = detectDiscipline(_revitBuf.elements);
+        var dObj = DISC.find(function(x){return x.id===disc;});
+        var col = dObj ? dObj.c : DISC[0].c;
+        var modelId = uid();
+        window._ccDispatch({t:A.ADD_MODEL, v:{
+          id:modelId, name:_revitBuf.name, discipline:disc, color:col, visible:true, _version:1,
+          meshes:_revitBuf.meshes, elements:_revitBuf.elements, storeys:storeys,
+          storeyData:storeyData, spatialHierarchy:{}, relatedPairs:relatedPairs,
+          stats:{elementCount:_revitBuf.elements.length, source:'revit-direct'}
+        }});
+        d({t:A.UPD_REVIT_DIRECT, u:{loading:false, progress:1}});
+        d({t:A.BRIDGE_LOG, logType:'pull', text:'Model "' + _revitBuf.name + '" loaded: ' + _revitBuf.elements.length + ' elements.'});
+        _revitBuf = null;
+        break;
+
+      case 'element-update':
+        // Live update: modified or deleted elements
+        if (msg.action === 'deleted' && msg.globalIds) {
+          d({t:A.BRIDGE_LOG, logType:'pull', text:msg.globalIds.length + ' elements deleted in Revit.'});
+          // TODO: remove elements from model by globalId
+        } else if (msg.action === 'modified' && msg.elements) {
+          d({t:A.BRIDGE_LOG, logType:'pull', text:msg.elements.length + ' elements updated in Revit.'});
+          // TODO: replace meshes for modified elements
+        }
+        break;
+
+      case 'error':
+        d({t:A.BRIDGE_LOG, logType:'error', text:'Revit: ' + (msg.message || 'Unknown error')});
+        break;
+    }
+  }
+
+  // Save/load direct connector port
+  function _saveDirectPort(port) {
+    try { localStorage.setItem('cc_revit_direct_port', String(port)); } catch(e) {}
+  }
+  function _loadDirectPort() {
+    try { return parseInt(localStorage.getItem('cc_revit_direct_port'), 10) || 19780; } catch(e) { return 19780; }
+  }
+
   // Build tool definitions that expose ClashControl data to the AI
   function _buildCCTools() {
     return [
@@ -12078,12 +12350,68 @@ function startApp() {
         <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'1rem 1.2rem',borderBottom:'1px solid var(--border)'}}>
           <div style=${{display:'flex',alignItems:'center',gap:'.5rem'}}>
             <span style=${{fontWeight:600,fontSize:'1.03rem'}}>Revit Bridge</span>
+            ${s.revitDirect.connected && html`<span style=${{fontSize:'0.63rem',padding:'2px 6px',borderRadius:99,background:'#22c55e22',color:'#22c55e',fontWeight:600}}>Live Link</span>`}
             <span style=${{fontSize:'0.63rem',padding:'2px 6px',borderRadius:99,background:statusColor+'22',color:statusColor,fontWeight:600}}>${statusText}</span>
           </div>
           <button onClick=${function(){d({t:A.REVIT_BRIDGE,v:false})}} style=${{...S_BTN,background:'none',color:'var(--text-muted)',fontSize:'1.26rem',padding:0}} aria-label="Close">✕</button>
         </div>
 
         <div style=${{padding:'.2rem 1.2rem 1rem 1.2rem'}}>
+          <!-- Revit Direct Connection (WebSocket) -->
+          <div style=${SEC}>Direct Connection (Live Link)</div>
+          ${function(){
+            var rd = s.revitDirect;
+            var directStatus = rd.connected ? '#22c55e' : '#64748b';
+            var directText = rd.connected ? ('Connected' + (rd.documentName ? ' — ' + rd.documentName : '')) : 'Disconnected';
+            var savedPort = _loadDirectPort();
+            var openClashes = s.clashes.filter(function(c){return c.status==='open'||c.status==='confirmed'||c.status==='in_progress';}).length;
+            var openIssues = s.issues.filter(function(i){return i.status==='open'||i.status==='in_progress';}).length;
+            return html`<div>
+              <div style=${ROW}>
+                <div style=${{flex:1}}>
+                  <label style=${LBL}>Port</label>
+                  <input type="number" id="cc-direct-port" defaultValue=${savedPort}
+                    onInput=${function(e){_saveDirectPort(+e.target.value);}}
+                    style=${Object.assign({},S_INPUT,{width:'100%'})} />
+                </div>
+                <div style=${{flex:2,display:'flex',alignItems:'flex-end',gap:'.3rem'}}>
+                  ${!rd.connected ? html`<button onClick=${function(){
+                    var p = parseInt(document.getElementById('cc-direct-port').value,10) || 19780;
+                    _revitDirectConnect(p, d);
+                  }} style=${{...S_BTN,background:'#2563eb',color:'#fff',flex:1}}>Connect</button>`
+                  : html`<button onClick=${function(){_revitDirectDisconnect(d);}}
+                    style=${{...S_BTN,background:'var(--bg-tertiary)',color:'var(--text-secondary)',border:'1px solid var(--border)',flex:1}}>Disconnect</button>`}
+                </div>
+              </div>
+              <div style=${{display:'flex',alignItems:'center',gap:'.35rem',marginBottom:'.4rem'}}>
+                <span style=${{width:7,height:7,borderRadius:'50%',background:directStatus,display:'inline-block'}}></span>
+                <span style=${{fontSize:'0.75rem',color:'var(--text-secondary)'}}>${directText}</span>
+              </div>
+              ${rd.connected && html`<div style=${{display:'flex',gap:'.3rem',marginBottom:'.5rem'}}>
+                <button onClick=${function(){_revitDirectExport(['all']);}}
+                  disabled=${rd.loading}
+                  style=${{...S_BTN,flex:1,background:'#065f46',color:'#6ee7b7',opacity:rd.loading?0.5:1,display:'flex',alignItems:'center',justifyContent:'center',gap:'.3rem'}}>
+                  ${rd.loading ? html`<span class="spin" style=${{display:'inline-block',width:10,height:10,borderRadius:'50%',border:'1.5px solid rgba(255,255,255,.3)',borderTopColor:'#fff'}}></span>` : null}
+                  ${rd.loading ? 'Loading ' + Math.round((rd.progress||0)*100) + '%' : 'Pull Model'}
+                </button>
+                <button onClick=${function(){_revitDirectPushClashes(s,d);}}
+                  disabled=${!openClashes && !openIssues}
+                  style=${{...S_BTN,flex:1,background:'#2563eb',color:'#fff',opacity:(!openClashes&&!openIssues)?0.5:1}}>
+                  Push Clashes (${openClashes}/${openIssues})
+                </button>
+              </div>`}
+              ${rd.connected && rd.lastPush && html`<div style=${{fontSize:'0.63rem',color:'var(--text-muted)',marginBottom:'.3rem'}}>
+                Last push: ${new Date(rd.lastPush).toLocaleTimeString()}
+              </div>`}
+              <div style=${{fontSize:'0.69rem',color:'var(--text-muted)',marginBottom:'.6rem',lineHeight:1.5}}>
+                Requires the ClashControl Connector plugin in Revit. No AI or API key needed — data stays on your machine.
+                ${!rd.connected ? html` <a href="https://github.com/clashcontrol-io/clash-control/blob/main/REVIT_ADDIN_GUIDE.md" target="_blank" rel="noopener" style=${{color:'#60a5fa',textDecoration:'underline'}}>Setup guide</a>` : null}
+              </div>
+            </div>`;
+          }()}
+
+          <div style=${{borderTop:'1px solid var(--border)',margin:'.2rem 0 .6rem 0'}}></div>
+
           <!-- AI Provider Config -->
           <div style=${SEC}>AI Provider (BYOK)</div>
           <div style=${ROW}>
@@ -12169,12 +12497,10 @@ function startApp() {
 
           <!-- Quick Help -->
           <div style=${{marginTop:'.6rem',padding:'.5rem',background:logBg,borderRadius:8,border:'1px solid var(--border)',fontSize:'0.69rem',color:'var(--text-secondary)',lineHeight:1.6}}>
-            <strong style=${{color:'var(--text-primary)'}}>How it works:</strong><br/>
-            1. Enter your AI API key (Anthropic, OpenAI, or Google) — stored locally only<br/>
-            2. Start your Revit MCP server (see <a href="https://github.com/clashcontrol-io/clash-control/blob/main/REVIT_BRIDGE_GUIDE.md" target="_blank" rel="noopener" style=${{color:'#60a5fa',textDecoration:'underline'}}>REVIT_BRIDGE_GUIDE.md</a>)<br/>
-            3. Click "Push to Revit" to send clashes/issues as markers in Revit<br/>
-            4. After resolving in Revit, click "Pull from Revit" to sync status back<br/>
-            <a href="https://github.com/mcp-servers-for-revit/mcp-server-for-revit-python" target="_blank" rel="noopener" style=${{color:'#60a5fa',textDecoration:'underline'}}>Recommended: mcp-server-for-revit-python</a>
+            <strong style=${{color:'var(--text-primary)'}}>Two ways to connect:</strong><br/>
+            <strong>Direct (Live Link)</strong> — Install the ClashControl Connector plugin in Revit. Pull geometry + properties live over WebSocket. Push clashes back. No AI needed.<br/>
+            <strong>AI Bridge</strong> — Use an AI API key + MCP server to push/pull clash data. See <a href="https://github.com/clashcontrol-io/clash-control/blob/main/REVIT_BRIDGE_GUIDE.md" target="_blank" rel="noopener" style=${{color:'#60a5fa',textDecoration:'underline'}}>REVIT_BRIDGE_GUIDE.md</a><br/>
+            Both methods keep all data on your machine. You can use both simultaneously.
           </div>
         </div>
       </div>
@@ -15569,6 +15895,19 @@ function startApp() {
       document.documentElement.setAttribute('data-theme', t);
       try { localStorage.setItem('cc_theme', t); } catch(e) {}
     }, [s.prefs.theme]);
+    // ── Sync clash selection to Revit Direct Connector ──
+    useEffect(function(){
+      if (!_revitWs || _revitWs.readyState !== 1 || !s.revitDirect.connected) return;
+      if (!s.activeId) return;
+      var item = s.clashes.find(function(c){return c.id===s.activeId;}) || s.issues.find(function(i){return i.id===s.activeId;});
+      if (!item) return;
+      var gids = [];
+      var eids = [item.elemA, item.elemB, item.elementId].filter(Boolean);
+      s.models.forEach(function(m){ m.elements.forEach(function(el){
+        if (eids.indexOf(el.expressId) >= 0 && el.props.globalId) gids.push(el.props.globalId);
+      }); });
+      if (gids.length) _revitWs.send(JSON.stringify({type:'highlight', globalIds:gids}));
+    }, [s.activeId, s.revitDirect.connected]);
     // ── Clean up 3D state when switching tabs ──
     useEffect(function(){
       if(_unghostAll) _unghostAll();

@@ -107,9 +107,38 @@
 
 ---
 
+### 7. Speckle Integration (Load from Speckle)
+
+**What**: Add a "Load from Speckle" option that connects to a user's Speckle server (cloud or self-hosted) and pulls model geometry + properties directly into ClashControl. This positions ClashControl as the clash detection engine for the Speckle ecosystem, which currently lacks production-ready clash detection.
+
+**Why**:
+- Speckle connects to Revit, Rhino, ArchiCAD, SketchUp, and 20+ other tools — one integration gives ClashControl access to all of them
+- Eliminates manual IFC export step entirely
+- Speckle has no production clash detection — their demo repo is explicitly "not for production"
+- `@speckle/objectloader` (JS, available on esm.sh) streams objects directly to the browser
+- Speckle's viewer is Three.js-based (same as ClashControl) — geometry conversion patterns are well-documented
+- Apache 2.0 license — fully compatible with ClashControl's SSPL
+- Authentication via Personal Access Token (simple) or OAuth2 with PKCE (full)
+- GraphQL API for browsing Projects → Models → Versions
+
+**Implementation approach**:
+- Load `@speckle/objectloader` from CDN (lazy, like web-ifc)
+- Speckle mesh conversion: flat vertex array + face prefix format → Three.js BufferGeometry (Z-up → Y-up coordinate swap)
+- Property mapping: Speckle schema → ClashControl element props (speckle_type → ifcType, parameters → psets, level → storey)
+- New SpeckleImportPanel component (~150 lines): server URL, token input, project/model/version browser, load button
+- ~420 lines total addition to index.html
+- No downstream changes needed — both bridges produce the standard `{meshes, elements, storeys, ...}` shape
+
+**Key references**:
+- https://github.com/specklesystems/speckle-server (Apache 2.0, 700+ stars)
+- https://docs.speckle.systems/developers/sdks/js/overview
+- https://github.com/specklesystems/speckle_automate-basic_clash_demo (their unfinished clash demo)
+
+---
+
 ## CONSIDER — High Value but Requires Architecture Changes
 
-### 7. ThatOpen Fragments Migration
+### 8. ThatOpen Fragments Migration
 
 **What**: Replace the current IFC geometry caching with ThatOpen's Fragments binary format. Convert IFC to Fragments once, store, then load 10x faster on subsequent opens. GPU instancing for identical geometries.
 
@@ -135,7 +164,7 @@
 
 ---
 
-### 8. Point Cloud Overlay (Scan-to-BIM Clashes)
+### 9. Point Cloud Overlay (Scan-to-BIM Clashes)
 
 **What**: Load LAS/LAZ point cloud files alongside IFC models. Overlay laser scans on BIM models to detect as-built vs. as-designed discrepancies.
 
@@ -160,7 +189,7 @@
 
 ---
 
-### 9. Real-Time Multi-User Collaboration
+### 10. Real-Time Multi-User Collaboration
 
 **What**: Multiple users view the same model simultaneously. Shared cursors, shared viewpoints, real-time issue creation/updates via WebRTC or WebSocket.
 
@@ -227,12 +256,13 @@
 **Phase 2 — Medium Effort**
 5. Rule-based model checking
 6. Enhanced markup persistence & export
-7. Point cloud visualization (overlay only)
+7. Speckle integration (Load from Speckle)
+8. Point cloud visualization (overlay only)
 
 **Phase 3 — Architecture Evolution**
-8. ThatOpen Fragments migration (if single-file constraint is relaxed)
-9. Shared viewpoint links
-10. Three.js version upgrade
+9. ThatOpen Fragments migration (if single-file constraint is relaxed)
+10. Shared viewpoint links
+11. Three.js version upgrade
 
 ---
 
@@ -246,4 +276,5 @@
 | [xeokit](https://github.com/xeokit) | WebGL/WebGPU BIM viewer SDK | Performance techniques, WebGPU approaches |
 | [opensourceBIM](https://github.com/opensourceBIM) | BIMserver, BIMsurfer, validators | Server-side BIM ecosystem |
 | [potree](https://github.com/potree) | Point cloud rendering | Point cloud overlay technology |
+| [specklesystems](https://github.com/specklesystems) | Open-source data platform for AEC | Speckle integration, multi-tool connectivity, Three.js viewer patterns |
 | [bldrs-ai](https://github.com/bldrs-ai) | Browser-based BIM collaboration | Real-time collaboration patterns |

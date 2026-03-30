@@ -25,11 +25,11 @@ ClashControl uses the following open source libraries and components:
 
 ## License compatibility
 
-- **ClashControl** is released under the **MIT** license.
+- **ClashControl** is released under the **SSPL** (Server Side Public License) v1.
 - **JSZip** is dual-licensed MIT/GPLv3. This project uses it under the **MIT** license.
 - **web-ifc** is licensed under **MPL-2.0** (file-level copyleft). ClashControl loads it unmodified from a CDN, which is compliant with MPL-2.0. If web-ifc source files are ever modified, those modifications must be released under MPL-2.0.
 - **htm** is Apache-2.0. ClashControl includes a custom minimal reimplementation inspired by htm, not a direct copy.
-- All other dependencies (React, ReactDOM, Three.js) are MIT-licensed — fully compatible.
+- All other dependencies (React, ReactDOM, Three.js) are MIT-licensed — compatible with SSPL.
 
 ## Related Open Source Tools
 

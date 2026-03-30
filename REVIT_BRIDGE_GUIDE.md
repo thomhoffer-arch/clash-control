@@ -205,6 +205,7 @@ The Revit Bridge makes this process automated and bidirectional — but BCF is t
 ## Future Roadmap
 
 - **Phase 2**: Direct .rvt file reading in the browser (when tooling matures)
+- **Speckle Integration**: Load models directly from Speckle servers (cloud or self-hosted) into ClashControl, bypassing IFC export entirely. Speckle connects to Revit, Rhino, ArchiCAD, SketchUp, and 20+ other tools — making ClashControl the clash detection engine for the Speckle ecosystem. See `FEATURE_RESEARCH.md` for full details.
 - **Auto-sync**: Scheduled polling for status changes
 - **Multi-tool MCP**: Connect to Navisworks, Tekla, ArchiCAD via their MCP servers
 - **AI clash resolution suggestions**: AI recommends how to fix clashes based on model constraints
