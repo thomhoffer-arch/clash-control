@@ -284,3 +284,436 @@ Send this immediately after WebSocket connection is established.
 ```json
 {"type":"error","message":"No document open in Revit"}
 ```
+
+---
+
+## Geometry Extraction
+
+### Overview
+For each Revit element, extract triangulated mesh data (vertices + indices + normals) and encode as base64 binary arrays.
+
+### Coordinate Conversion — CRITICAL
+Revit uses **feet, Z-up**. ClashControl uses **meters, Y-up**.
+
+```csharp
+// Revit XYZ → ClashControl (meters, Y-up)
+float x_out = (float)(point.X * 0.3048);   // feet → meters
+float y_out = (float)(point.Z * 0.3048);   // Revit Z → ClashControl Y (up)
+float z_out = (float)(-point.Y * 0.3048);  // Revit Y → ClashControl -Z (into screen)
+```
+
+Same transform applies to normals (but without the 0.3048 scale — normals are unit vectors):
+```csharp
+float nx_out = (float)normal.X;
+float ny_out = (float)normal.Z;
+float nz_out = (float)(-normal.Y);
+```
+
+### Extraction Algorithm
+
+```csharp
+public static ElementGeometry ExtractGeometry(Element element)
+{
+    var positions = new List<float>();
+    var indices = new List<uint>();
+    var normals = new List<float>();
+
+    var options = new Options
+    {
+        ComputeReferences = true,
+        DetailLevel = ViewDetailLevel.Fine
+    };
+
+    var geomElement = element.get_Geometry(options);
+    if (geomElement == null) return null;
+
+    uint vertexOffset = 0;
+    ProcessGeometry(geomElement, Transform.Identity, positions, indices, normals, ref vertexOffset);
+
+    if (positions.Count == 0) return null;
+
+    return new ElementGeometry
+    {
+        Positions = Convert.ToBase64String(FloatListToBytes(positions)),
+        Indices = Convert.ToBase64String(UIntListToBytes(indices)),
+        Normals = Convert.ToBase64String(FloatListToBytes(normals))
+    };
+}
+
+private static void ProcessGeometry(GeometryElement geomElement, Transform transform,
+    List<float> positions, List<uint> indices, List<float> normals, ref uint vertexOffset)
+{
+    foreach (var geomObj in geomElement)
+    {
+        switch (geomObj)
+        {
+            case Solid solid:
+                if (solid.Volume > 0)
+                    ProcessSolid(solid, transform, positions, indices, normals, ref vertexOffset);
+                break;
+
+            case GeometryInstance instance:
+                var instanceGeom = instance.GetInstanceGeometry();
+                // GetInstanceGeometry() already applies the instance transform
+                if (instanceGeom != null)
+                    ProcessGeometry(instanceGeom, Transform.Identity, positions, indices, normals, ref vertexOffset);
+                break;
+        }
+    }
+}
+
+private static void ProcessSolid(Solid solid, Transform transform,
+    List<float> positions, List<uint> indices, List<float> normals, ref uint vertexOffset)
+{
+    foreach (Face face in solid.Faces)
+    {
+        Mesh mesh = face.Triangulate();
+        if (mesh == null) continue;
+
+        int meshVertCount = mesh.Vertices.Count;
+
+        // Compute face normal (use first triangle's normal for flat faces)
+        XYZ faceNormal = face.ComputeNormal(new UV(0.5, 0.5));
+        XYZ transformedNormal = transform.IsIdentity ? faceNormal : transform.OfVector(faceNormal);
+
+        // Normals: Revit Z-up → Y-up
+        float nx = (float)transformedNormal.X;
+        float ny = (float)transformedNormal.Z;
+        float nz = (float)(-transformedNormal.Y);
+
+        // Add vertices
+        for (int i = 0; i < meshVertCount; i++)
+        {
+            XYZ pt = mesh.Vertices[i];
+            XYZ transformed = transform.IsIdentity ? pt : transform.OfPoint(pt);
+
+            // Convert: feet Z-up → meters Y-up
+            positions.Add((float)(transformed.X * 0.3048));
+            positions.Add((float)(transformed.Z * 0.3048));
+            positions.Add((float)(-transformed.Y * 0.3048));
+
+            // Per-vertex normals (use face normal for all vertices of this face)
+            normals.Add(nx);
+            normals.Add(ny);
+            normals.Add(nz);
+        }
+
+        // Add triangle indices
+        for (int i = 0; i < mesh.NumTriangles; i++)
+        {
+            MeshTriangle tri = mesh.get_Triangle(i);
+            indices.Add(vertexOffset + (uint)tri.get_Index(0));
+            indices.Add(vertexOffset + (uint)tri.get_Index(1));
+            indices.Add(vertexOffset + (uint)tri.get_Index(2));
+        }
+
+        vertexOffset += (uint)meshVertCount;
+    }
+}
+```
+
+### Base64 Encoding Helpers
+
+```csharp
+private static byte[] FloatListToBytes(List<float> list)
+{
+    var bytes = new byte[list.Count * 4];
+    Buffer.BlockCopy(list.ToArray(), 0, bytes, 0, bytes.Length);
+    return bytes;
+}
+
+private static byte[] UIntListToBytes(List<uint> list)
+{
+    var bytes = new byte[list.Count * 4];
+    Buffer.BlockCopy(list.ToArray(), 0, bytes, 0, bytes.Length);
+    return bytes;
+}
+```
+
+---
+
+## Property Extraction
+
+### IFC GlobalId Generation
+
+ClashControl uses 22-character IFC GlobalIds as join keys. Convert Revit's GUID:
+
+```csharp
+public static class GlobalIdEncoder
+{
+    private static readonly char[] Base64Chars =
+        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_$".ToCharArray();
+
+    public static string ToIfcGlobalId(Guid guid)
+    {
+        var bytes = guid.ToByteArray();
+
+        // Rearrange bytes to match IFC encoding order
+        var num = new byte[16];
+        num[0] = bytes[3]; num[1] = bytes[2]; num[2] = bytes[1]; num[3] = bytes[0];
+        num[4] = bytes[5]; num[5] = bytes[4];
+        num[6] = bytes[7]; num[7] = bytes[6];
+        Array.Copy(bytes, 8, num, 8, 8);
+
+        var result = new char[22];
+        int offset = 0;
+
+        // Encode 16 bytes (128 bits) into 22 base64 characters (132 bits, 4 padding)
+        result[offset++] = Base64Chars[(num[0] & 0xFC) >> 2];
+        result[offset++] = Base64Chars[((num[0] & 0x03) << 4) | ((num[1] & 0xF0) >> 4)];
+
+        for (int i = 1; i < 15; i += 3)
+        {
+            if (i + 2 < 16)
+            {
+                result[offset++] = Base64Chars[((num[i] & 0x0F) << 2) | ((num[i + 1] & 0xC0) >> 6)];
+                result[offset++] = Base64Chars[num[i + 1] & 0x3F];
+                result[offset++] = Base64Chars[(num[i + 2] & 0xFC) >> 2];
+                if (i + 3 < 16)
+                    result[offset++] = Base64Chars[((num[i + 2] & 0x03) << 4) | ((num[i + 3] & 0xF0) >> 4)];
+                else
+                    result[offset++] = Base64Chars[(num[i + 2] & 0x03) << 4];
+            }
+            else if (i + 1 < 16)
+            {
+                result[offset++] = Base64Chars[((num[i] & 0x0F) << 2) | ((num[i + 1] & 0xC0) >> 6)];
+                result[offset++] = Base64Chars[num[i + 1] & 0x3F];
+            }
+            else
+            {
+                result[offset++] = Base64Chars[(num[i] & 0x0F) << 2];
+            }
+        }
+
+        return new string(result, 0, 22);
+    }
+
+    public static string FromElement(Element element)
+    {
+        // element.UniqueId is "{GUID}-{suffix}" — extract the GUID part
+        string uniqueId = element.UniqueId;
+        // The GUID is typically the first 36 characters (with dashes)
+        // but Revit UniqueIds can be more complex. Parse the episode GUID:
+        if (Guid.TryParse(uniqueId.Substring(0, Math.Min(36, uniqueId.Length)), out var guid))
+            return ToIfcGlobalId(guid);
+
+        // Fallback: hash the UniqueId
+        using (var md5 = System.Security.Cryptography.MD5.Create())
+        {
+            var hash = md5.ComputeHash(System.Text.Encoding.UTF8.GetBytes(uniqueId));
+            return ToIfcGlobalId(new Guid(hash));
+        }
+    }
+}
+```
+
+### Revit Category → IFC Type Mapping
+
+```csharp
+private static readonly Dictionary<string, string> CategoryToIfcType =
+    new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+{
+    {"Walls",                    "IfcWall"},
+    {"Floors",                   "IfcSlab"},
+    {"Roofs",                    "IfcRoof"},
+    {"Ceilings",                 "IfcCovering"},
+    {"Doors",                    "IfcDoor"},
+    {"Windows",                  "IfcWindow"},
+    {"Columns",                  "IfcColumn"},
+    {"Structural Columns",       "IfcColumn"},
+    {"Structural Framing",       "IfcBeam"},
+    {"Structural Foundations",   "IfcFooting"},
+    {"Stairs",                   "IfcStair"},
+    {"Railings",                 "IfcRailing"},
+    {"Ramps",                    "IfcRamp"},
+    {"Curtain Panels",           "IfcPlate"},
+    {"Curtain Wall Mullions",    "IfcMember"},
+    {"Generic Models",           "IfcBuildingElementProxy"},
+    {"Ducts",                    "IfcDuctSegment"},
+    {"Pipes",                    "IfcPipeSegment"},
+    {"Flex Ducts",               "IfcDuctSegment"},
+    {"Flex Pipes",               "IfcPipeSegment"},
+    {"Duct Fittings",            "IfcDuctFitting"},
+    {"Pipe Fittings",            "IfcPipeFitting"},
+    {"Duct Accessories",         "IfcDuctFitting"},
+    {"Pipe Accessories",         "IfcPipeFitting"},
+    {"Mechanical Equipment",     "IfcFlowTerminal"},
+    {"Plumbing Fixtures",        "IfcSanitaryTerminal"},
+    {"Electrical Equipment",     "IfcElectricDistributionBoard"},
+    {"Electrical Fixtures",      "IfcElectricDistributionBoard"},
+    {"Cable Trays",              "IfcCableCarrierSegment"},
+    {"Conduits",                 "IfcCableSegment"},
+    {"Lighting Fixtures",        "IfcLightFixture"},
+    {"Fire Alarm Devices",       "IfcAlarm"},
+    {"Sprinklers",               "IfcFireSuppressionTerminal"},
+    {"Furniture",                "IfcFurnishingElement"},
+    {"Furniture Systems",        "IfcFurnishingElement"},
+};
+
+public static string GetIfcType(Element element)
+{
+    var catName = element.Category?.Name;
+    if (catName != null && CategoryToIfcType.TryGetValue(catName, out var ifcType))
+        return ifcType;
+    return "IfcBuildingElementProxy";
+}
+```
+
+### Full Property Extraction
+
+```csharp
+public static ElementData ExtractProperties(Element element, Document doc)
+{
+    var data = new ElementData();
+
+    data.GlobalId = GlobalIdEncoder.FromElement(element);
+    data.ExpressId = element.Id.IntegerValue;
+    data.RevitId = element.Id.IntegerValue;
+    data.Name = element.Name ?? "";
+    data.Category = GetIfcType(element);
+
+    // Level
+    if (element.LevelId != ElementId.InvalidElementId)
+    {
+        var level = doc.GetElement(element.LevelId) as Level;
+        data.Level = level?.Name ?? "";
+    }
+
+    // Type name
+    var typeId = element.GetTypeId();
+    if (typeId != ElementId.InvalidElementId)
+    {
+        var type = doc.GetElement(typeId);
+        data.Type = type?.Name ?? "";
+    }
+
+    // Materials
+    var materialIds = element.GetMaterialIds(false);
+    data.Materials = materialIds
+        .Select(id => doc.GetElement(id))
+        .Where(m => m != null)
+        .Select(m => m.Name)
+        .Distinct()
+        .ToList();
+
+    // Parameters — grouped by ParameterGroup
+    data.Parameters = new Dictionary<string, Dictionary<string, object>>();
+    foreach (Parameter param in element.Parameters)
+    {
+        if (!param.HasValue) continue;
+        string groupName = LabelUtils.GetLabelFor(param.Definition.ParameterGroup);
+        if (string.IsNullOrEmpty(groupName)) groupName = "Other";
+
+        if (!data.Parameters.ContainsKey(groupName))
+            data.Parameters[groupName] = new Dictionary<string, object>();
+
+        object value = null;
+        switch (param.StorageType)
+        {
+            case StorageType.String:
+                value = param.AsString();
+                break;
+            case StorageType.Integer:
+                value = param.AsInteger();
+                break;
+            case StorageType.Double:
+                // Convert internal units to display units
+                value = Math.Round(UnitUtils.ConvertFromInternalUnits(
+                    param.AsDouble(), param.GetUnitTypeId()), 4);
+                break;
+            case StorageType.ElementId:
+                var refElem = doc.GetElement(param.AsElementId());
+                value = refElem?.Name;
+                break;
+        }
+
+        if (value != null)
+            data.Parameters[param.Definition.Name] = new Dictionary<string, object>
+            {
+                [param.Definition.Name] = value
+            };
+        // Simplified: just add to the group dict directly
+        data.Parameters[groupName][param.Definition.Name] = value;
+    }
+
+    return data;
+}
+```
+
+---
+
+## Host Relationships (Clash Suppression)
+
+ClashControl suppresses clashes between host elements and their children (e.g., a wall and its door). Extract these relationships:
+
+```csharp
+public static class RelationshipExporter
+{
+    public static (Dictionary<string, string> hostIds,
+                   Dictionary<string, List<string>> hostRelationships,
+                   Dictionary<string, bool> relatedPairs)
+    BuildRelationships(IList<Element> elements, Document doc)
+    {
+        var hostIds = new Dictionary<string, string>();           // childGid → hostGid
+        var hostRelationships = new Dictionary<string, List<string>>(); // hostGid → [childGids]
+        var relatedPairs = new Dictionary<string, bool>();
+
+        // Build GlobalId lookup by ElementId
+        var eidToGid = new Dictionary<int, string>();
+        foreach (var el in elements)
+            eidToGid[el.Id.IntegerValue] = GlobalIdEncoder.FromElement(el);
+
+        foreach (var element in elements)
+        {
+            if (!(element is FamilyInstance fi)) continue;
+
+            // Get host element (wall, floor, ceiling, etc.)
+            var host = fi.Host;
+            if (host == null) continue;
+
+            if (!eidToGid.TryGetValue(host.Id.IntegerValue, out var hostGid)) continue;
+            var childGid = eidToGid[fi.Id.IntegerValue];
+
+            hostIds[childGid] = hostGid;
+
+            if (!hostRelationships.ContainsKey(hostGid))
+                hostRelationships[hostGid] = new List<string>();
+            hostRelationships[hostGid].Add(childGid);
+
+            // Add relatedPair (both directions for safety)
+            relatedPairs[$"{hostGid}:{childGid}"] = true;
+            relatedPairs[$"{childGid}:{hostGid}"] = true;
+        }
+
+        return (hostIds, hostRelationships, relatedPairs);
+    }
+}
+```
+
+### ElementData Class
+
+```csharp
+public class ElementData
+{
+    [JsonProperty("globalId")] public string GlobalId { get; set; }
+    [JsonProperty("expressId")] public int ExpressId { get; set; }
+    [JsonProperty("category")] public string Category { get; set; }
+    [JsonProperty("name")] public string Name { get; set; }
+    [JsonProperty("level")] public string Level { get; set; }
+    [JsonProperty("type")] public string Type { get; set; }
+    [JsonProperty("revitId")] public int RevitId { get; set; }
+    [JsonProperty("materials")] public List<string> Materials { get; set; }
+    [JsonProperty("parameters")] public Dictionary<string, Dictionary<string, object>> Parameters { get; set; }
+    [JsonProperty("hostId")] public string HostId { get; set; }
+    [JsonProperty("hostRelationships")] public List<string> HostRelationships { get; set; }
+    [JsonProperty("geometry")] public ElementGeometry Geometry { get; set; }
+}
+
+public class ElementGeometry
+{
+    [JsonProperty("positions")] public string Positions { get; set; }   // base64 Float32Array
+    [JsonProperty("indices")] public string Indices { get; set; }       // base64 Uint32Array
+    [JsonProperty("normals")] public string Normals { get; set; }       // base64 Float32Array
+    [JsonProperty("color")] public float[] Color { get; set; }          // [r, g, b, a] 0-1
+}
+```
