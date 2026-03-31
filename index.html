@@ -336,6 +336,10 @@ function startApp() {
   function guid() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16)}); }
   function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+  // Expose core utilities for addons
+  window._ccUid = uid;
+  window._ccDISC = DISC;
+
   // ── Reducer ────────────────────────────────────────────────────
 
   var INIT_FILTERS = {
@@ -6931,6 +6935,10 @@ function startApp() {
   var S_PANELR  = {background:'var(--bg-primary)',borderLeft:'1px solid var(--border-subtle)',display:'flex',flexDirection:'column',flexShrink:0};
   var S_BTN     = {border:'none',cursor:'pointer',fontFamily:'inherit',fontSize:'0.86rem',borderRadius:'6px',padding:'.4rem .85rem',lineHeight:1.4};
   var S_INPUT   = {width:'100%',background:'var(--bg-tertiary)',color:'var(--text-primary)',fontSize:'0.92rem',borderRadius:'8px',padding:'.4rem .65rem',border:'1px solid var(--border)',outline:'none',transition:'border-color .15s'};
+  // Expose for addons
+  window._ccHtml = html;
+  window._ccS_BTN = S_BTN;
+  window._ccS_INPUT = S_INPUT;
 
   // ── Header ─────────────────────────────────────────────────────
 
@@ -7927,6 +7935,7 @@ function startApp() {
     if(structCount>archCount) return 'structural';
     return 'architectural';
   }
+  window._ccDetectDiscipline = detectDiscipline;
 
   // (UnderlayImport removed — unified into the main import button in ModelSidebar)
 
@@ -16151,6 +16160,9 @@ function startApp() {
                 background:active?'var(--bg-secondary)':'var(--accent)',
                 color:active?'var(--text-secondary)':'#fff',
                 fontFamily:'inherit'}}>${active?'Disable':'Enable'}</button>
+              ${active && addon.panel && html`<div style=${{borderTop:'1px solid var(--border-subtle)',marginTop:'.4rem',paddingTop:'.2rem'}}>
+                ${addon.panel(html, s, d)}
+              </div>`}
             </div>
           </div>`;
         })}
