@@ -526,6 +526,81 @@ function startApp() {
     UPD_SHARED_PROJECT:'UPD_SHARED_PROJECT',
     IDS_SET_RESULTS:'IDS_SET_RESULTS', IDS_SET_SPECS:'IDS_SET_SPECS', IDS_RUNNING:'IDS_RUNNING'
   };
+
+  // ── Addon Registry ─────────────────────────────────────────────
+  // Addons are optional JS files that hook into the core app via this registry.
+  // Each addon calls window._ccRegisterAddon({id, name, description, icon, init, destroy, panel, reducerCases, initState})
+  // The core app stays fully functional without any addons loaded.
+
+  var _ccAddons = {};       // {id: addonDef}
+  var _ccAddonActive = {};  // {id: true/false} — persisted in localStorage
+
+  // Restore addon active states from localStorage
+  try {
+    var _savedAddonStates = JSON.parse(localStorage.getItem('cc_addons_active') || '{}');
+    Object.keys(_savedAddonStates).forEach(function(k){ _ccAddonActive[k] = _savedAddonStates[k]; });
+  } catch(e){}
+
+  function _saveAddonStates() {
+    try { localStorage.setItem('cc_addons_active', JSON.stringify(_ccAddonActive)); } catch(e){}
+  }
+
+  window._ccRegisterAddon = function(def) {
+    if (!def || !def.id) return;
+    _ccAddons[def.id] = def;
+    // Merge addon's initial state into INIT if provided
+    if (def.initState) {
+      Object.keys(def.initState).forEach(function(k){ if (!(k in INIT)) INIT[k] = def.initState[k]; });
+    }
+    // Auto-activate if previously active (or if addon sets autoActivate)
+    if (_ccAddonActive[def.id] === undefined && def.autoActivate) _ccAddonActive[def.id] = true;
+    // Initialize if active and dispatch is ready
+    if (_ccAddonActive[def.id] && window._ccDispatch) {
+      try { if (def.init) def.init(window._ccDispatch, function(){ return window._ccLatestState; }); } catch(e) { console.warn('[Addon] init error:', def.id, e); }
+    }
+    // Notify UI
+    window.dispatchEvent(new Event('cc-addons-changed'));
+  };
+
+  window._ccActivateAddon = function(id) {
+    var def = _ccAddons[id];
+    if (!def) return;
+    _ccAddonActive[id] = true;
+    _saveAddonStates();
+    // Merge initState into live state
+    if (def.initState && window._ccDispatch) {
+      Object.keys(def.initState).forEach(function(k){
+        var state = window._ccLatestState;
+        if (state && !(k in state)) window._ccDispatch({t:'_ADDON_INIT_STATE', k:k, v:def.initState[k]});
+      });
+    }
+    try { if (def.init) def.init(window._ccDispatch, function(){ return window._ccLatestState; }); } catch(e) { console.warn('[Addon] init error:', id, e); }
+    window.dispatchEvent(new Event('cc-addons-changed'));
+  };
+
+  window._ccDeactivateAddon = function(id) {
+    var def = _ccAddons[id];
+    _ccAddonActive[id] = false;
+    _saveAddonStates();
+    if (def) { try { if (def.destroy) def.destroy(); } catch(e) { console.warn('[Addon] destroy error:', id, e); } }
+    window.dispatchEvent(new Event('cc-addons-changed'));
+  };
+
+  window._ccGetAddons = function() { return _ccAddons; };
+  window._ccIsAddonActive = function(id) { return !!_ccAddonActive[id]; };
+
+  // Load addon scripts — called after app mounts
+  function _loadAddonScripts() {
+    var addonFiles = ['pwa', 'local-engine', 'shared-project', 'revit-bridge'];
+    addonFiles.forEach(function(name) {
+      var script = document.createElement('script');
+      script.src = 'addons/' + name + '.js';
+      script.async = true;
+      script.onerror = function() { /* addon file not present — that's fine */ };
+      document.head.appendChild(script);
+    });
+  }
+
   // Collect all element IDs from a clash/issue item
   function _itemEids(item) {
     var ids=[];
@@ -765,7 +840,19 @@ function startApp() {
       case A.IDS_SET_RESULTS: return Object.assign({},s,{idsValidation:Object.assign({},s.idsValidation,{results:a.results,summary:a.summary,running:false})});
       case A.IDS_SET_SPECS:   return Object.assign({},s,{idsValidation:Object.assign({},s.idsValidation,{specs:a.specs})});
       case A.IDS_RUNNING:     return Object.assign({},s,{idsValidation:Object.assign({},s.idsValidation,{running:a.v})});
-      default:            return s;
+      // Addon dynamic state init
+      case '_ADDON_INIT_STATE': var asi={}; asi[a.k]=a.v; return Object.assign({},s,asi);
+      default:
+        // Let active addons handle unknown action types
+        var addonResult = s;
+        Object.keys(_ccAddons).forEach(function(aid) {
+          if (!_ccAddonActive[aid]) return;
+          var addon = _ccAddons[aid];
+          if (addon.reducerCases && addon.reducerCases[a.t]) {
+            addonResult = addon.reducerCases[a.t](addonResult, a);
+          }
+        });
+        return addonResult;
     }
   }
 
@@ -15396,6 +15483,11 @@ function startApp() {
           <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>
         </svg>`,
         'Revit Bridge')}
+      ${iconBtn(function(){d({t:A.TAB,v:s.tab==='addons'?null:'addons'});},
+        html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 2v4m0 12v4M2 12h4m12 0h4"/><circle cx="12" cy="12" r="3"/><path d="M6.34 6.34l2.83 2.83m5.66 5.66l2.83 2.83M17.66 6.34l-2.83 2.83m-5.66 5.66l-2.83 2.83"/>
+        </svg>`,
+        'Addons')}
       ${iconBtn(function(){d({t:A.SETTINGS,v:true});},
         html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_GEAR}}></svg>`,
         'Settings')}
@@ -16011,6 +16103,66 @@ function startApp() {
     </div>`;
   }
 
+  // ── Addons Panel ──────────────────────────────────────────────
+
+  function AddonsPanel(props) {
+    var s=props.s, d=props.d;
+    var addonsChanged = useState(0), forceUpdate = addonsChanged[1];
+    useEffect(function(){
+      function onChanged(){ forceUpdate(function(n){return n+1;}); }
+      window.addEventListener('cc-addons-changed', onChanged);
+      return function(){ window.removeEventListener('cc-addons-changed', onChanged); };
+    },[]);
+    var addons = window._ccGetAddons ? window._ccGetAddons() : {};
+    var ids = Object.keys(addons);
+    var SEC={fontSize:'0.72rem',fontWeight:700,color:'var(--accent-subtle)',textTransform:'uppercase',letterSpacing:'.06em',padding:'.6rem .85rem .3rem'};
+    var CARD={background:'var(--card-bg)',border:'1px solid var(--card-border)',borderRadius:10,padding:'.65rem .75rem',display:'flex',gap:'.6rem',alignItems:'flex-start'};
+
+    return html`<div style=${{display:'flex',flexDirection:'column',gap:0,overflowY:'auto',flex:1}}>
+      <div style=${SEC}>Installed Addons</div>
+      <div style=${{padding:'0 .85rem .5rem',display:'flex',flexDirection:'column',gap:'.4rem'}}>
+        ${ids.length === 0 && html`<div style=${{fontSize:'0.78rem',color:'var(--text-muted)',padding:'.5rem 0',lineHeight:1.7}}>
+          No addons loaded. Addons extend ClashControl with optional features like PWA support, local clash engine, shared projects, and Revit integration.<br/><br/>
+          Place addon files in the <code style=${{fontSize:'0.73rem',background:'var(--tag-bg)',padding:'1px 4px',borderRadius:3}}>addons/</code> folder and reload.
+        </div>`}
+        ${ids.map(function(id) {
+          var addon = addons[id];
+          var active = window._ccIsAddonActive(id);
+          return html`<div key=${id} style=${CARD}>
+            <div style=${{width:32,height:32,borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,
+              background:active?'rgba(37,99,235,.15)':'rgba(100,100,100,.1)'}}>
+              ${addon.icon ? html`<span dangerouslySetInnerHTML=${{__html:addon.icon}}></span>`
+                : html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke=${active?'#60a5fa':'var(--text-faint)'} stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M12 2v4m0 12v4M2 12h4m12 0h4"/><circle cx="12" cy="12" r="3"/>
+                </svg>`}
+            </div>
+            <div style=${{flex:1,minWidth:0}}>
+              <div style=${{display:'flex',alignItems:'center',gap:'.4rem',marginBottom:'.15rem'}}>
+                <span style=${{fontSize:'0.83rem',fontWeight:600,color:'var(--text-primary)'}}>${addon.name}</span>
+                <span style=${{fontSize:'0.58rem',fontWeight:600,padding:'1px 5px',borderRadius:4,
+                  background:active?'rgba(34,197,94,.12)':'var(--tag-bg)',
+                  color:active?'var(--pill-green)':'var(--text-faint)'}}>${active?'ACTIVE':'OFF'}</span>
+              </div>
+              <div style=${{fontSize:'0.72rem',color:'var(--text-secondary)',lineHeight:1.6,marginBottom:'.3rem'}}>${addon.description||''}</div>
+              <button onClick=${function(){
+                if (active) window._ccDeactivateAddon(id);
+                else window._ccActivateAddon(id);
+              }} style=${{padding:'.25rem .6rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',border:'1px solid var(--border)',
+                background:active?'var(--bg-secondary)':'var(--accent)',
+                color:active?'var(--text-secondary)':'#fff',
+                fontFamily:'inherit'}}>${active?'Disable':'Enable'}</button>
+            </div>
+          </div>`;
+        })}
+      </div>
+      ${ids.length > 0 && html`<div style=${{padding:'.5rem .85rem',borderTop:'1px solid var(--border-subtle)'}}>
+        <div style=${{fontSize:'0.69rem',color:'var(--text-faint)',lineHeight:1.6}}>
+          Addons extend ClashControl with optional features. Each addon runs independently and can be enabled/disabled at any time. Settings are preserved across sessions.
+        </div>
+      </div>`}
+    </div>`;
+  }
+
   // ── Side Panel ─────────────────────────────────────────────────
 
   function SidePanel(props) {
@@ -16022,7 +16174,7 @@ function startApp() {
     if (!tab) return null;
     var projects=s.projectList||[];
     var activeProj=projects.find(function(p){return p.id===s.activeProject;})||projects[0]||{name:'Default'};
-    var TITLES={models:'Models',clashes:'Clashes',issues:'Issues',navigator:'Navigator',tools:'Tools'};
+    var TITLES={models:'Models',clashes:'Clashes',issues:'Issues',navigator:'Navigator',tools:'Tools',addons:'Addons'};
     function onResizeDown(e){
       e.preventDefault();
       dragRef.current={startX:e.clientX,startW:panelW};
@@ -16056,6 +16208,7 @@ function startApp() {
       ${tab==='navigator' && html`<${IssuePanel} key="navigator" s=${s} d=${d} hideTabBar=${true} />`}
       ${tab==='standards' && html`<${StandardsPanel} s=${s} d=${d} />`}
       ${tab==='tools'    && html`<${ToolsPanel} s=${s} d=${d} />`}
+      ${tab==='addons'   && html`<${AddonsPanel} s=${s} d=${d} />`}
     </div>`;
   }
 
@@ -16863,6 +17016,16 @@ function startApp() {
   var root = ReactDOM.createRoot ? ReactDOM.createRoot(rootEl) : null;
   if (root) { root.render(h(ErrorBoundary, null, h(App, null))); }
   else { ReactDOM.render(h(ErrorBoundary, null, h(App, null)), rootEl); }
+
+  // Load addon scripts after mount
+  _loadAddonScripts();
+
+  // Initialize already-registered addons now that dispatch is ready
+  Object.keys(_ccAddons).forEach(function(aid) {
+    if (_ccAddonActive[aid] && _ccAddons[aid].init && window._ccDispatch) {
+      try { _ccAddons[aid].init(window._ccDispatch, function(){ return window._ccLatestState; }); } catch(e) { console.warn('[Addon] late init error:', aid, e); }
+    }
+  });
 
   // ── Demo Tour (console-only: window._ccDemoTour()) ─────────────
   // Hidden feature showcase. Trigger from browser console: _ccDemoTour()
