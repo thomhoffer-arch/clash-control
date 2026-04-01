@@ -15451,6 +15451,11 @@ function startApp() {
                 var isLocalEngine = id==='local-engine';
                 var le = isLocalEngine ? (s.localEngine||{}) : null;
                 var needsInstall = isLocalEngine && !active && !le.available;
+                // PWA addon: hide Disable button when running as installed PWA
+                var isPwaInstalled = id==='pwa' && window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
+                if (isPwaInstalled && active) {
+                  return html`<div style=${{fontSize:'0.69rem',color:'var(--text-faint)'}}>Always on in installed app</div>`;
+                }
                 if (needsInstall) {
                   return html`<div>
                     <button onClick=${function(){installAndEnable(id, d);}}

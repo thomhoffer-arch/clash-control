@@ -11,7 +11,9 @@
   window._ccRegisterAddon({
     id: 'pwa',
     name: 'Progressive Web App',
-    description: 'Offline support, install-as-app, and automatic updates via service worker.',
+    description: window.matchMedia && window.matchMedia('(display-mode: standalone)').matches
+      ? 'Offline support and automatic updates for your installed app.'
+      : 'Offline support, install-as-app, and automatic updates via service worker.',
     autoActivate: true, // PWA should be active by default
     icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
 
