@@ -15402,13 +15402,23 @@ function startApp() {
       d({t:'UPD_LOCAL_ENGINE',u:{active:true}});
       if(_installPollRef.current) clearInterval(_installPollRef.current);
       var attempts=0;
+      var _pollInFlight = false;
       _installPollRef.current = setInterval(function(){
         attempts++;
-        if(attempts>60){clearInterval(_installPollRef.current);_installPollRef.current=null;return;}
-        if(window._checkLocalEngine) window._checkLocalEngine(d).then(function(ready){
-          if(ready){clearInterval(_installPollRef.current);_installPollRef.current=null;setInstallCopied(false);}
-        });
-      },2000);
+        if(attempts>60){clearInterval(_installPollRef.current);_installPollRef.current=null;setInstallCopied(false);return;}
+        if(_pollInFlight) return; // skip if previous check still pending
+        if(window._checkLocalEngine) {
+          _pollInFlight = true;
+          // Silent poll: pass null to avoid dispatching checking:true flicker
+          window._checkLocalEngine(null).then(function(ready){
+            _pollInFlight = false;
+            if(ready){
+              d({t:'UPD_LOCAL_ENGINE',u:{available:true, checking:false}});
+              clearInterval(_installPollRef.current);_installPollRef.current=null;setInstallCopied(false);
+            }
+          }).catch(function(){ _pollInFlight = false; });
+        }
+      },3000);
     }
 
     return html`<div style=${{display:'flex',flexDirection:'column',gap:0,overflowY:'auto',flex:1}}>
@@ -15667,7 +15677,7 @@ function startApp() {
                                : 'Optional Python server for faster, exact clash detection. Not required \u2014 the built-in browser engine works fine for most projects.'}
                 </div>
                 ${!engineAvail && html`<div style=${{fontSize:'0.65rem',color:'var(--text-faint)',marginTop:'.25rem',lineHeight:1.5}}>
-                  Install later: <code style=${{fontSize:'0.63rem',background:'var(--tag-bg)',padding:'1px 4px',borderRadius:3}}>pip install clashcontrol-engine</code> then run <code style=${{fontSize:'0.63rem',background:'var(--tag-bg)',padding:'1px 4px',borderRadius:3}}>clashcontrol-engine</code>
+                  Install later: <code style=${{fontSize:'0.63rem',background:'var(--tag-bg)',padding:'1px 4px',borderRadius:3}}>pip install clashcontrol-engine</code>${' then run '}<code style=${{fontSize:'0.63rem',background:'var(--tag-bg)',padding:'1px 4px',borderRadius:3}}>clashcontrol-engine</code>
                 </div>`}
               </div>
             </div>
