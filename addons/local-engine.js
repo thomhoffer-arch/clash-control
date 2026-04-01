@@ -153,7 +153,9 @@
 
   function _checkLocalEngine(d) {
     if (d) d({t:'UPD_LOCAL_ENGINE', u:{checking:true}});
-    return fetch(_localEngineUrl + '/status', {method:'GET', signal:AbortSignal.timeout(2000)})
+    var fetchOpts = {method:'GET'};
+    try { if (AbortSignal.timeout) fetchOpts.signal = AbortSignal.timeout(2000); } catch(e){}
+    return fetch(_localEngineUrl + '/status', fetchOpts)
       .then(function(r){ return r.json(); })
       .then(function(j){
         var ready = j && j.status === 'ready';

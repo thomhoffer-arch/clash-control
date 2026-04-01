@@ -7,6 +7,8 @@
 (function() {
   'use strict';
 
+  var uid = window._ccUid || function() { return Math.random().toString(36).slice(2,10).toUpperCase(); };
+
   // ── Direct Connector state ─────────────────────────────────────
 
   var _revitWs = null;
@@ -223,7 +225,6 @@
 
     var detectDiscipline = window._ccDetectDiscipline || function() { return 'architectural'; };
     var DISC = window._ccDISC || [{id:'architectural', c:'#60a5fa'}];
-    var uid = window._ccUid || function() { return Math.random().toString(36).slice(2,10).toUpperCase(); };
 
     var disc = detectDiscipline(_revitBuf.elements);
     var dObj = DISC.find(function(x){return x.id===disc;});
@@ -581,7 +582,6 @@
 
   // Execute a tool call from the AI response
   function _executeCCTool(name, args, s, d) {
-    var uid = window._ccUid || function() { return Math.random().toString(36).slice(2,10); };
     switch(name) {
       case 'get_clashes': {
         var items = s.clashes;
@@ -747,7 +747,6 @@
 
   // Parse tool calls from AI response (normalize across providers)
   function _parseAIToolCalls(provider, response) {
-    var uid = window._ccUid || function() { return Math.random().toString(36).slice(2,10); };
     var text = '';
     var toolCalls = [];
     if (provider === 'anthropic') {
@@ -761,7 +760,7 @@
       text = msg.content||'';
       (msg.tool_calls||[]).forEach(function(tc) {
         var fn = tc.function||{};
-        toolCalls.push({ id:tc.id, name:fn.name, args:JSON.parse(fn.arguments||'{}') });
+        try { toolCalls.push({ id:tc.id, name:fn.name, args:JSON.parse(fn.arguments||'{}') }); } catch(e) { console.warn('[RevitBridge] Bad tool_call arguments:', fn.arguments); }
       });
     } else if (provider === 'google') {
       var parts = ((response.candidates||[])[0]||{}).content||{};
