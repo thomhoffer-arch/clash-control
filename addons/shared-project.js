@@ -66,6 +66,16 @@
       var canUse = !!window.showDirectoryPicker;
 
       return html`<div style=${{padding:'.5rem 0',fontSize:'0.78rem',color:'var(--text-secondary)',lineHeight:1.7}}>
+        <div style=${{display:'flex',alignItems:'center',gap:'.4rem',marginBottom:'.5rem',padding:'.4rem .5rem',background:'rgba(37,99,235,.08)',borderRadius:6,border:'1px solid rgba(37,99,235,.15)'}}>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+          <span style=${{fontSize:'0.72rem',color:'var(--text-muted)',flexShrink:0}}>Your name:</span>
+          <input type="text" value=${sp.userName||''} placeholder="Enter your name"
+            onInput=${function(e){ d({t:A_UPD, u:{userName:e.target.value}}); }}
+            style=${{flex:1,padding:'.2rem .4rem',background:'var(--bg-primary)',color:'var(--text-primary)',border:'1px solid var(--border)',borderRadius:4,fontSize:'0.75rem',fontFamily:'inherit',outline:'none'}} />
+        </div>
+        ${!sp.userName && enabled && html`<div style=${{fontSize:'0.69rem',color:'#f59e0b',marginBottom:'.3rem',padding:'.2rem .4rem',background:'rgba(245,158,11,.08)',borderRadius:4}}>
+          Set your name above so collaborators can see who made changes.
+        </div>`}
         <div style=${{display:'flex',alignItems:'center',gap:'.4rem',marginBottom:'.4rem'}}>
           <span style=${{width:7,height:7,borderRadius:'50%',background:statusColor,display:'inline-block'}}></span>
           <span>${enabled ? 'Connected: ' + sp.folderName + '/' + sp.fileName : 'Not connected'}</span>
