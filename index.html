@@ -528,7 +528,7 @@ function startApp() {
 
   // Load addon scripts — called after app mounts
   function _loadAddonScripts() {
-    var addonFiles = ['pwa', 'local-engine', 'shared-project', 'revit-bridge'];
+    var addonFiles = ['pwa', 'local-engine', 'shared-project', 'revit-bridge', 'ifc-sidecar'];
     addonFiles.forEach(function(name) {
       var script = document.createElement('script');
       script.src = 'addons/' + name + '.js';
