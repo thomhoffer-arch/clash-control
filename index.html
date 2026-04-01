@@ -13536,7 +13536,7 @@ function startApp() {
       var lines = [cl.length + ' total clashes: ' + hd.length + ' hard, ' + sf.length + ' soft, ' + op.length + ' open.'];
       lines.push('Resolution progress: ' + pct + '%.');
       if (hotStorey) lines.push('Hotspot: ' + hotStorey + ' (' + storeys[hotStorey] + ' clashes).');
-      if (s.revitBridge.provider && s.revitBridge.apiKey) lines.push('Tip: Use Revit Bridge for deeper AI-powered analysis.');
+      if (s.revitBridge && s.revitBridge.provider && s.revitBridge.apiKey) lines.push('Tip: Use Revit Bridge for deeper AI-powered analysis.');
       return lines.join('\n');
     }
 
@@ -15527,9 +15527,8 @@ function startApp() {
     }
     function acceptSetup() {
       // Install PWA if available
-      if (_ccInstallPrompt) {
-        _ccInstallPrompt.prompt();
-        _ccInstallPrompt.userChoice.then(function(){ _ccInstallPrompt = null; });
+      if (window._ccPwaPromptInstall) {
+        window._ccPwaPromptInstall();
       }
       // Enable local engine if available
       if (engineAvail) {
@@ -15545,7 +15544,7 @@ function startApp() {
       return function(){window.removeEventListener('keydown', onKey);};
     },[show]);
     if (!show) return null;
-    var pwaAvail = !!_ccInstallPrompt;
+    var pwaAvail = !!(window._ccPwaInstallPrompt && window._ccPwaInstallPrompt());
     var CARD = {background:'var(--card-bg)',border:'1px solid var(--card-border)',borderRadius:10,padding:'.65rem .75rem',display:'flex',gap:'.6rem',alignItems:'flex-start',cursor:'default'};
 
     return html`<div style=${{position:'fixed',inset:0,background:vis?'var(--modal-bg)':'transparent',display:'flex',alignItems:'center',justifyContent:'center',zIndex:60,transition:'background .2s',overflow:'hidden',padding:'2rem 0'}}
@@ -16051,17 +16050,18 @@ function startApp() {
     }, [s.prefs.theme]);
     // ── Sync clash selection to Revit Direct Connector ──
     useEffect(function(){
-      if (!_revitWs || _revitWs.readyState !== 1 || !s.revitDirect.connected) return;
+      if (!s.revitDirect || !s.revitDirect.connected) return;
+      if (!_revitWs || _revitWs.readyState !== 1) return;
       if (!s.activeId) return;
       var item = s.clashes.find(function(c){return c.id===s.activeId;}) || s.issues.find(function(i){return i.id===s.activeId;});
       if (!item) return;
       var gids = [];
       var eids = [item.elemA, item.elemB, item.elementId].filter(Boolean);
-      s.models.forEach(function(m){ m.elements.forEach(function(el){
+      s.models.forEach(function(m){ (m.elements||[]).forEach(function(el){
         if (eids.indexOf(el.expressId) >= 0 && el.props.globalId) gids.push(el.props.globalId);
       }); });
       if (gids.length) _revitWs.send(JSON.stringify({type:'highlight', globalIds:gids}));
-    }, [s.activeId, s.revitDirect.connected]);
+    }, [s.activeId, s.revitDirect && s.revitDirect.connected]);
     // ── Clean up 3D state when switching tabs ──
     useEffect(function(){
       if(_unghostAll) _unghostAll();
@@ -16185,7 +16185,7 @@ function startApp() {
     window._ccShowMemReport = function(){ setShowMemWarn(true); };
     // ── PWA install & update state ──
     var _pwaUpdate = useState(!!window._ccUpdateAvailable), pwaUpdateAvail=_pwaUpdate[0], setPwaUpdateAvail=_pwaUpdate[1];
-    var _pwaInstall = useState(!!_ccInstallPrompt), pwaInstallAvail=_pwaInstall[0], setPwaInstallAvail=_pwaInstall[1];
+    var _pwaInstall = useState(!!(window._ccPwaInstallPrompt && window._ccPwaInstallPrompt())), pwaInstallAvail=_pwaInstall[0], setPwaInstallAvail=_pwaInstall[1];
     var _pwaDismissed = useState(false), pwaDismissed=_pwaDismissed[0], setPwaDismissed=_pwaDismissed[1];
     useEffect(function(){
       function onUpdate(){ setPwaUpdateAvail(true); }
