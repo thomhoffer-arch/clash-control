@@ -13012,17 +13012,13 @@ function startApp() {
 
     // ── Help ───────────────────────────────────────────────────────
     if (/^help$|what can you do|how (?:do i|to) use|what.*commands?/.test(text)) {
-      return 'I can control ClashControl with plain English:\n\n' +
-        '**Clash detection:** "check structural vs MEP", "find near misses", "max gap 75mm"\n' +
-        '**Filters:** "show open", "group by storey", "reset filters"\n' +
-        '**Batch:** "mark all open clashes as resolved", "assign all issues to John"\n' +
-        '**Analysis:** "how many clashes?", "analyze clashes", "summary"\n' +
-        '**Theme:** "switch to light", "dark mode"\n' +
-        '**Files:** "load ifc", "load 2d", "import bcf", "export bcf"\n' +
-        '**Navigation:** "show clashes tab", "open settings", "open bridge", "training mode"\n' +
-        '**Viewer:** "section x", "wireframe mode", "show markers", "hide grid"\n' +
-        '**Tools:** "measure length", "save viewpoint", "save project"\n' +
-        '**Display:** "color by discipline", "show model tree", "reset view"';
+      return 'Sure! Just type what you need in plain English. Here are some things I can help with:\n\n' +
+        'To run a clash check, try something like "check structural vs MEP" or "find near misses with 75mm gap".\n\n' +
+        'You can filter results — "show open clashes", "group by storey", or "show only critical".\n\n' +
+        'For batch actions, say "mark all open as resolved" or "assign everything to John".\n\n' +
+        'Ask me questions too — "how many clashes?", "analyze clashes", or just "summary".\n\n' +
+        'I can also handle files ("load ifc", "export bcf"), change the view ("section x", "wireframe mode", "hide grid"), adjust the theme ("switch to light"), or open panels ("show settings", "clashes tab").\n\n' +
+        'Basically, just describe what you want and I\'ll figure it out.';
     }
 
     // ── Q&A ────────────────────────────────────────────────────────
