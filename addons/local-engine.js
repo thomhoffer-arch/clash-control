@@ -9,10 +9,27 @@
   var _localEngineUrl = 'http://localhost:19800';
   var _localEngineWsUrl = 'ws://localhost:19801';
 
+  // ── Download URLs for standalone executables ──────────────────
+  // These point to GitHub Releases. The engine is a PyInstaller-bundled
+  // standalone binary — no Python install required.
+  var _releaseBase = 'https://github.com/clashcontrol-io/clashcontrol-engine/releases/latest/download/';
+  var _downloads = {
+    win:   {url: _releaseBase + 'clashcontrol-engine-win.exe',   label: 'Windows (.exe)'},
+    mac:   {url: _releaseBase + 'clashcontrol-engine-mac',       label: 'macOS'},
+    linux: {url: _releaseBase + 'clashcontrol-engine-linux',     label: 'Linux'}
+  };
+
+  function _detectOS() {
+    var ua = navigator.userAgent || '';
+    if (/Win/.test(navigator.platform || ua)) return 'win';
+    if (/Mac/.test(navigator.platform || ua)) return 'mac';
+    return 'linux';
+  }
+
   window._ccRegisterAddon({
     id: 'local-engine',
     name: 'Local Clash Engine',
-    description: 'Multi-threaded Python server on localhost:19800 for exact mesh intersection. 5-10x faster on large models.',
+    description: 'Multi-threaded local server for exact mesh intersection. 5-10x faster on large models. One-click install.',
     autoActivate: false,
     icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg>',
 
@@ -48,39 +65,86 @@
 
     panel: function(html, s, d) {
       var le = s.localEngine || {};
+      var os = _detectOS();
+      var dl = _downloads[os];
+
+      // Status
       var statusColor = le.available ? '#22c55e' : le.checking ? '#eab308' : '#64748b';
-      var statusText = le.available ? 'Connected to localhost:19800' : le.checking ? 'Checking...' : 'Server not running';
+      var statusText = le.available ? 'Connected to localhost:19800' : le.checking ? 'Checking...' : 'Not running';
 
       return html`<div style=${{padding:'.5rem 0',fontSize:'0.78rem',color:'var(--text-secondary)',lineHeight:1.7}}>
         <div style=${{display:'flex',alignItems:'center',gap:'.4rem',marginBottom:'.4rem'}}>
           <span style=${{width:7,height:7,borderRadius:'50%',background:statusColor,display:'inline-block'}}></span>
           <span>${statusText}</span>
         </div>
-        <div style=${{display:'flex',gap:'.3rem',marginBottom:'.4rem'}}>
+
+        ${le.available ? html`<div style=${{display:'flex',gap:'.3rem',marginBottom:'.4rem'}}>
           <button onClick=${function(){_checkLocalEngine(d);}}
             disabled=${le.checking}
             style=${{padding:'.3rem .6rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',
               border:'1px solid var(--border)',background:'var(--bg-secondary)',color:'var(--text-secondary)',fontFamily:'inherit',
               opacity:le.checking?0.5:1}}>
             ${le.checking?'Checking...':'Check Status'}</button>
-          ${le.available && html`<button onClick=${function(){
+          <button onClick=${function(){
             var newActive = !le.active;
             try{localStorage.setItem('cc_local_engine',newActive?'1':'0');}catch(e){}
             d({t:'UPD_LOCAL_ENGINE',u:{active:newActive}});
           }} style=${{padding:'.3rem .6rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',border:'none',fontFamily:'inherit',
             background:le.active?'var(--bg-secondary)':'#2563eb',
             color:le.active?'var(--text-secondary)':'#fff'}}>
-            ${le.active?'Disable':'Enable for Detection'}</button>`}
-        </div>
-        ${!le.available && html`<div style=${{fontSize:'0.69rem',color:'var(--text-faint)',lineHeight:1.6}}>
-          <div style=${{marginBottom:'.25rem'}}><strong style=${{color:'var(--text-muted)'}}>Coming soon</strong> — the local engine is not yet released. The built-in browser engine handles most projects well.</div>
-          <div>When available, install with:
-            <div style=${{marginTop:'.15rem',display:'flex',flexDirection:'column',gap:'.15rem'}}>
-              <code style=${{fontSize:'0.63rem',background:'var(--tag-bg)',padding:'2px 6px',borderRadius:3}}>pip install clashcontrol-engine</code>
-              <code style=${{fontSize:'0.63rem',background:'var(--tag-bg)',padding:'2px 6px',borderRadius:3}}>clashcontrol-engine</code>
+            ${le.active?'Disable':'Enable for Detection'}</button>
+        </div>`
+
+        : html`<div style=${{fontSize:'0.72rem',lineHeight:1.7}}>
+          <div style=${{marginBottom:'.5rem',color:'var(--text-muted)'}}>
+            The local engine runs on your machine for faster, more accurate clash detection on large models. No Python or command line needed.
+          </div>
+
+          <div style=${{display:'flex',flexDirection:'column',gap:'.35rem'}}>
+            <div style=${{display:'flex',alignItems:'center',gap:'.5rem'}}>
+              <span style=${{color:'var(--accent)',fontWeight:700,fontSize:'0.75rem',width:18,textAlign:'center'}}>1</span>
+              <span>Download for ${dl.label}:</span>
+            </div>
+            <div style=${{marginLeft:18+8,display:'flex',gap:'.3rem',alignItems:'center'}}>
+              <a href=${dl.url} download
+                style=${{padding:'.35rem .7rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',border:'none',
+                  background:'var(--accent)',color:'#fff',fontFamily:'inherit',textDecoration:'none',display:'inline-flex',alignItems:'center',gap:'.3rem'}}>
+                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Download
+              </a>
+              ${os !== 'win' && html`<a href=${_downloads.win.url} download
+                style=${{fontSize:'0.65rem',color:'var(--text-faint)',textDecoration:'underline',cursor:'pointer'}}>Windows</a>`}
+              ${os !== 'mac' && html`<a href=${_downloads.mac.url} download
+                style=${{fontSize:'0.65rem',color:'var(--text-faint)',textDecoration:'underline',cursor:'pointer'}}>macOS</a>`}
+              ${os !== 'linux' && html`<a href=${_downloads.linux.url} download
+                style=${{fontSize:'0.65rem',color:'var(--text-faint)',textDecoration:'underline',cursor:'pointer'}}>Linux</a>`}
+            </div>
+
+            <div style=${{display:'flex',alignItems:'center',gap:'.5rem',marginTop:'.15rem'}}>
+              <span style=${{color:'var(--accent)',fontWeight:700,fontSize:'0.75rem',width:18,textAlign:'center'}}>2</span>
+              <span>Run the downloaded file${os === 'win' ? '' : ' (may need '}<code style=${{fontSize:'0.65rem',background:'var(--tag-bg)',padding:'1px 4px',borderRadius:3,display:os==='win'?'none':'inline'}}>chmod +x</code>${os === 'win' ? '' : ' first)'}</span>
+            </div>
+
+            <div style=${{display:'flex',alignItems:'center',gap:'.5rem',marginTop:'.15rem'}}>
+              <span style=${{color:'var(--accent)',fontWeight:700,fontSize:'0.75rem',width:18,textAlign:'center'}}>3</span>
+              <span>ClashControl connects automatically</span>
             </div>
           </div>
-          <div style=${{marginTop:'.25rem',color:'var(--text-faint)'}}>Requires Python 3.8+.</div>
+
+          <div style=${{marginTop:'.5rem',display:'flex',gap:'.3rem'}}>
+            <button onClick=${function(){_checkLocalEngine(d);}}
+              disabled=${le.checking}
+              style=${{padding:'.3rem .6rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',
+                border:'1px solid var(--border)',background:'var(--bg-secondary)',color:'var(--text-secondary)',fontFamily:'inherit',
+                opacity:le.checking?0.5:1}}>
+              ${le.checking?'Checking...':'Check Connection'}</button>
+          </div>
+
+          <div style=${{marginTop:'.4rem',fontSize:'0.65rem',color:'var(--text-faint)'}}>
+            The built-in browser engine is used until the local engine is running.
+          </div>
         </div>`}
       </div>`;
     }
@@ -96,6 +160,10 @@
       .then(function(j){
         var ready = j && j.status === 'ready';
         if (d) d({t:'UPD_LOCAL_ENGINE', u:{available:ready, checking:false}});
+        if (ready) {
+          try { localStorage.setItem('cc_local_engine','1'); } catch(e){}
+          if (d) d({t:'UPD_LOCAL_ENGINE', u:{active:true}});
+        }
         return ready;
       })
       .catch(function(){
