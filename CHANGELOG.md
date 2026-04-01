@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.6.0 (2026-04-01)
+- Local engine: one-click Enable & Install with auto-connect
+
 ## v4.5.2 (2026-04-01)
 - Fix crash: guard _checkLocalEngine, _loadSharedHandle, _revitWs
 
