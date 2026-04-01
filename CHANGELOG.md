@@ -1,5 +1,23 @@
 # Changelog
 
+## v4.6.6 (2026-04-01)
+- Fix install command for Windows, add browser top border separator
+
+## v4.6.5 (2026-04-01)
+- Extend NL regex parser for more natural, conversational commands
+
+## v4.6.4 (2026-04-01)
+- Improve Local Clash Engine addon UX and status clarity
+
+## v4.6.3 (2026-04-01)
+- Fix CSP blocking service worker registration
+
+## v4.6.2 (2026-04-01)
+- PWA addon: auto-enabled in installed app, context-aware UI
+
+## v4.6.1 (2026-04-01)
+- Fix local engine install text spacing and polling loop
+
 ## v4.6.0 (2026-04-01)
 - Local engine: one-click Enable & Install with auto-connect
 
