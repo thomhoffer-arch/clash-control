@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.6.3 (2026-04-01)
+- Fix CSP blocking service worker registration
+
 ## v4.6.2 (2026-04-01)
 - PWA addon: auto-enabled in installed app, context-aware UI
 
