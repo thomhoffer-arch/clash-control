@@ -105,7 +105,7 @@
       });
       var mesh = new THREE.Mesh(geom, mat);
       mesh.name = el.globalId || '';
-      mesh._expressId = el.expressId || nextId;
+      mesh.userData.expressId = el.expressId || nextId;
       meshes.push(mesh);
       box.copy(geom.boundingBox);
     }

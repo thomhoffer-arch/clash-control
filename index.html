@@ -8580,9 +8580,16 @@ function startApp() {
     var GENERIC_RE = /^(basic\s+)?(wall|floor|ceiling|roof|column|beam|slab|door|window|generic model|furniture|curtain wall|curtain panel|railing|stair|ramp|mass|component|panel|mullion|structural framing|structural column)(\s+[\d\-]+)?$/i;
     var OPENING = {IfcDoor:1, IfcWindow:1};
     var guidSeen = {};
-    var acc = {proxy:[],genericName:[],noMaterial:[],noStorey:[],guidCollision:[],zeroLayers:[],unhostedOpenings:[]};
+    var acc = {proxy:[],genericName:[],noMaterial:[],noStorey:[],guidCollision:[],zeroLayers:[],unhostedOpenings:[],
+      noGlobalId:[],emptyGeometry:[],duplicateName:[],noDescription:[],noProperties:[]};
     var hasHostData = (elements||[]).some(function(el){return el.props&&el.props.hostId;});
     var hasLayerData = (elements||[]).some(function(el){return el.props&&Array.isArray(el.props.layers)&&el.props.layers.length>0;});
+    var nameCounts = {};
+    (elements||[]).forEach(function(el) {
+      var p = el.props||{};
+      var n = (p.name||'').trim();
+      if (n) { nameCounts[n] = (nameCounts[n]||0)+1; }
+    });
     (elements||[]).forEach(function(el) {
       var p = el.props||{};
       var it = {name:p.name||('#'+el.expressId), gid:p.globalId, ifcType:p.ifcType, el:el};
@@ -8593,15 +8600,34 @@ function startApp() {
       if (!p.storey||!p.storey.trim()) acc.noStorey.push(it);
       if (hasLayerData&&Array.isArray(p.layers)&&p.layers.some(function(l){return typeof l==='object'&&l!==null&&(l.width===0||l.width==='0');})) acc.zeroLayers.push(it);
       if (hasHostData&&OPENING[p.ifcType]&&!p.hostId) acc.unhostedOpenings.push(it);
+      if (!p.globalId || !p.globalId.trim()) acc.noGlobalId.push(it);
+      if (el.meshes && el.meshes.length === 0) acc.emptyGeometry.push(it);
+      var nm = (p.name||'').trim();
+      if (nm && nameCounts[nm] > 5) acc.duplicateName.push(it);
+      if (!p.description || !p.description.trim()) acc.noDescription.push(it);
+      var hasPsets = p.psets && Object.keys(p.psets).some(function(g){var grp=p.psets[g];return grp&&typeof grp==='object'&&Object.keys(grp).length>0;});
+      if (!hasPsets && !p.quantities) acc.noProperties.push(it);
+    });
+    // Deduplicate names — only report each duplicate name once
+    var dupNameSeen = {};
+    acc.duplicateName = acc.duplicateName.filter(function(it){
+      if (dupNameSeen[it.name]) return false;
+      dupNameSeen[it.name] = true;
+      return true;
     });
     return {
-      proxy:       {label:'IfcBuildingElementProxy (unclassified)', sev:'warn', count:acc.proxy.length,       ex:acc.proxy.slice(0,6)},
-      genericName: {label:'Generic element names',                  sev:'info', count:acc.genericName.length, ex:acc.genericName.slice(0,6)},
-      noMaterial:  {label:'No material assigned',                   sev:'info', count:acc.noMaterial.length,  ex:acc.noMaterial.slice(0,6)},
-      noStorey:    {label:'No level/storey',                        sev:'info', count:acc.noStorey.length,    ex:acc.noStorey.slice(0,6)},
       guidCollision:{label:'GlobalId collisions',                   sev:'error',count:acc.guidCollision.length,ex:acc.guidCollision.slice(0,6)},
+      noGlobalId:  {label:'Missing GlobalId',                       sev:'error',count:acc.noGlobalId.length,  ex:acc.noGlobalId.slice(0,6)},
+      proxy:       {label:'IfcBuildingElementProxy (unclassified)', sev:'warn', count:acc.proxy.length,       ex:acc.proxy.slice(0,6)},
+      genericName: {label:'Generic element names',                  sev:'warn', count:acc.genericName.length, ex:acc.genericName.slice(0,6)},
+      duplicateName:{label:'Non-unique element names (>5 same)',    sev:'warn', count:acc.duplicateName.length,ex:acc.duplicateName.slice(0,6)},
+      noMaterial:  {label:'No material assigned',                   sev:'warn', count:acc.noMaterial.length,  ex:acc.noMaterial.slice(0,6)},
+      noStorey:    {label:'No level/storey',                        sev:'warn', count:acc.noStorey.length,    ex:acc.noStorey.slice(0,6)},
+      emptyGeometry:{label:'No geometry (invisible elements)',      sev:'warn', count:acc.emptyGeometry.length,ex:acc.emptyGeometry.slice(0,6)},
       zeroLayers:  {label:'Zero-thickness layers',                  sev:'warn', count:acc.zeroLayers.length,  ex:acc.zeroLayers.slice(0,6)},
       unhostedOpenings:{label:'Unhosted doors/windows',             sev:'warn', count:acc.unhostedOpenings.length,ex:acc.unhostedOpenings.slice(0,6)},
+      noProperties:{label:'No property sets or quantities',         sev:'info', count:acc.noProperties.length,ex:acc.noProperties.slice(0,6)},
+      noDescription:{label:'No description',                        sev:'info', count:acc.noDescription.length,ex:acc.noDescription.slice(0,6)},
       _total: (elements||[]).length
     };
   }
@@ -8645,6 +8671,8 @@ function startApp() {
     var aiSugSt=useState({}), aiSug=aiSugSt[0], setAiSug=aiSugSt[1];
     var aiLoadSt=useState({}), aiLoad=aiLoadSt[0], setAiLoad=aiLoadSt[1];
     function runQC() { setQc(runDataQualityChecks(m.elements||[])); setQcExp({}); setAiSug({}); setAiLoad({}); }
+    // Auto-run quality check on first expand
+    useEffect(function(){ if(open && !qc && m.elements && m.elements.length>0) runQC(); }, [open]);
     function toggleQcSection(key) { setQcExp(function(p){var n=Object.assign({},p);n[key]=!n[key];return n;}); }
     function doSuggest(key, item) {
       var gid = item.gid||item.name;
@@ -8678,12 +8706,16 @@ function startApp() {
           ${DISC.map(function(p){return html`<option key=${p.id} value=${p.id}>${p.label}</option>`})}
         </select>
         <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
-          <span style=${{fontSize:'0.8rem',color:'var(--text-faint)'}}>Tag</span>
-          <input type="text" value=${m.tag||''} placeholder="e.g. Group A" onChange=${function(e){d({t:A.UPD_MODEL,id:m.id,u:{tag:e.target.value.trim()}})}}
-            style=${{...S_INPUT,fontSize:'0.75rem',padding:'.15rem .35rem',width:80}} />
+          <span style=${{fontSize:'0.8rem',color:m.discipline==='other'?'var(--text-secondary)':'var(--text-faint)',opacity:m.discipline==='other'?1:0.5}}>Tag</span>
+          <input type="text" value=${m.tag||''} placeholder=${m.discipline==='other'?'e.g. Group A':'Set discipline to Other'} disabled=${m.discipline!=='other'}
+            onChange=${function(e){d({t:A.UPD_MODEL,id:m.id,u:{tag:e.target.value.trim()}})}}
+            style=${{...S_INPUT,fontSize:'0.75rem',padding:'.15rem .35rem',width:80,opacity:m.discipline==='other'?1:0.5,cursor:m.discipline==='other'?'text':'not-allowed'}} />
           <span style=${{fontSize:'0.8rem',color:'var(--text-faint)'}}>Colour</span>
           <input type="color" value=${m.color} onChange=${function(e){d({t:A.UPD_MODEL,id:m.id,u:{color:e.target.value}})}} style=${{width:24,height:20,border:'none',padding:0,background:'none',cursor:'pointer'}} />
         </div>
+        ${m.discipline==='other' && m.tag && html`<div style=${{fontSize:'0.63rem',color:'var(--accent)',marginTop:'.1rem'}}>
+          Use <code style=${{fontSize:'0.63rem',background:'var(--tag-bg)',padding:'1px 3px',borderRadius:2}}>tag:${m.tag}</code> in clash detection rules
+        </div>`}
         ${m.stats && m.stats.fileSize && html`<span style=${{fontSize:'0.63rem',color:'var(--text-faint)'}}>${(m.stats.fileSize/1048576).toFixed(1)} MB · ${(m.elements&&m.elements.length||0)} elements · ${(m.meshes&&m.meshes.length||0)} meshes</span>`}
         ${!(m.stats && m.stats.fileSize) && html`<span style=${{fontSize:'0.75rem',color:'var(--text-faint)'}}>${(m.elements&&m.elements.length||0)} elements · ${(m.meshes&&m.meshes.length||0)} meshes</span>`}
         ${m._versionDiff && html`<div style=${{borderTop:'1px solid var(--border)',paddingTop:'.35rem',marginTop:'.1rem'}}>
@@ -8717,7 +8749,7 @@ function startApp() {
           </div>
           ${qc && (function(){
             var SEV = {error:'#ef4444', warn:'#f59e0b', info:'#60a5fa'};
-            var checks = ['guidCollision','proxy','unhostedOpenings','zeroLayers','genericName','noMaterial','noStorey'];
+            var checks = ['guidCollision','noGlobalId','proxy','genericName','duplicateName','noMaterial','noStorey','emptyGeometry','zeroLayers','unhostedOpenings','noProperties','noDescription'];
             var issues = checks.reduce(function(n,k){return n+(qc[k]?qc[k].count:0);},0);
             var canSuggest = s&&s.bridge&&s.bridge.provider&&s.bridge.apiKey;
             return html`<div>
@@ -8762,28 +8794,8 @@ function startApp() {
             </div>`;
           }())}
         </div>
-        ${m.storeys&&m.storeys.length>0 && html`<div style=${{borderTop:'1px solid var(--border)',paddingTop:'.35rem',marginTop:'.1rem'}}>
-          <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.25rem'}}>
-            <span style=${{fontSize:'0.69rem',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase',letterSpacing:'.03em'}}>Levels</span>
-            <div style=${{display:'flex',gap:'.2rem'}}>
-              <button onClick=${function(){d({t:A.TOGGLE_ALL_STOREYS,id:m.id,storeys:m.storeys,hide:false})}}
-                style=${{...S_BTN,fontSize:'0.57rem',padding:'.1rem .25rem',background:'var(--bg-primary)',color:'var(--text-muted)'}}>All on</button>
-              <button onClick=${function(){d({t:A.TOGGLE_ALL_STOREYS,id:m.id,storeys:m.storeys,hide:true})}}
-                style=${{...S_BTN,fontSize:'0.57rem',padding:'.1rem .25rem',background:'var(--bg-primary)',color:'var(--text-muted)'}}>All off</button>
-            </div>
-          </div>
-          <div style=${{maxHeight:120,overflowY:'auto',display:'flex',flexDirection:'column',gap:'.15rem'}}>
-            ${m.storeys.map(function(st){
-              var hidden = m.hiddenStoreys&&m.hiddenStoreys[st];
-              return html`<label key=${st} style=${{display:'flex',alignItems:'center',gap:'.3rem',cursor:'pointer',padding:'.1rem 0'}}>
-                <span onClick=${function(e){e.preventDefault();d({t:A.TOGGLE_STOREY,id:m.id,storey:st})}}
-                  style=${{width:12,height:12,borderRadius:2,border:'2px solid '+(hidden?'#475569':'#3b82f6'),background:hidden?'transparent':'#3b82f6',cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}>
-                  ${!hidden && html`<span style=${{color:'#fff',fontSize:8}}>✓</span>`}
-                </span>
-                <span style=${{fontSize:'0.75rem',color:hidden?'var(--text-faint)':'var(--text-primary)',overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title=${st}>${st}</span>
-              </label>`;
-            })}
-          </div>
+        ${m.storeys&&m.storeys.length>0 && html`<div style=${{fontSize:'0.63rem',color:'var(--text-faint)',borderTop:'1px solid var(--border)',paddingTop:'.25rem',marginTop:'.1rem'}}>
+          ${m.storeys.length} level${m.storeys.length===1?'':'s'} — manage in Levels panel below
         </div>`}
       </div>`}
     </div>`;
@@ -15749,6 +15761,175 @@ function startApp() {
       ${navBtn('navigator','<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>','Navigator',0)}
       ${navBtn('ai','<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>','AI Chat',0)}
     </nav>`;
+  }
+
+  // ── Revit Bridge Panel (full-screen modal) ──────────────────────
+
+  function RevitBridgePanel(props) {
+    var s=props.s, d=props.d;
+    var rd = s.revitDirect || {};
+    var br = s.revitBridge || {};
+    var portSt = useState(rd.port || (window._loadDirectPort ? window._loadDirectPort() : 19780));
+    var port = portSt[0], setPort = portSt[1];
+    var tabSt = useState('direct'), tab = tabSt[0], setTab = tabSt[1];
+    var provSt = useState(br.provider || ''), prov = provSt[0], setProv = provSt[1];
+    var keySt = useState(br.apiKey || ''), apiKey = keySt[0], setApiKey = keySt[1];
+    var hostSt = useState(br.mcpHost || 'localhost'), mcpHost = hostSt[0], setMcpHost = hostSt[1];
+    var mcpPortSt = useState(br.mcpPort || 8080), mcpPort = mcpPortSt[0], setMcpPort = mcpPortSt[1];
+
+    // Load saved config on mount
+    useEffect(function() {
+      if (window._loadBridgeConfig) {
+        var cfg = window._loadBridgeConfig();
+        if (cfg) {
+          if (cfg.provider) setProv(cfg.provider);
+          if (cfg.apiKey) setApiKey(cfg.apiKey);
+          if (cfg.mcpHost) setMcpHost(cfg.mcpHost);
+          if (cfg.mcpPort) setMcpPort(cfg.mcpPort);
+        }
+      }
+      if (window._loadDirectPort) setPort(window._loadDirectPort());
+    }, []);
+
+    // Project targeting state
+    var projects = s.projectList || [];
+    var targetProjSt = useState(s.activeProject || 'default');
+    var targetProj = targetProjSt[0], setTargetProj = targetProjSt[1];
+
+    var S_LBL = {fontSize:'0.72rem',color:'var(--text-muted)',marginBottom:'.15rem',fontWeight:600};
+    var S_INP = {width:'100%',padding:'.35rem .5rem',background:'var(--bg-primary)',color:'var(--text-primary)',border:'1px solid var(--border)',borderRadius:6,fontSize:'0.8rem',fontFamily:'inherit',outline:'none'};
+    var S_BTN2 = {padding:'.4rem .8rem',borderRadius:6,fontSize:'0.8rem',fontWeight:600,cursor:'pointer',border:'none',fontFamily:'inherit'};
+
+    return html`<div style=${{position:'fixed',inset:0,zIndex:9000,background:'rgba(0,0,0,.6)',display:'flex',alignItems:'center',justifyContent:'center'}}
+      onClick=${function(e){if(e.target===e.currentTarget)d({t:'REVIT_BRIDGE',v:false})}}>
+      <div style=${{background:'var(--bg-secondary)',border:'1px solid var(--border)',borderRadius:12,width:560,maxWidth:'95vw',maxHeight:'90vh',display:'flex',flexDirection:'column',overflow:'hidden',boxShadow:'0 8px 32px rgba(0,0,0,.5)'}}>
+        <div style=${{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'.75rem 1rem',borderBottom:'1px solid var(--border)'}}>
+          <div style=${{display:'flex',alignItems:'center',gap:'.5rem'}}>
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/></svg>
+            <span style=${{fontSize:'1rem',fontWeight:700,color:'var(--text-primary)'}}>Revit Bridge</span>
+          </div>
+          <button onClick=${function(){d({t:'REVIT_BRIDGE',v:false})}} style=${{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',fontSize:'1.2rem',padding:'0 .2rem'}}>×</button>
+        </div>
+
+        <div style=${{display:'flex',borderBottom:'1px solid var(--border)'}}>
+          ${[{id:'direct',label:'Direct Connector'},{id:'ai',label:'AI Bridge'}].map(function(t){
+            return html`<button key=${t.id} onClick=${function(){setTab(t.id)}}
+              style=${{flex:1,padding:'.5rem',background:tab===t.id?'var(--bg-tertiary)':'transparent',color:tab===t.id?'var(--text-primary)':'var(--text-muted)',
+                border:'none',borderBottom:tab===t.id?'2px solid var(--accent)':'2px solid transparent',cursor:'pointer',fontSize:'0.8rem',fontWeight:600,fontFamily:'inherit'}}>${t.label}</button>`;
+          })}
+        </div>
+
+        <div style=${{padding:'1rem',overflowY:'auto',flex:1}}>
+          ${tab==='direct' && html`<div style=${{display:'flex',flexDirection:'column',gap:'.75rem'}}>
+            <div>
+              <div style=${S_LBL}>WebSocket Port</div>
+              <div style=${{display:'flex',gap:'.4rem'}}>
+                <input type="number" value=${port} onInput=${function(e){setPort(parseInt(e.target.value,10)||19780)}}
+                  style=${{...S_INP,flex:1}} />
+                ${rd.connected ? html`<button onClick=${function(){if(window._revitDirectDisconnect) window._revitDirectDisconnect(d)}}
+                  style=${{...S_BTN2,background:'#7f1d1d',color:'#fca5a5'}}>Disconnect</button>`
+                : html`<button onClick=${function(){if(window._saveDirectPort) window._saveDirectPort(port); if(window._revitDirectConnect) window._revitDirectConnect(port,d)}}
+                  style=${{...S_BTN2,background:'var(--accent)',color:'#fff'}}>Connect</button>`}
+              </div>
+            </div>
+
+            <div style=${{display:'flex',alignItems:'center',gap:'.4rem'}}>
+              <span style=${{width:8,height:8,borderRadius:'50%',background:rd.connected?'#22c55e':'#ef4444'}}></span>
+              <span style=${{fontSize:'0.78rem',color:rd.connected?'#4ade80':'var(--text-muted)'}}>
+                ${rd.connected ? 'Connected' + (rd.documentName ? ' — ' + rd.documentName : '') : 'Not connected'}
+              </span>
+            </div>
+
+            ${rd.connected && html`<div>
+              <div style=${S_LBL}>Target Project</div>
+              <select value=${targetProj} onChange=${function(e){setTargetProj(e.target.value)}} style=${S_INP}>
+                ${projects.map(function(p){return html`<option key=${p.id} value=${p.id}>${p.name}</option>`})}
+              </select>
+              <div style=${{fontSize:'0.63rem',color:'var(--text-faint)',marginTop:'.2rem'}}>Revit models will be added to this project.</div>
+            </div>`}
+
+            ${rd.connected && html`<div style=${{display:'flex',gap:'.4rem'}}>
+              <button onClick=${function(){if(window._revitDirectExport) window._revitDirectExport(['all'])}}
+                style=${{...S_BTN2,flex:1,background:'#1e3a5f',color:'#93c5fd'}}>Export All from Revit</button>
+              <button onClick=${function(){if(window._revitDirectPushClashes) window._revitDirectPushClashes(s,d)}}
+                style=${{...S_BTN2,flex:1,background:'#052e16',color:'#4ade80'}}>Push Clashes to Revit</button>
+            </div>`}
+
+            ${rd.loading && html`<div>
+              <div style=${{fontSize:'0.72rem',color:'var(--text-muted)',marginBottom:'.2rem'}}>Loading... ${Math.round((rd.progress||0)*100)}%</div>
+              <div style=${{width:'100%',height:4,background:'var(--bg-primary)',borderRadius:2,overflow:'hidden'}}>
+                <div style=${{width:Math.round((rd.progress||0)*100)+'%',height:'100%',background:'var(--accent)',borderRadius:2,transition:'width .3s'}}></div>
+              </div>
+            </div>`}
+
+            <div style=${{fontSize:'0.69rem',color:'var(--text-faint)',lineHeight:1.6,padding:'.4rem .5rem',background:'var(--bg-primary)',borderRadius:6}}>
+              Requires the <a href="https://github.com/clashcontrol-io/ClashControlConnector" target="_blank" rel="noopener"
+                style=${{color:'var(--accent)',textDecoration:'none',fontWeight:600}}>ClashControl Connector</a> Revit plugin.
+              Install it in Revit, then connect here.
+            </div>
+          </div>`}
+
+          ${tab==='ai' && html`<div style=${{display:'flex',flexDirection:'column',gap:'.75rem'}}>
+            <div>
+              <div style=${S_LBL}>AI Provider</div>
+              <select value=${prov} onChange=${function(e){setProv(e.target.value)}} style=${S_INP}>
+                <option value="">Select provider...</option>
+                <option value="anthropic">Anthropic (Claude)</option>
+                <option value="openai">OpenAI (GPT-4o)</option>
+                <option value="google">Google (Gemini)</option>
+              </select>
+            </div>
+            <div>
+              <div style=${S_LBL}>API Key</div>
+              <input type="password" value=${apiKey} onInput=${function(e){setApiKey(e.target.value)}}
+                placeholder="sk-..." style=${S_INP} />
+            </div>
+            <div style=${{display:'flex',gap:'.5rem'}}>
+              <div style=${{flex:1}}>
+                <div style=${S_LBL}>MCP Host</div>
+                <input type="text" value=${mcpHost} onInput=${function(e){setMcpHost(e.target.value)}} style=${S_INP} />
+              </div>
+              <div style=${{width:80}}>
+                <div style=${S_LBL}>Port</div>
+                <input type="number" value=${mcpPort} onInput=${function(e){setMcpPort(parseInt(e.target.value,10)||8080)}} style=${S_INP} />
+              </div>
+            </div>
+            <div style=${{display:'flex',gap:'.4rem'}}>
+              <button onClick=${function(){
+                var cfg = {provider:prov, apiKey:apiKey, mcpHost:mcpHost, mcpPort:mcpPort};
+                d({t:'UPD_BRIDGE', u:cfg});
+                if(window._saveBridgeConfig) window._saveBridgeConfig(cfg);
+                if(window._testBridgeConnection) window._testBridgeConnection(Object.assign({}, br, cfg), d);
+              }} style=${{...S_BTN2,background:'var(--accent)',color:'#fff'}}>Save & Test</button>
+              <button onClick=${function(){if(window._revitBridgePush) window._revitBridgePush(s,d)}}
+                disabled=${br.syncing || !prov || !apiKey}
+                style=${{...S_BTN2,background:'#052e16',color:'#4ade80',opacity:br.syncing||!prov||!apiKey?0.5:1}}>Push</button>
+              <button onClick=${function(){if(window._revitBridgePull) window._revitBridgePull(s,d)}}
+                disabled=${br.syncing || !prov || !apiKey}
+                style=${{...S_BTN2,background:'#1e3a5f',color:'#93c5fd',opacity:br.syncing||!prov||!apiKey?0.5:1}}>Pull</button>
+            </div>
+            ${br.connected && html`<div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
+              <span style=${{width:7,height:7,borderRadius:'50%',background:'#22c55e'}}></span>
+              <span style=${{fontSize:'0.72rem',color:'#4ade80'}}>AI connected (${prov})</span>
+            </div>`}
+          </div>`}
+        </div>
+
+        ${br.log && br.log.length > 0 && html`<div style=${{borderTop:'1px solid var(--border)',maxHeight:180,overflowY:'auto',padding:'.5rem .75rem',background:'var(--bg-primary)'}}>
+          <div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'.3rem'}}>
+            <span style=${{fontSize:'0.69rem',fontWeight:600,color:'var(--text-muted)',textTransform:'uppercase'}}>Log</span>
+            <button onClick=${function(){d({t:'CLEAR_BRIDGE_LOG'})}} style=${{fontSize:'0.63rem',background:'none',border:'none',color:'var(--text-faint)',cursor:'pointer'}}>Clear</button>
+          </div>
+          ${br.log.slice().reverse().map(function(entry, i) {
+            var col = entry.type==='error' ? '#f87171' : entry.type==='push' ? '#4ade80' : entry.type==='pull' ? '#93c5fd' : 'var(--text-faint)';
+            return html`<div key=${i} style=${{fontSize:'0.69rem',color:col,lineHeight:1.5,borderBottom:'1px solid var(--border-subtle)',padding:'.15rem 0'}}>
+              <span style=${{color:'var(--text-faint)',marginRight:'.3rem'}}>${new Date(entry.ts).toLocaleTimeString()}</span>
+              ${entry.text}
+            </div>`;
+          })}
+        </div>`}
+      </div>
+    </div>`;
   }
 
   // ── App ────────────────────────────────────────────────────────
