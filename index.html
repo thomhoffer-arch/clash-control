@@ -13014,13 +13014,29 @@ function startApp() {
     // ── Help ───────────────────────────────────────────────────────
     if (/^help$|what can you do|how (?:do i|to) use|what.*commands?/.test(text)) {
       return 'Sure! Just type what you need in plain English. Here are some things I can help with:\n\n' +
-        'To run a clash check, try something like "check structural vs MEP" or "find near misses with 75mm gap".\n\n' +
-        'You can filter results — "show open clashes", "group by storey", or "show only critical".\n\n' +
-        'For batch actions, say "mark all open as resolved" or "assign everything to John".\n\n' +
-        'Ask me questions too — "how many clashes?", "analyze clashes", or just "summary".\n\n' +
-        'I can also handle files ("load ifc", "export bcf"), change the view ("section x", "wireframe mode", "hide grid"), adjust the theme ("switch to light"), or open panels ("show settings", "clashes tab").\n\n' +
-        'Basically, just describe what you want and I\'ll figure it out.';
+        '**Clash detection** — "check structural vs MEP", "find near misses with 75mm gap", "run detection"\n\n' +
+        '**Filter & group** — "show open clashes", "group by storey", "show only critical"\n\n' +
+        '**Batch actions** — "mark all open as resolved", "assign everything to John"\n\n' +
+        '**Questions** — "how many clashes?", "summary", "any problems?", "which types are clashing?"\n\n' +
+        '**View controls** — "top view", "front", "isometric", "section x", "wireframe", "dark mode"\n\n' +
+        '**Visibility** — "hide walls", "isolate pipes", "show only MEP", "show all"\n\n' +
+        '**Files** — "load ifc", "export bcf", "import bcf"\n\n' +
+        '**Panels** — "settings", "clashes tab", "model tree", "training mode"\n\n' +
+        'Just describe what you want — I understand short commands too!';
     }
+
+    // ── Short-form / single-word commands ──────────────────────────
+    // These catch minimal inputs that users naturally try
+    if (/^summary$|^stats$|^report$/i.test(text)) return processNLCommand('analyze clashes', s, d) || 'No data yet. Load models and run detection first.';
+    if (/^clashes?\s*\??$|^results?\s*\??$/i.test(text)) { d({t:A.TAB,v:'clashes'}); return s.clashes.length ? s.clashes.length + ' clashes. Opened Clashes tab.' : 'No clashes yet.'; }
+    if (/^issues?\s*\??$/i.test(text)) { d({t:A.TAB,v:'issues'}); return s.issues.length ? s.issues.length + ' issues. Opened Issues tab.' : 'No issues yet.'; }
+    if (/^models?\s*\??$/i.test(text)) { d({t:A.TAB,v:'models'}); return s.models.length ? s.models.length + ' model'+(s.models.length>1?'s':'')+' loaded.' : 'No models loaded.'; }
+    if (/^settings?$/i.test(text)) { d({t:A.SETTINGS,v:true}); return 'Opened settings.'; }
+    if (/^bcf$/i.test(text)) { if(!s.issues.length&&!s.clashes.length)return 'Nothing to export.'; exportBCF(s.issues.length?s.issues:s.clashes,'2.1',s.viewpoints); return 'BCF exported.'; }
+    if (/^ifc$/i.test(text)) { if(window._ccOpenIFC) window._ccOpenIFC(); return 'Opening IFC file picker...'; }
+    if (/^(?:undo|cancel\s+that|never\s*mind|oops)$/i.test(text)) return 'I can\'t undo actions, but you can: reset filters ("clear filters"), restore hidden elements ("show all"), or reset the view ("reset view").';
+    if (/^(?:thanks?|thank\s+you|ty|thx|cheers)$/i.test(text)) return 'You\'re welcome! Let me know if you need anything else.';
+    if (/^(?:hi|hello|hey|yo|sup)$/i.test(text)) return 'Hey! I\'m ready to help. Try "help" to see what I can do, or just describe what you need.';
 
     // ── Q&A ────────────────────────────────────────────────────────
     if (/how many clashes?|clash count|number of clashes?|clashes? (?:found|detected|total|do we have)/.test(text)) {
@@ -13058,6 +13074,42 @@ function startApp() {
     if (/what.*project|current project|active project/.test(text)) {
       var proj = (s.projectList||[]).find(function(p){return p.id===s.activeProject;});
       return proj ? 'Active project: ' + proj.name + '.' : 'No active project.';
+    }
+    // Q&A: hard/soft/duplicate breakdown
+    if (/how many (?:hard|soft|duplicate)|(?:hard|soft|duplicate)\s+clash(?:es)?\s*\??/.test(text)) {
+      if (!s.clashes.length) return 'No clashes detected yet.';
+      var hard = s.clashes.filter(function(c){return c.type==='hard';}).length;
+      var soft = s.clashes.filter(function(c){return c.type==='soft'||c.type==='clearance';}).length;
+      var dup = s.clashes.filter(function(c){return c.type==='duplicate';}).length;
+      return s.clashes.length + ' clashes: ' + hard + ' hard, ' + soft + ' soft' + (dup ? ', ' + dup + ' duplicates' : '') + '.';
+    }
+    // Q&A: discipline breakdown
+    if (/(?:which|what)\s+discipline|discipline\s+(?:has|with)\s+most|clashes?\s+by\s+discipline/.test(text)) {
+      if (!s.clashes.length) return 'No clashes to analyse yet.';
+      var discCounts = {};
+      s.clashes.forEach(function(c){ (c.disciplines||[]).forEach(function(dd){ discCounts[dd]=(discCounts[dd]||0)+1; }); });
+      if (!Object.keys(discCounts).length) return 'No discipline data available on current clashes.';
+      var sorted = Object.keys(discCounts).sort(function(a,b){return discCounts[b]-discCounts[a];});
+      return 'Clashes by discipline: ' + sorted.map(function(k){return k+' ('+discCounts[k]+')';}).join(', ') + '.';
+    }
+    // Q&A: type pair breakdown
+    if (/(?:which|what)\s+types?\s+(?:are\s+)?clash|clash.*type\s+pair|type.*most\s+clash|most\s+common\s+clash/.test(text)) {
+      if (!s.clashes.length) return 'No clashes to analyse yet.';
+      var tpCounts = {};
+      s.clashes.forEach(function(c){
+        var tA = (c.elemAType||'').replace(/^Ifc/,''), tB = (c.elemBType||'').replace(/^Ifc/,'');
+        if (tA && tB) { var pair = tA < tB ? tA+' vs '+tB : tB+' vs '+tA; tpCounts[pair]=(tpCounts[pair]||0)+1; }
+      });
+      if (!Object.keys(tpCounts).length) return 'No type data available.';
+      var topPairs = Object.keys(tpCounts).sort(function(a,b){return tpCounts[b]-tpCounts[a];}).slice(0,5);
+      return 'Top clashing pairs:\n' + topPairs.map(function(p,i){return (i+1)+'. '+p+' ('+tpCounts[p]+')';}).join('\n');
+    }
+    // Q&A: natural conversational ("any problems?", "what's wrong?", "status?")
+    if (/(?:any|are\s+there)\s+(?:problems?|issues?|conflicts?|clashes?|collisions?)|what'?s\s+(?:wrong|happening|the\s+status|going\s+on)|status\s*\??$/.test(text)) {
+      if (!s.models.length) return 'No models loaded yet. Drag and drop IFC files to get started.';
+      if (!s.clashes.length) return s.models.length + ' model' + (s.models.length>1?'s':'') + ' loaded, no clashes detected yet. Say "run detection" to check.';
+      var op2 = s.clashes.filter(function(c){return c.status==='open';}).length;
+      return s.clashes.length + ' clashes found (' + op2 + ' open). Say "summary" for a full breakdown.';
     }
 
     // ── Clash setup ────────────────────────────────────────────────
@@ -13605,6 +13657,64 @@ function startApp() {
     if (/(?:section|cut|slice)\s+(?:plane\s+)?(?:on\s+)?z|z\s+(?:section|cut)/.test(text)) { d({t:A.SECTION,axis:'z'}); return 'Section plane set on Z axis.'; }
     if (/(?:remove|clear|off|disable|hide)\s+(?:the\s+)?(?:section|cut|slice|clipping)/.test(text)) { d({t:A.SECTION,axis:null}); d({t:A.SECTION_BOX,v:null}); return 'Section planes cleared.'; }
 
+    // Camera views: top, front, back, left, right, bottom, isometric
+    var viewDirs = {top:[0,1,0],bottom:[0,-1,0],front:[0,0,1],back:[0,0,-1],left:[-1,0,0],right:[1,0,0]};
+    var viewMatch = text.match(/(?:show\s+|go\s+to\s+|switch\s+to\s+)?(top|bottom|front|back|left|right|iso(?:metric)?)\s*(?:view)?$|^(top|bottom|front|back|left|right|iso(?:metric)?)$/);
+    if (viewMatch) {
+      var vName = (viewMatch[1]||viewMatch[2]).replace(/^iso$/,'isometric');
+      var S3 = window._ccState3d;
+      if (S3 && S3.orbit && S3.cam) {
+        var dir = viewDirs[vName];
+        if (dir) {
+          var box = new THREE.Box3(); S3.mg.children.forEach(function(g){if(g.visible)box.expandByObject(g);});
+          if(!box.isEmpty()){var c=new THREE.Vector3(),sz=new THREE.Vector3();box.getCenter(c);box.getSize(sz);var dist=Math.max(sz.x,sz.y,sz.z)*1.5;S3.cam.position.set(c.x+dir[0]*dist,c.y+dir[1]*dist,c.z+dir[2]*dist);S3.orbit.target.copy(c);S3.orbit.update();invalidate(5);}
+        } else if (/iso/.test(vName)) {
+          var box2=new THREE.Box3();S3.mg.children.forEach(function(g){if(g.visible)box2.expandByObject(g);});
+          if(!box2.isEmpty()){var c2=new THREE.Vector3(),sz2=new THREE.Vector3();box2.getCenter(c2);box2.getSize(sz2);var d2=Math.max(sz2.x,sz2.y,sz2.z)*1.5;S3.cam.position.set(c2.x+d2*0.7,c2.y+d2*0.7,c2.z+d2*0.7);S3.orbit.target.copy(c2);S3.orbit.update();invalidate(5);}
+        }
+        return vName.charAt(0).toUpperCase()+vName.slice(1)+' view.';
+      }
+      return 'No 3D view available.';
+    }
+
+    // Visibility: hide/show/isolate by type
+    var hideTypeMatch = text.match(/(?:hide|remove)\s+(?:all\s+)?(\w+?)s?\s*$/);
+    if (hideTypeMatch && !/filter|clash|marker|grid|axes?|section|tree|ghost/.test(hideTypeMatch[1])) {
+      var resolved = _resolveIfcType(hideTypeMatch[1]);
+      if (resolved) {
+        var ids = [];
+        s.models.forEach(function(m){(m.elements||[]).forEach(function(el){if(el.props&&el.props.ifcType===resolved)el.meshes.forEach(function(mesh){ids.push(mesh.userData.expressId);});});});
+        if (ids.length && window._ccTempHide) { window._ccTempHide(ids); return 'Hidden ' + ids.length + ' ' + resolved.replace('Ifc','') + ' elements. Say "show all" to restore.'; }
+      }
+    }
+    var isolateMatch = text.match(/(?:isolate|show\s+only|only\s+show)\s+(?:all\s+)?(\w+?)s?\s*$/);
+    if (isolateMatch) {
+      var isoType = _resolveIfcType(isolateMatch[1]);
+      if (isoType) {
+        var isoIds = [];
+        s.models.forEach(function(m){(m.elements||[]).forEach(function(el){if(el.props&&el.props.ifcType===isoType)el.meshes.forEach(function(mesh){isoIds.push(mesh.userData.expressId);});});});
+        if (isoIds.length && window._ccIsolate) { window._ccIsolate(isoIds); return 'Isolated ' + isoIds.length + ' ' + isoType.replace('Ifc','') + ' elements. Say "show all" to restore.'; }
+      }
+    }
+    if (/(?:show|restore|unhide)\s+all\s*(?:elements?)?$|^show\s+all$/.test(text)) {
+      if (window._ccTempUnhide) window._ccTempUnhide();
+      if (window._ccUnisolate) window._ccUnisolate();
+      if (_unghostAll) _unghostAll();
+      return 'All elements restored.';
+    }
+
+    // Element finder: "find beams", "search for pipes", "select walls"
+    var findMatch = text.match(/(?:find|search\s+(?:for)?|select|highlight)\s+(?:all\s+)?(\w+?)s?\s*$/);
+    if (findMatch && !/clash|issue|model|filter|storey|floor/.test(findMatch[1])) {
+      var findType = _resolveIfcType(findMatch[1]);
+      if (findType) {
+        var count = 0;
+        s.models.forEach(function(m){(m.elements||[]).forEach(function(el){if(el.props&&el.props.ifcType===findType)count++;});});
+        if (count && window._ccToggleFinder) { window._ccToggleFinder(); }
+        return count + ' ' + findType.replace('Ifc','') + ' element'+(count===1?'':'s')+' found. Use the element finder (Ctrl+F) to navigate.';
+      }
+    }
+
     // Render style
     var renderMatch = text.match(/(?:switch|change|set)\s+(?:to\s+)?(?:render\s+)?(?:style\s+)?(?:to\s+)?(standard|shaded|rendered|wireframe)/);
     if (!renderMatch) renderMatch = text.match(/(standard|shaded|rendered|wireframe)\s+(?:mode|style|view|render)/);
@@ -13710,7 +13820,22 @@ function startApp() {
       [['tree','close','hide'],   function(){d({t:A.TREE,v:false});return 'Tree closed.';}, 2],
       [['floor','plan','exit','close'],function(){d({t:A.FLOOR_PLAN,v:null});return 'Floor plan closed.';}, 2],
       [['new','create','issue'],  function(){d({t:A.MODAL,v:true});return 'New issue form.';}, 2],
-      [['reload','refresh'],      function(){setTimeout(function(){window.location.reload();},300);return 'Reloading\u2026';}, 1]
+      [['reload','refresh'],      function(){setTimeout(function(){window.location.reload();},300);return 'Reloading\u2026';}, 1],
+      // Camera views
+      [['top','view'],            function(){processNLCommand('top view',s,d);return 'Top view.';}, 1],
+      [['front','view'],          function(){processNLCommand('front view',s,d);return 'Front view.';}, 1],
+      [['back','rear','view'],    function(){processNLCommand('back view',s,d);return 'Back view.';}, 1],
+      [['left','view'],           function(){processNLCommand('left view',s,d);return 'Left view.';}, 2],
+      [['right','view'],          function(){processNLCommand('right view',s,d);return 'Right view.';}, 2],
+      [['isometric','iso'],       function(){processNLCommand('isometric view',s,d);return 'Isometric view.';}, 1],
+      // Visibility
+      [['show','restore','unhide','all'],function(){if(window._ccTempUnhide)window._ccTempUnhide();if(window._ccUnisolate)window._ccUnisolate();if(_unghostAll)_unghostAll();return 'All restored.';}, 2],
+      // Q&A shortcuts
+      [['summary','overview','report'],function(){return processNLCommand('analyze clashes',s,d)||'No data yet.';}, 1],
+      [['status','problems'],     function(){return processNLCommand('any problems',s,d)||'No data yet.';}, 1],
+      [['count','many','how'],    function(){return processNLCommand('how many clashes',s,d)||'No clashes yet.';}, 2],
+      // Addons tab
+      [['addons','addon','plugins'],function(){d({t:A.TAB,v:'ai'});return 'Addons tab.';}, 1]
     ];
     var inputWords = text.replace(/[,;:!?.]+/g,' ').split(/\s+/);
     var bestIntent = null, bestScore = 0, bestKwCount = 0;
