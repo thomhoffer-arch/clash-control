@@ -15998,19 +15998,6 @@ function startApp() {
     var sectionActive = s.sectionAxis || s.sectionCustom || (s.sectionBox && s.sectionBox.enabled);
     return html`<div style=${{display:'flex',flexDirection:'column',gap:0,overflowY:'auto',flex:1}}>
 
-      <!-- Project -->
-      <div style=${{padding:'.75rem',borderBottom:'1px solid var(--border-subtle)'}}>
-        <span style=${SEC}>Project</span>
-        <div style=${{display:'flex',gap:'.2rem'}}>
-          <button onClick=${function(){loadProject(d);}}
-            style=${{...S_BTN,flex:1,padding:'.3rem',fontSize:'0.8rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)'}}>Import Project</button>
-          <button onClick=${function(){saveProject(s);}}
-            disabled=${!s.models.length&&!s.clashes.length&&!s.issues.length}
-            style=${{...S_BTN,flex:1,padding:'.3rem',fontSize:'0.8rem',background:s.models.length||s.clashes.length||s.issues.length?'var(--accent)':'var(--bg-secondary)',color:s.models.length||s.clashes.length||s.issues.length?'#fff':'var(--text-faint)'}}>Save Project</button>
-        </div>
-        <span style=${{fontSize:'0.63rem',color:'var(--text-faint)',display:'block',marginTop:'.15rem'}}>Save/load clashes, issues, viewpoints, and settings as a .ccproject file</span>
-      </div>
-
       <!-- Section / Clipping -->
       <div style=${{padding:'.75rem',borderBottom:'1px solid var(--border-subtle)'}}>
         <span style=${SEC}>Section / Clipping</span>
@@ -16061,6 +16048,8 @@ function startApp() {
         <span style=${SEC}>Export</span>
         <${_ExportFlyout} label="Export" icon=${html`<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>`}
           items=${[
+            {label:'Project (.ccproject)', hint:'Clashes, issues, viewpoints, settings', disabled:!s.models.length&&!s.clashes.length&&!s.issues.length, action:function(){saveProject(s);}},
+            {type:'divider'},
             {label:'BCF 2.1', hint:'Clashes & issues', disabled:!s.clashes.length&&!s.issues.length, action:function(){var all=s.clashes.concat(s.issues);exportBCF(all,'2.1',s.viewpoints);}},
             {label:'BCF 3.0', hint:'With extensions', disabled:!s.clashes.length&&!s.issues.length, action:function(){var all=s.clashes.concat(s.issues);exportBCF(all,'3.0',s.viewpoints);}},
             {type:'divider'},
@@ -16071,8 +16060,14 @@ function startApp() {
       <!-- Import -->
       <div style=${{padding:'.75rem',borderBottom:'1px solid var(--border-subtle)'}}>
         <span style=${SEC}>Import</span>
-        <button onClick=${function(){importBCF(d);}}
-          style=${{...S_BTN,width:'100%',padding:'.35rem .5rem',fontSize:'0.8rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)'}}>Import BCF</button>
+        <div style=${{display:'flex',flexDirection:'column',gap:'.2rem'}}>
+          <button onClick=${function(){loadProject(d);}}
+            style=${{...S_BTN,width:'100%',padding:'.35rem .5rem',fontSize:'0.8rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)'}}>Project (.ccproject)</button>
+          <button onClick=${function(){importBCF(d);}}
+            style=${{...S_BTN,width:'100%',padding:'.35rem .5rem',fontSize:'0.8rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)'}}>BCF</button>
+          <button onClick=${function(){if(window._ccOpen2D)window._ccOpen2D();}}
+            style=${{...S_BTN,width:'100%',padding:'.35rem .5rem',fontSize:'0.8rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border)'}}>2D Floor Plan (DXF / PDF / DWG)</button>
+        </div>
       </div>
 
       <!-- Training Mode -->
