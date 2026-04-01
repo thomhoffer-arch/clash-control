@@ -1236,7 +1236,7 @@ function startApp() {
           props.axis = _extractAxis(api, modelID, line);
         }
       }
-    } catch(e) {}
+    } catch(e) { console.warn('[IFC] extractProperties failed for expressID=' + expressID, e); }
     return props;
   }
 
@@ -1766,7 +1766,7 @@ function startApp() {
           if (spPm) { spProps.quantities = spPm.quantities; spProps.psets = spPm.psets; }
           rawElements.push({expressId:sid, meshes:[], box:new THREE.Box3(), props:spProps, _lodProxy:null});
         }
-      } catch(e) {}
+      } catch(e) { console.warn('[IFC] IfcSpace extraction failed:', e); }
 
       // Close WASM model immediately — all data is now in JavaScript memory
       api.CloseModel(modelID);
@@ -1896,7 +1896,7 @@ function startApp() {
                 color: c ? {r:c.x, g:c.y, b:c.z, a:c.w} : null,
                 tf:tf});
               xfer.push(tf.buffer);
-            } catch(ex) {}
+            } catch(ex) { console.warn('[IFC Worker] Geometry extraction failed for expressID=' + eid + ', geoExpId=' + (geoExpId||'?'), ex); }
             finally { if (gd) try { gd.delete(); } catch(e2) {} }
           }
           if (geos.length > 0) {
@@ -3255,7 +3255,7 @@ function startApp() {
       while (runs.length > 20) runs.shift(); // keep last 20 runs
       localStorage.setItem('cc_detection_runs', JSON.stringify(runs));
       window.dispatchEvent(new Event('cc-training-data-change'));
-    } catch(e) {}
+    } catch(e) { console.warn('[Detect] Failed to save detection run summary:', e); }
 
     // ── Profiling summary ──────────────────────────────────────────
     _mark('done');
@@ -13901,7 +13901,7 @@ function startApp() {
     window._ccNLOpen = function(){ if(window._ccDispatch) window._ccDispatch({t:'TAB',v:'ai'}); else setOpen(true); if(inputRef.current) setTimeout(function(){inputRef.current&&inputRef.current.focus();},50); };
     window._ccNLSetInput = function(text){ setInput(text); };
     window._ccNLSetStatus = function(status, back){ setLLMStatus(status); setBackend(back); };
-    var stMsgs = useState([{role:'assistant', text:'Control ClashControl with plain English — try "load ifc", "structural vs MEP", "switch to light", "analyze clashes", or "help" for all commands.'}]);
+    var stMsgs = useState([{role:'assistant', text:'Welcome to ClashControl! I\'m your AI assistant — I can help you load models, run clash detection, adjust the view, and more. Pick one of the options below to get started, or type any command in plain English.'}]);
     var msgs = stMsgs[0], setMsgs = stMsgs[1];
     var stInput = useState(''), input = stInput[0], setInput = stInput[1];
     var stLoading = useState(false), loading = stLoading[0], setLoading = stLoading[1];
