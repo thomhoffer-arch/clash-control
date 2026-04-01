@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.6.13 (2026-04-01)
+- Complete Revit connector integration to match ClashControlConnector protocol
+
 ## v4.6.12 (2026-04-01)
 - Deduplicate: extract shared resize handler and IndexedDB helper
 
