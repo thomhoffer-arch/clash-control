@@ -166,6 +166,7 @@
       .cc-left-rail{display:none!important}
       /* Side panel becomes full-width overlay, leaving room for bottom nav */
       .cc-side-panel{position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:56px!important;width:100%!important;z-index:1040!important;border:none!important}
+      .cc-left-panel{position:fixed!important;top:0!important;left:0!important;right:0!important;bottom:56px!important;width:100%!important;z-index:1040!important;border:none!important}
       /* Bottom mobile nav bar — above side panel */
       .cc-mobile-nav{display:flex!important;z-index:1050!important}
       /* Header: compact */
@@ -13012,17 +13013,13 @@ function startApp() {
 
     // ── Help ───────────────────────────────────────────────────────
     if (/^help$|what can you do|how (?:do i|to) use|what.*commands?/.test(text)) {
-      return 'I can control ClashControl with plain English:\n\n' +
-        '**Clash detection:** "check structural vs MEP", "find near misses", "max gap 75mm"\n' +
-        '**Filters:** "show open", "group by storey", "reset filters"\n' +
-        '**Batch:** "mark all open clashes as resolved", "assign all issues to John"\n' +
-        '**Analysis:** "how many clashes?", "analyze clashes", "summary"\n' +
-        '**Theme:** "switch to light", "dark mode"\n' +
-        '**Files:** "load ifc", "load 2d", "import bcf", "export bcf"\n' +
-        '**Navigation:** "show clashes tab", "open settings", "open bridge", "training mode"\n' +
-        '**Viewer:** "section x", "wireframe mode", "show markers", "hide grid"\n' +
-        '**Tools:** "measure length", "save viewpoint", "save project"\n' +
-        '**Display:** "color by discipline", "show model tree", "reset view"';
+      return 'Sure! Just type what you need in plain English. Here are some things I can help with:\n\n' +
+        'To run a clash check, try something like "check structural vs MEP" or "find near misses with 75mm gap".\n\n' +
+        'You can filter results — "show open clashes", "group by storey", or "show only critical".\n\n' +
+        'For batch actions, say "mark all open as resolved" or "assign everything to John".\n\n' +
+        'Ask me questions too — "how many clashes?", "analyze clashes", or just "summary".\n\n' +
+        'I can also handle files ("load ifc", "export bcf"), change the view ("section x", "wireframe mode", "hide grid"), adjust the theme ("switch to light"), or open panels ("show settings", "clashes tab").\n\n' +
+        'Basically, just describe what you want and I\'ll figure it out.';
     }
 
     // ── Q&A ────────────────────────────────────────────────────────
@@ -14036,8 +14033,8 @@ function startApp() {
     }, [open]);
 
     useEffect(function() {
-      if (open && inputRef.current) setTimeout(function(){ inputRef.current && inputRef.current.focus(); }, 80);
-    }, [open]);
+      if ((open || isDocked) && inputRef.current) setTimeout(function(){ inputRef.current && inputRef.current.focus(); }, 80);
+    }, [open, isDocked]);
 
     useEffect(function() {
       if (bottomRef.current) bottomRef.current.scrollIntoView({behavior:'smooth'});
@@ -14411,15 +14408,19 @@ function startApp() {
           } else {
             suggestions = ['Group by type', 'Show hard clashes', 'Export to BCF', 'Help'];
           }
-          return html`<div style=${{display:'flex',gap:'.3rem',flexWrap:'wrap',marginTop:'.25rem'}}>
-            ${suggestions.map(function(sug){return html`<button key=${sug} onClick=${function(){
+          return html`<div style=${{display:'flex',flexDirection:'column',gap:'.2rem',marginTop:'.25rem'}}>
+            ${suggestions.map(function(sug){return html`<div key=${sug} onClick=${function(){
               send(sug);
             }} style=${{
-              background:'var(--accent-bg)', border:'1px solid rgba(139,92,246,.3)',
-              color:'#c4b5fd', borderRadius:99, padding:'.25rem .6rem',
-              fontSize:'0.75rem', cursor:'pointer', fontFamily:'inherit',
-              transition:'background .15s, border-color .15s'
-            }}>${sug}</button>`})}
+              background:'none', border:'none',
+              color:'var(--text-muted)', padding:'.2rem .4rem',
+              fontSize:'0.82rem', cursor:'pointer', fontFamily:'inherit',
+              borderLeft:'2px solid transparent',
+              transition:'color .15s, border-color .15s'
+            }}
+            onMouseEnter=${function(e){e.currentTarget.style.color='var(--accent)';e.currentTarget.style.borderLeftColor='var(--accent)';}}
+            onMouseLeave=${function(e){e.currentTarget.style.color='var(--text-muted)';e.currentTarget.style.borderLeftColor='transparent';}}
+            >${sug}</div>`})}
           </div>`;
         }()}
         <div ref=${bottomRef}></div>
@@ -14658,19 +14659,7 @@ function startApp() {
         ${tabBtn('issues',  SVG_ISSUES,  'Issues',   issueN)}
         ${tabBtn('navigator',SVG_EXPLORE, 'Navigator', 0)}
         ${tabBtn('standards',SVG_STANDARDS,'Standards',0)}
-        <button class="cc-tip" data-tip="AI Chat" onClick=${function(){d({t:A.TAB,v:s.tab==='ai'?null:'ai'});}}
-          style=${{width:'100%',height:40,background:s.tab==='ai'?'rgba(124,58,237,.15)':'none',border:'none',
-            cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',position:'relative',
-            borderRight:s.tab==='ai'?'3px solid #a78bfa':'3px solid transparent',
-            color:s.tab==='ai'?'#a78bfa':'var(--text-muted)',transition:'background .15s,color .15s'}}>
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_AI_CHAT}}></svg>
-          ${_aiDotCol && s.tab!=='ai' && html`<span style=${{position:'absolute',bottom:6,right:8,width:6,height:6,borderRadius:'50%',background:_aiDotCol,
-            boxShadow:'0 0 4px '+_aiDotCol,pointerEvents:'none'}}></span>`}
-        </button>
       </div>
-      ${iconBtn(function(){if(window._ccToggleTutorial)window._ccToggleTutorial();},
-        html`<span style=${{fontSize:'0.92rem',fontWeight:700}}>ⓘ</span>`,
-        'Quick start guide')}
       <!-- Project switcher -->
       <div style=${{position:'relative'}}>
         <button onClick=${function(){setProjOpen(!projOpen)}}
@@ -14763,11 +14752,6 @@ function startApp() {
       </div>
       ${iconBtn(function(){d({t:A.UPD_PREFS,u:{theme:isDark?'light':'dark'}});},
         isDark?'☀':'☾', isDark?'Light mode':'Dark mode')}
-      ${iconBtn(function(){d({t:A.REVIT_BRIDGE,v:true});},
-        html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"/>
-        </svg>`,
-        'Revit Bridge')}
       ${iconBtn(function(){d({t:A.TAB,v:s.tab==='addons'?null:'addons'});},
         html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
           <path d="M12 2v4m0 12v4M2 12h4m12 0h4"/><circle cx="12" cy="12" r="3"/><path d="M6.34 6.34l2.83 2.83m5.66 5.66l2.83 2.83M17.66 6.34l-2.83 2.83m-5.66 5.66l-2.83 2.83"/>
@@ -14776,6 +14760,9 @@ function startApp() {
       ${iconBtn(function(){d({t:A.SETTINGS,v:true});},
         html`<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" dangerouslySetInnerHTML=${{__html:SVG_GEAR}}></svg>`,
         'Settings')}
+      ${iconBtn(function(){if(window._ccToggleTutorial)window._ccToggleTutorial();},
+        html`<span style=${{fontSize:'0.92rem',fontWeight:700}}>ⓘ</span>`,
+        'Quick start guide')}
     </div>`;
   }
 
@@ -15402,6 +15389,27 @@ function startApp() {
     var ids = Object.keys(addons);
     var SEC={fontSize:'0.72rem',fontWeight:700,color:'var(--accent-subtle)',textTransform:'uppercase',letterSpacing:'.06em',padding:'.6rem .85rem .3rem'};
     var CARD={background:'var(--card-bg)',border:'1px solid var(--card-border)',borderRadius:10,padding:'.65rem .75rem',display:'flex',gap:'.6rem',alignItems:'flex-start'};
+    var _installPollRef = useRef(null);
+    var _installCopiedSt = useState(false), installCopied = _installCopiedSt[0], setInstallCopied = _installCopiedSt[1];
+    // Clean up polling on unmount
+    useEffect(function(){ return function(){ if(_installPollRef.current) clearInterval(_installPollRef.current); }; },[]);
+    function installAndEnable(id, d) {
+      var cmd = 'pip install clashcontrol-engine && clashcontrol-engine';
+      navigator.clipboard.writeText(cmd).catch(function(){});
+      setInstallCopied(true);
+      window._ccActivateAddon(id);
+      try{localStorage.setItem('cc_local_engine','1');}catch(e){}
+      d({t:'UPD_LOCAL_ENGINE',u:{active:true}});
+      if(_installPollRef.current) clearInterval(_installPollRef.current);
+      var attempts=0;
+      _installPollRef.current = setInterval(function(){
+        attempts++;
+        if(attempts>60){clearInterval(_installPollRef.current);_installPollRef.current=null;return;}
+        if(window._checkLocalEngine) window._checkLocalEngine(d).then(function(ready){
+          if(ready){clearInterval(_installPollRef.current);_installPollRef.current=null;setInstallCopied(false);}
+        });
+      },2000);
+    }
 
     return html`<div style=${{display:'flex',flexDirection:'column',gap:0,overflowY:'auto',flex:1}}>
       <div style=${SEC}>Installed Addons</div>
@@ -15429,13 +15437,32 @@ function startApp() {
                   color:active?'var(--pill-green)':'var(--text-faint)'}}>${active?'ACTIVE':'OFF'}</span>
               </div>
               <div style=${{fontSize:'0.72rem',color:'var(--text-secondary)',lineHeight:1.6,marginBottom:'.3rem'}}>${addon.description||''}</div>
-              <button onClick=${function(){
-                if (active) window._ccDeactivateAddon(id);
-                else window._ccActivateAddon(id);
-              }} style=${{padding:'.25rem .6rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',border:'1px solid var(--border)',
-                background:active?'var(--bg-secondary)':'var(--accent)',
-                color:active?'var(--text-secondary)':'#fff',
-                fontFamily:'inherit'}}>${active?'Disable':'Enable'}</button>
+              ${function(){
+                var isLocalEngine = id==='local-engine';
+                var le = isLocalEngine ? (s.localEngine||{}) : null;
+                var needsInstall = isLocalEngine && !active && !le.available;
+                if (needsInstall) {
+                  return html`<div>
+                    <button onClick=${function(){installAndEnable(id, d);}}
+                      style=${{padding:'.25rem .6rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',border:'none',
+                        background:'var(--accent)',color:'#fff',fontFamily:'inherit'}}>
+                      ${installCopied?'Command copied — waiting for engine…':'Enable & Install'}</button>
+                    ${installCopied && html`<div style=${{fontSize:'0.72rem',color:'#60a5fa',lineHeight:1.6,padding:'.3rem .5rem',marginTop:'.3rem',
+                      background:'rgba(37,99,235,.08)',borderRadius:6}}>
+                      Paste the copied command in your terminal and press Enter. I'll connect automatically once the engine starts.
+                    </div>`}
+                  </div>`;
+                }
+                return html`<div>
+                  <button onClick=${function(){
+                    if (active) window._ccDeactivateAddon(id);
+                    else window._ccActivateAddon(id);
+                  }} style=${{padding:'.25rem .6rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',border:'1px solid var(--border)',
+                    background:active?'var(--bg-secondary)':'var(--accent)',
+                    color:active?'var(--text-secondary)':'#fff',
+                    fontFamily:'inherit'}}>${active?'Disable':'Enable'}</button>
+                </div>`;
+              }()}
               ${active && addon.panel && html`<div style=${{borderTop:'1px solid var(--border-subtle)',marginTop:'.4rem',paddingTop:'.2rem'}}>
                 ${addon.panel(html, s, d)}
               </div>`}
@@ -15451,35 +15478,34 @@ function startApp() {
     </div>`;
   }
 
-  // ── Side Panel ─────────────────────────────────────────────────
+  // ── Left Panel (Models, Clashes, Issues, etc.) ─────────────────
 
-  function SidePanel(props) {
+  function LeftPanel(props) {
     var s=props.s, d=props.d;
     var tab=s.tab;
-    // Hooks MUST be called unconditionally (before any early return)
     var widthSt=useState(300), panelW=widthSt[0], setPanelW=widthSt[1];
     var dragRef=useRef(null);
     if (!tab) return null;
     var projects=s.projectList||[];
     var activeProj=projects.find(function(p){return p.id===s.activeProject;})||projects[0]||{name:'Default'};
-    var TITLES={models:'Models',clashes:'Clashes',issues:'Issues',navigator:'Navigator',tools:'Tools',addons:'Addons',ai:'AI Chat'};
+    var TITLES={models:'Models',clashes:'Clashes',issues:'Issues',navigator:'Navigator',tools:'Tools',addons:'Addons',standards:'Standards'};
     function onResizeDown(e){
       e.preventDefault();
       dragRef.current={startX:e.clientX,startW:panelW};
       function onMove(ev){
         if(!dragRef.current) return;
-        var dx=dragRef.current.startX-ev.clientX;
+        var dx=ev.clientX-dragRef.current.startX;
         setPanelW(Math.max(200,Math.min(600,dragRef.current.startW+dx)));
       }
       function onUp(){dragRef.current=null;window.removeEventListener('mousemove',onMove);window.removeEventListener('mouseup',onUp);}
       window.addEventListener('mousemove',onMove);
       window.addEventListener('mouseup',onUp);
     }
-    return html`<div class="cc-side-panel" style=${{
+    return html`<div class="cc-left-panel" style=${{
       width:panelW,flexShrink:0,display:'flex',flexDirection:'column',overflow:'hidden',
-      background:'var(--bg-primary)',borderLeft:'1px solid var(--border-subtle)',position:'relative'
+      background:'var(--bg-primary)',borderRight:'1px solid var(--border-subtle)',position:'relative'
     }}>
-      <div onMouseDown=${onResizeDown} style=${{position:'absolute',left:0,top:0,bottom:0,width:8,cursor:'col-resize',zIndex:10,
+      <div onMouseDown=${onResizeDown} style=${{position:'absolute',right:0,top:0,bottom:0,width:8,cursor:'col-resize',zIndex:10,
         background:'transparent',transition:'background .15s'}} onMouseEnter=${function(e){e.currentTarget.style.background='rgba(59,130,246,0.3)';}} onMouseLeave=${function(e){e.currentTarget.style.background='transparent';}}></div>
       <div style=${{display:'flex',alignItems:'center',padding:'.6rem .85rem',
         borderBottom:'1px solid var(--border-subtle)',flexShrink:0,gap:'.5rem'}}>
@@ -15497,7 +15523,34 @@ function startApp() {
       ${tab==='standards' && html`<${StandardsPanel} s=${s} d=${d} />`}
       ${tab==='tools'    && html`<${ToolsPanel} s=${s} d=${d} />`}
       ${tab==='addons'   && html`<${AddonsPanel} s=${s} d=${d} />`}
-      ${tab==='ai'       && html`<${NLCommandPanel} s=${s} d=${d} docked=${true} />`}
+    </div>`;
+  }
+
+  // ── AI Chat Panel (always visible, right side) ────────────────
+
+  function AIChatPanel(props) {
+    var s=props.s, d=props.d;
+    var widthSt=useState(320), panelW=widthSt[0], setPanelW=widthSt[1];
+    var dragRef=useRef(null);
+    function onResizeDown(e){
+      e.preventDefault();
+      dragRef.current={startX:e.clientX,startW:panelW};
+      function onMove(ev){
+        if(!dragRef.current) return;
+        var dx=dragRef.current.startX-ev.clientX;
+        setPanelW(Math.max(250,Math.min(600,dragRef.current.startW+dx)));
+      }
+      function onUp(){dragRef.current=null;window.removeEventListener('mousemove',onMove);window.removeEventListener('mouseup',onUp);}
+      window.addEventListener('mousemove',onMove);
+      window.addEventListener('mouseup',onUp);
+    }
+    return html`<div class="cc-side-panel" style=${{
+      width:panelW,flexShrink:0,display:'flex',flexDirection:'column',overflow:'hidden',
+      background:'var(--bg-primary)',borderLeft:'1px solid var(--border-subtle)',position:'relative'
+    }}>
+      <div onMouseDown=${onResizeDown} style=${{position:'absolute',left:0,top:0,bottom:0,width:8,cursor:'col-resize',zIndex:10,
+        background:'transparent',transition:'background .15s'}} onMouseEnter=${function(e){e.currentTarget.style.background='rgba(59,130,246,0.3)';}} onMouseLeave=${function(e){e.currentTarget.style.background='transparent';}}></div>
+      <${NLCommandPanel} s=${s} d=${d} docked=${true} />
     </div>`;
   }
 
@@ -16439,13 +16492,13 @@ function startApp() {
       <input ref=${_gFileRef} type="file" accept=".ifc" multiple style=${{display:'none'}} onChange=${_gOnFiles} />
       <input ref=${_gFile2dRef} type="file" accept=".dxf,.pdf,.dwg" multiple style=${{display:'none'}} onChange=${_gOnFiles} />
       <${LeftRail} s=${s} d=${d} />
+      <${LeftPanel} s=${s} d=${d} />
       <div style=${{flex:1,display:'flex',flexDirection:'column',overflow:'hidden',position:'relative',minWidth:0}}>
         <${Header} s=${s} d=${d} />
         ${is2D ? html`<${View2D} s=${s} d=${d} />` : html`<${Viewer} s=${s} d=${d} />`}
         ${is2D && html`<${ExportBar} s=${s} d=${d} />`}
-        ${s.tab !== 'ai' && html`<${NLCommandPanel} s=${s} d=${d} />`}
       </div>
-      <${SidePanel} s=${s} d=${d} />
+      <${AIChatPanel} s=${s} d=${d} />
       ${s.showModal && html`<${NewIssueModal} d=${d} el=${s.modalElement} prefs=${s.prefs} clashes=${s.clashes} activeId=${s.activeId} />`}
       ${s.showSettings && html`<${SettingsModal} d=${d} s=${s} prefs=${s.prefs} models=${s.models} rules=${s.rules} />`}
       ${s.showRevitBridge && html`<${RevitBridgePanel} s=${s} d=${d} />`}
