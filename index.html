@@ -7996,6 +7996,65 @@ function startApp() {
     // Project file restoration now handled at App level (runs immediately on load,
     // no need to open the models tab first). See _restoreProjectFilesGlobal().
 
+    // Detect storey/level from a 2D filename, or prompt the user to pick one
+    function _detect2DStorey(filename, storeys, callback) {
+      var name = filename.replace(/\.[^.]+$/, '').toLowerCase();
+      // Common patterns: "Level 1", "L1", "Floor_2", "GF", "Ground", "B1", "Basement"
+      // Also: "01_First_Floor", "plan-level-3", "L03_Architectural"
+      var patterns = [
+        /(?:level|lvl|lv)\s*[-_.]?\s*(\d+)/i,
+        /(?:floor|flr)\s*[-_.]?\s*(\d+)/i,
+        /\bl[-_.]?(\d+)\b/i,
+        /(?:ground|gf|eg|rez)/i,
+        /(?:basement|ug|b)\s*[-_.]?\s*(\d*)/i,
+        /(?:roof|dach|attic)/i,
+      ];
+      // Try to match against known storeys first
+      if (storeys && storeys.length) {
+        for (var i = 0; i < storeys.length; i++) {
+          if (name.indexOf(storeys[i].toLowerCase()) !== -1) {
+            callback(storeys[i]);
+            return;
+          }
+        }
+        // Try partial match: extract level number from filename and match
+        for (var pi = 0; pi < patterns.length; pi++) {
+          var m = name.match(patterns[pi]);
+          if (m) {
+            var num = m[1] || '0';
+            for (var si = 0; si < storeys.length; si++) {
+              var sm = storeys[si].match(/(\d+)/);
+              if (sm && sm[1] === num) { callback(storeys[si]); return; }
+            }
+          }
+        }
+      }
+      // No match — prompt user
+      var allStoreys = storeys && storeys.length ? storeys : [];
+      if (!allStoreys.length) {
+        // Gather storeys from all loaded models
+        (window._ccLatestState && window._ccLatestState.models || []).forEach(function(m) {
+          (m.storeys || []).forEach(function(st) { if (allStoreys.indexOf(st) === -1) allStoreys.push(st); });
+        });
+      }
+      if (!allStoreys.length) { callback(null); return; }
+      // Build a simple prompt with the available storeys
+      var msg = 'Which level is "' + filename + '" for?\n\n';
+      allStoreys.forEach(function(st, idx) { msg += (idx + 1) + '. ' + st + '\n'; });
+      msg += '\nEnter number (or leave blank to skip):';
+      var answer = prompt(msg);
+      if (answer && answer.trim()) {
+        var idx = parseInt(answer.trim(), 10);
+        if (idx >= 1 && idx <= allStoreys.length) { callback(allStoreys[idx - 1]); return; }
+        // Maybe they typed the name directly
+        var lower = answer.trim().toLowerCase();
+        for (var ai = 0; ai < allStoreys.length; ai++) {
+          if (allStoreys[ai].toLowerCase() === lower) { callback(allStoreys[ai]); return; }
+        }
+      }
+      callback(null);
+    }
+
     function processFiles(files) {
       setErr('');
       var errors = [];
@@ -8256,11 +8315,14 @@ function startApp() {
               var dxfData = parseDXF(text);
               if (dxfData.entities.length === 0) { errors.push(f.name + ': No entities found in DXF file.'); return; }
               var result = renderDXFToCanvas(dxfData, 2048, 2048);
-              d({ t: 'ADD_UNDERLAY', v: { id: uid(), name: f.name, type: 'dxf', canvasData: result.canvas.toDataURL('image/png'),
-                offsetX: 0, offsetY: 0, scale: 1, rotation: 0, opacity: 0.7, visible: true,
-                extentW: result.extentW, extentH: result.extentH, storeyName: null }});
-              d({ t: 'UNDERLAY_MODE', v: 'view2d' });
-              _gcEvent('underlay-loaded', 'DXF');
+              var allStoreys = []; s.models.forEach(function(m){ (m.storeys||[]).forEach(function(st){ if(allStoreys.indexOf(st)===-1) allStoreys.push(st); }); });
+              _detect2DStorey(f.name, allStoreys, function(storey) {
+                d({ t: 'ADD_UNDERLAY', v: { id: uid(), name: f.name, type: 'dxf', canvasData: result.canvas.toDataURL('image/png'),
+                  offsetX: 0, offsetY: 0, scale: 1, rotation: 0, opacity: 0.7, visible: true,
+                  extentW: result.extentW, extentH: result.extentH, storeyName: storey }});
+                d({ t: 'UNDERLAY_MODE', v: 'view2d' });
+                _gcEvent('underlay-loaded', 'DXF' + (storey ? ' → ' + storey : ''));
+              });
             }).catch(function(e) { errors.push(f.name + ': ' + (e.message || 'DXF parse failed')); });
           });
           return;
@@ -8269,11 +8331,14 @@ function startApp() {
           chain = chain.then(function() {
             setLoadMsg('Loading ' + f.name + '…');
             return f.arrayBuffer().then(function(buf) { return loadPDFPage(buf, 1); }).then(function(result) {
-              d({ t: 'ADD_UNDERLAY', v: { id: uid(), name: f.name, type: 'pdf', canvasData: result.canvas.toDataURL('image/png'),
-                offsetX: 0, offsetY: 0, scale: 1, rotation: 0, opacity: 0.7, visible: true,
-                extentW: result.extentW, extentH: result.extentH, storeyName: null, numPages: result.numPages, page: 1 }});
-              d({ t: 'UNDERLAY_MODE', v: 'view2d' });
-              _gcEvent('underlay-loaded', 'PDF');
+              var allStoreys = []; s.models.forEach(function(m){ (m.storeys||[]).forEach(function(st){ if(allStoreys.indexOf(st)===-1) allStoreys.push(st); }); });
+              _detect2DStorey(f.name, allStoreys, function(storey) {
+                d({ t: 'ADD_UNDERLAY', v: { id: uid(), name: f.name, type: 'pdf', canvasData: result.canvas.toDataURL('image/png'),
+                  offsetX: 0, offsetY: 0, scale: 1, rotation: 0, opacity: 0.7, visible: true,
+                  extentW: result.extentW, extentH: result.extentH, storeyName: storey, numPages: result.numPages, page: 1 }});
+                d({ t: 'UNDERLAY_MODE', v: 'view2d' });
+                _gcEvent('underlay-loaded', 'PDF' + (storey ? ' → ' + storey : ''));
+              });
             }).catch(function(e) { errors.push(f.name + ': ' + (e.message || 'PDF load failed')); });
           });
           return;
