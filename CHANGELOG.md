@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.6.22 (2026-04-02)
+- fix: preserve camera on model sync, expose selection functions for addons
+
 ## v4.6.21 (2026-04-02)
 - fix: auto-pull model on Revit sync-to-central notification
 
