@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.7.3 (2026-04-02)
+- feat: redesign clash detection setup with natural language options
+
 ## v4.7.2 (2026-04-02)
 - refactor: extract data quality engines into addons/data-quality.js
 
