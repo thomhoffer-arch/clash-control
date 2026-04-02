@@ -214,6 +214,10 @@
   // ── Message handler ────────────────────────────────────────────
 
   function _handleRevitMessage(msg, d) {
+    // Debug: log all incoming messages (except high-frequency element-batch)
+    if (msg.type !== 'element-batch' && msg.type !== 'pong') {
+      console.log('%c[Revit→CC] ' + msg.type, 'color:#60a5fa', msg);
+    }
     switch (msg.type) {
       case 'pong':
       case 'status':
@@ -322,6 +326,7 @@
       case 'selection-changed':
         // Revit → Browser selection sync
         if (!_selectionSyncEnabled) break;
+        d({t:'BRIDGE_LOG', logType:'info', text:'Selection from Revit: ' + JSON.stringify(msg.globalIds || msg.elementIds || msg.revitIds || []).slice(0,80)});
         _handleSelectionChanged(msg, d);
         break;
 
@@ -577,9 +582,14 @@
   // ── Selection sync (Revit → Browser) ───────────────────────────
 
   function _handleSelectionChanged(msg, d) {
-    var globalIds = msg.globalIds || [];
+    var rawIds = msg.globalIds || msg.elementIds || msg.revitIds || [];
     var state = window._ccLatestState;
     if (!state) return;
+
+    // Resolve any revitIds to globalIds using the index
+    var globalIds = rawIds.map(function(id) {
+      return _revitIdIndex[id] || id; // try revitId lookup, fall back to treating as globalId
+    });
 
     if (globalIds.length === 0) {
       // Deselect — clear highlights
