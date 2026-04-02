@@ -14674,16 +14674,11 @@ function startApp() {
         </div>`}
       </div>
       <div style=${{flex:1}}></div>
-      <div class="cc-ifc-load-btn">${(function(){
-        var proj=(s.projectList||[]).find(function(p){return p.id===s.activeProject;});
-        var isRevit=proj&&proj.sourceType==='revit';
-        return iconBtn(function(){
-          if(isRevit){alert('This project is connected to Revit. Import IFC into a different project.');return;}
+      <div class="cc-ifc-load-btn">${iconBtn(function(){
           if(window._ccOpenIFC) window._ccOpenIFC();
         },
-        html`<span style=${{fontWeight:700,fontSize:'0.8rem',letterSpacing:'.03em',opacity:isRevit?0.4:1}}>IFC</span>`,
-        isRevit?'IFC import disabled — Revit project':'Load IFC model');
-      }())}</div>
+        html`<span style=${{fontWeight:700,fontSize:'0.8rem',letterSpacing:'.03em'}}>IFC</span>`,
+        'Load IFC model')}</div>
       ${iconBtn(function(){
           if(window._ccOpen2D) window._ccOpen2D();
         },
@@ -15333,7 +15328,7 @@ function startApp() {
                 if (isPwaInstalled && active) {
                   return html`<div style=${{fontSize:'0.69rem',color:'var(--text-faint)'}}>Always on in installed app</div>`;
                 }
-                return html`<div>
+                return html`<div style=${{display:'flex',gap:'.3rem',alignItems:'center'}}>
                   <button onClick=${function(){
                     if (active) window._ccDeactivateAddon(id);
                     else window._ccActivateAddon(id);
@@ -15341,6 +15336,9 @@ function startApp() {
                     background:active?'var(--bg-secondary)':'var(--accent)',
                     color:active?'var(--text-secondary)':'#fff',
                     fontFamily:'inherit'}}>${active?'Disable':'Enable'}</button>
+                  ${active && id==='revit-bridge' && html`<button onClick=${function(){d({t:'REVIT_BRIDGE',v:true});}}
+                    style=${{padding:'.25rem .6rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',border:'1px solid var(--border)',
+                      background:'#1e3a5f',color:'#93c5fd',fontFamily:'inherit'}}>Connect</button>`}
                 </div>`;
               }()}
               ${active && addon.panel && html`<div style=${{borderTop:'1px solid var(--border-subtle)',marginTop:'.4rem',paddingTop:'.2rem'}}>
