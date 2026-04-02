@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.6.16 (2026-04-02)
+- fix: IIFE syntax in bridge panel and addon badge rendering
+
 ## v4.6.15 (2026-04-02)
 - feat: implement Revit Connector integration improvements
 
