@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.7.1 (2026-04-02)
+- feat: add ILS / NL-SfB data quality checks for Dutch BIM standard
+
 ## v4.7.0 (2026-04-02)
 - feat: color-by-property and value distributions in Data Quality tab
 
