@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.6.20 (2026-04-02)
+- refactor: make ClashControl a passive receiver — connector dictates sync
+
 ## v4.6.19 (2026-04-02)
 - fix: add Connect button to Revit Bridge addon card
 
