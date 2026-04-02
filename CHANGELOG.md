@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.6.23 (2026-04-02)
+- feat: add Cancel button during Revit model pull
+
 ## v4.6.22 (2026-04-02)
 - fix: preserve camera on model sync, expose selection functions for addons
 
