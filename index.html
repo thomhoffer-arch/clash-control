@@ -383,7 +383,7 @@ function startApp() {
   };
   var INIT = {
     models:[], clashes:[], issues:[], activeId:null, showModal:false, showSettings:false, modalElement:null, tab:null,
-    rules:{ modelA:'all', modelB:'all', hard:true, maxGap:50, duplicates:false, changeAware:false, excludeSelf:true, excludeTypes:[], excludeTypePairs:[], minOverlapVolM3:1e-5, toleranceByTypePair:{}, useSemanticFilter:true },
+    rules:{ modelA:'all', modelB:'all', hard:true, maxGap:50, minGap:0, duplicates:false, changeAware:false, excludeSelf:true, excludeTypes:[], excludeTypePairs:[], minOverlapVolM3:1e-5, toleranceByTypePair:{}, useSemanticFilter:true },
     detectionSettings:null, // Captured at detection run time: {clearance_mm, discipline_filters}
     trainingMode:(function(){try{return localStorage.getItem('cc_trainingMode')==='1';}catch(e){return false;}}()),
     clashGroupBy:_ccLoadPref('clashGroupBy','none'), clashSortBy:_ccLoadPref('clashSortBy','none'),
@@ -8999,6 +8999,58 @@ function startApp() {
     try { localStorage.setItem('cc_clash_presets', JSON.stringify(list)); } catch(e) {}
   }
 
+  // ── Clash Rules helpers ────────────────────────────────────────────
+  function _modelSelect(value, field, models, d) {
+    var tags=[]; models.forEach(function(m){if(m.tag&&tags.indexOf(m.tag)===-1)tags.push(m.tag);});
+    var selVal=Array.isArray(value)?JSON.stringify(value):value;
+    var u = {};
+    return html`<select value=${selVal} onChange=${function(e){var v=e.target.value;try{v=JSON.parse(v);}catch(x){}u[field]=v;d({t:A.UPD_RULES,u:u});}}
+      style=${{...S_INPUT,fontSize:'0.72rem',padding:'.2rem .3rem',flex:1}}>
+      <option value="all">all models</option>
+      ${DISC.map(function(p){return html`<option key=${p.id} value=${'disc:'+p.id}>${p.label} models</option>`})}
+      ${tags.map(function(t){return html`<option key=${'tag:'+t} value=${'tag:'+t}>tag: ${t}</option>`})}
+      ${models.map(function(m){return html`<option key=${m.id} value=${m.id}>${m.name}${m.tag?' ['+m.tag+']':''}</option>`})}
+    </select>`;
+  }
+
+  function _renderTypePairTolerances(rules, models, tpState, setTPState, d) {
+    var tpPairs = rules.toleranceByTypePair||{};
+    var tpKeys = Object.keys(tpPairs);
+    var ifcTypes = {};
+    models.forEach(function(m){ (m.elements||[]).forEach(function(el){ if(el.props&&el.props.ifcType) ifcTypes[el.props.ifcType]=true; }); });
+    var typeList = Object.keys(ifcTypes).sort();
+    if (typeList.length < 2 && tpKeys.length === 0) return null;
+    return html`<div>
+      <div style=${{fontSize:'0.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.2rem'}}>Custom tolerances per type pair</div>
+      ${tpKeys.length > 0 && html`<div style=${{marginBottom:'.2rem'}}>
+        ${tpKeys.map(function(k){
+          return html`<div key=${k} style=${{display:'flex',alignItems:'center',gap:'.2rem',marginBottom:'.1rem',padding:'.15rem .3rem',background:'var(--bg-secondary)',borderRadius:4}}>
+            <span style=${{fontSize:'0.67rem',color:'var(--text-secondary)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${k.replace(':',' \u2194 ').replace(/Ifc/g,'')}</span>
+            <span style=${{fontSize:'0.67rem',color:'var(--accent-subtle)',fontWeight:600}}>${tpPairs[k]}mm</span>
+            <button onClick=${function(){var u=Object.assign({},tpPairs);delete u[k];d({t:A.UPD_RULES,u:{toleranceByTypePair:u}})}}
+              style=${{...S_BTN,fontSize:'0.57rem',padding:'0 3px',background:'none',color:'var(--text-faint)'}}>✕</button>
+          </div>`;
+        })}
+      </div>`}
+      ${typeList.length >= 2 && html`<div style=${{display:'flex',gap:'.15rem',alignItems:'center',flexWrap:'wrap'}}>
+        <select value=${tpState.a||typeList[0]||''} onChange=${function(e){setTPState(Object.assign({},tpState,{a:e.target.value}))}}
+          style=${{...S_INPUT,fontSize:'0.63rem',padding:'1px 2px',flex:1,minWidth:60}}>${typeList.map(function(t){return html`<option key=${t} value=${t}>${t.replace('Ifc','')}</option>`})}</select>
+        <span style=${{fontSize:'0.63rem',color:'var(--text-faint)'}}>\u2194</span>
+        <select value=${tpState.b||typeList[1]||typeList[0]||''} onChange=${function(e){setTPState(Object.assign({},tpState,{b:e.target.value}))}}
+          style=${{...S_INPUT,fontSize:'0.63rem',padding:'1px 2px',flex:1,minWidth:60}}>${typeList.map(function(t){return html`<option key=${t} value=${t}>${t.replace('Ifc','')}</option>`})}</select>
+        <input type="number" value=${tpState.mm||'50'} onInput=${function(e){setTPState(Object.assign({},tpState,{mm:e.target.value}))}}
+          style=${{...S_INPUT,fontSize:'0.63rem',padding:'1px 2px',width:35}} placeholder="mm" />
+        <button onClick=${function(){
+          var a=tpState.a||typeList[0],b=tpState.b||typeList[1]||typeList[0];
+          if(!a||!b||a===b) return;
+          var key=a<b?a+':'+b:b+':'+a;
+          var u=Object.assign({},tpPairs);u[key]=+(tpState.mm||50)||0;
+          d({t:A.UPD_RULES,u:{toleranceByTypePair:u}});
+        }} style=${{...S_BTN,fontSize:'0.63rem',padding:'1px 5px',background:'var(--accent-bg)',color:'var(--accent-subtle)'}}>Add</button>
+      </div>`}
+    </div>`;
+  }
+
   // ── Clash Rules Panel (Classical UI) ────────────────────────────
   function ClashRulesPanel(props) {
     var s = props.s, d = props.d;
@@ -9132,117 +9184,146 @@ function startApp() {
       </div>
 
       <!-- Advanced Rules (expandable) -->
-      ${expanded && html`<div style=${{padding:'0 .5rem .4rem',borderTop:'1px solid var(--border-subtle)'}}>
-        <div style=${{marginTop:'.3rem'}}>
-          <span class="cc-tip cc-tip-delay" data-tip="First group of elements to check. Clashes are detected between Model A and Model B." style=${{...FL,cursor:'help'}}>Model A</span>
-          ${function(){
-            var tags=[]; models.forEach(function(m){if(m.tag&&tags.indexOf(m.tag)===-1)tags.push(m.tag);});
-            var selVal=Array.isArray(rules.modelA)?JSON.stringify(rules.modelA):rules.modelA;
-            return html`<select value=${selVal} onChange=${function(e){var v=e.target.value;try{v=JSON.parse(v);}catch(x){}d({t:A.UPD_RULES,u:{modelA:v}});}}
-              style=${{...S_INPUT,fontSize:'0.75rem',padding:'.2rem .3rem',marginBottom:'.25rem'}}>
-              <option value="all">All models</option>
-              ${DISC.map(function(p){return html`<option key=${p.id} value=${'disc:'+p.id}>${p.label} models</option>`})}
-              ${tags.map(function(t){return html`<option key=${'tag:'+t} value=${'tag:'+t}>Tag: ${t}</option>`})}
-              ${models.map(function(m){return html`<option key=${m.id} value=${m.id}>${m.name}${m.tag?' ['+m.tag+']':''}</option>`})}
-            </select>`;
-          }()}
-          <span class="cc-tip cc-tip-delay" data-tip="Second group of elements to check against Model A." style=${{...FL,cursor:'help'}}>Model B</span>
-          ${function(){
-            var tags=[]; models.forEach(function(m){if(m.tag&&tags.indexOf(m.tag)===-1)tags.push(m.tag);});
-            var selVal=Array.isArray(rules.modelB)?JSON.stringify(rules.modelB):rules.modelB;
-            return html`<select value=${selVal} onChange=${function(e){var v=e.target.value;try{v=JSON.parse(v);}catch(x){}d({t:A.UPD_RULES,u:{modelB:v}});}}
-              style=${{...S_INPUT,fontSize:'0.75rem',padding:'.2rem .3rem',marginBottom:'.25rem'}}>
-              <option value="all">All models</option>
-              ${DISC.map(function(p){return html`<option key=${p.id} value=${'disc:'+p.id}>${p.label} models</option>`})}
-              ${tags.map(function(t){return html`<option key=${'tag:'+t} value=${'tag:'+t}>Tag: ${t}</option>`})}
-              ${models.map(function(m){return html`<option key=${m.id} value=${m.id}>${m.name}${m.tag?' ['+m.tag+']':''}</option>`})}
-            </select>`;
-          }()}
-        </div>
-        <div style=${TOGROW}>
-          <span class="cc-tip cc-tip-delay" data-tip="Detect elements that physically intersect. Disable to only check for near misses using the max gap distance." style=${{fontSize:'0.78rem',color:'var(--text-primary)',cursor:'help'}}>Hard clashes</span>
-          <${MiniToggle} on=${rules.hard} onToggle=${function(){d({t:A.UPD_RULES,u:{hard:!rules.hard}})}} />
-        </div>
-        <div style=${{marginBottom:'.25rem'}}>
-          <span class="cc-tip cc-tip-delay" data-tip="Elements within this distance are flagged as near misses. Set to 0 for hard clashes only." style=${{...FL,cursor:'help'}}>Max gap (mm)</span>
-          <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
-            <input type="range" min="0" max="500" step="5" value=${rules.maxGap||0}
-              onInput=${function(e){d({t:A.UPD_RULES,u:{maxGap:+e.target.value}})}}
-              style=${{flex:1,height:4}} />
-            <span style=${{fontSize:'0.75rem',color:'var(--accent-subtle)',fontWeight:600,minWidth:30,textAlign:'right'}}>${rules.maxGap||0}</span>
+      ${expanded && html`<div style=${{padding:'.35rem .5rem .4rem',borderTop:'1px solid var(--border-subtle)'}}>
+        <div style=${{display:'flex',flexDirection:'column',gap:'.5rem'}}>
+
+          <!-- What to check -->
+          <div>
+            <div style=${{fontSize:'0.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.3rem'}}>What do you want to check?</div>
+            <div style=${{display:'flex',flexDirection:'column',gap:'.2rem'}}>
+              <div style=${{display:'flex',alignItems:'center',gap:'.35rem'}}>
+                <span style=${{fontSize:'0.72rem',color:'var(--text-secondary)',whiteSpace:'nowrap'}}>Check</span>
+                ${_modelSelect(rules.modelA, 'modelA', models, d)}
+              </div>
+              <div style=${{display:'flex',alignItems:'center',gap:'.35rem'}}>
+                <span style=${{fontSize:'0.72rem',color:'var(--text-secondary)',whiteSpace:'nowrap'}}>against</span>
+                ${_modelSelect(rules.modelB, 'modelB', models, d)}
+              </div>
+            </div>
           </div>
-        </div>
-        <div style=${{marginBottom:'.25rem'}}>
-          <span class="cc-tip cc-tip-delay" data-tip=${'Minimum AABB overlap volume to count as a hard clash. Filters flush-surface false positives. 0 = detect everything. Current: '+(rules.minOverlapVolM3*1e6).toFixed(0)+' cm³'} style=${{...FL,cursor:'help'}}>Min overlap volume (cm³)</span>
-          <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
-            <input type="range" min="0" max="200" step="1" value=${Math.round((rules.minOverlapVolM3||0)*1e6)}
+
+          <!-- Detection type -->
+          <div>
+            <div style=${{fontSize:'0.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.3rem'}}>What type of clashes?</div>
+            <div style=${{display:'flex',flexDirection:'column',gap:'.25rem'}}>
+              <label style=${{display:'flex',alignItems:'center',gap:'.35rem',cursor:'pointer',padding:'.2rem 0'}}>
+                <input type="radio" name="clashtype" checked=${rules.hard && (rules.maxGap||0)===0}
+                  onChange=${function(){d({t:A.UPD_RULES,u:{hard:true,maxGap:0}})}}
+                  style=${{margin:0,accentColor:'var(--accent)'}} />
+                <div>
+                  <div style=${{fontSize:'0.72rem',color:'var(--text-primary)'}}>Hard clashes only</div>
+                  <div style=${{fontSize:'0.63rem',color:'var(--text-faint)'}}>Elements that physically intersect each other</div>
+                </div>
+              </label>
+              <label style=${{display:'flex',alignItems:'center',gap:'.35rem',cursor:'pointer',padding:'.2rem 0'}}>
+                <input type="radio" name="clashtype" checked=${rules.hard && (rules.maxGap||0)>0}
+                  onChange=${function(){d({t:A.UPD_RULES,u:{hard:true,maxGap:rules.maxGap||50}})}}
+                  style=${{margin:0,accentColor:'var(--accent)'}} />
+                <div>
+                  <div style=${{fontSize:'0.72rem',color:'var(--text-primary)'}}>Hard clashes + near misses</div>
+                  <div style=${{fontSize:'0.63rem',color:'var(--text-faint)'}}>Intersections and elements that are too close</div>
+                </div>
+              </label>
+              <label style=${{display:'flex',alignItems:'center',gap:'.35rem',cursor:'pointer',padding:'.2rem 0'}}>
+                <input type="radio" name="clashtype" checked=${!rules.hard}
+                  onChange=${function(){d({t:A.UPD_RULES,u:{hard:false,minGap:rules.minGap||0,maxGap:rules.maxGap||100}})}}
+                  style=${{margin:0,accentColor:'var(--accent)'}} />
+                <div>
+                  <div style=${{fontSize:'0.72rem',color:'var(--text-primary)'}}>Soft clashes only (clearance check)</div>
+                  <div style=${{fontSize:'0.63rem',color:'var(--text-faint)'}}>Only flag elements within a distance range, no intersections</div>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- Gap settings (conditional) -->
+          ${(rules.hard && (rules.maxGap||0)>0) && html`<div style=${{background:'var(--bg-secondary)',borderRadius:6,padding:'.35rem .45rem'}}>
+            <div style=${{fontSize:'0.69rem',color:'var(--text-muted)',marginBottom:'.2rem'}}>Flag near misses within</div>
+            <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
+              <input type="range" min="5" max="500" step="5" value=${rules.maxGap||50}
+                onInput=${function(e){d({t:A.UPD_RULES,u:{maxGap:+e.target.value}})}}
+                style=${{flex:1,height:4}} />
+              <input type="number" min="1" max="2000" value=${rules.maxGap||50}
+                onInput=${function(e){var v=+e.target.value;if(v>0)d({t:A.UPD_RULES,u:{maxGap:v}})}}
+                style=${{...S_INPUT,fontSize:'0.72rem',width:48,padding:'.15rem .25rem',textAlign:'right'}} />
+              <span style=${{fontSize:'0.69rem',color:'var(--text-faint)'}}>mm</span>
+            </div>
+          </div>`}
+
+          ${!rules.hard && html`<div style=${{background:'var(--bg-secondary)',borderRadius:6,padding:'.35rem .45rem'}}>
+            <div style=${{fontSize:'0.69rem',color:'var(--text-muted)',marginBottom:'.25rem'}}>Flag elements with a gap between</div>
+            <div style=${{display:'flex',alignItems:'center',gap:'.3rem',flexWrap:'wrap'}}>
+              <input type="number" min="0" max="2000" value=${rules.minGap||0}
+                onInput=${function(e){var v=+e.target.value;if(v>=0)d({t:A.UPD_RULES,u:{minGap:v}})}}
+                style=${{...S_INPUT,fontSize:'0.72rem',width:48,padding:'.15rem .25rem',textAlign:'right'}} />
+              <span style=${{fontSize:'0.69rem',color:'var(--text-faint)'}}>mm</span>
+              <span style=${{fontSize:'0.69rem',color:'var(--text-secondary)'}}>and</span>
+              <input type="number" min="1" max="5000" value=${rules.maxGap||100}
+                onInput=${function(e){var v=+e.target.value;if(v>0)d({t:A.UPD_RULES,u:{maxGap:v}})}}
+                style=${{...S_INPUT,fontSize:'0.72rem',width:48,padding:'.15rem .25rem',textAlign:'right'}} />
+              <span style=${{fontSize:'0.69rem',color:'var(--text-faint)'}}>mm</span>
+            </div>
+            ${(rules.minGap||0)>=(rules.maxGap||100) && html`<div style=${{fontSize:'0.63rem',color:'#ef4444',marginTop:'.2rem'}}>Minimum gap must be less than maximum gap</div>`}
+          </div>`}
+
+          <!-- Filtering -->
+          <div>
+            <div style=${{fontSize:'0.72rem',fontWeight:600,color:'var(--text-primary)',marginBottom:'.3rem'}}>Filtering options</div>
+            <div style=${{display:'flex',flexDirection:'column',gap:'.15rem'}}>
+              <div style=${TOGROW}>
+                <div>
+                  <div style=${{fontSize:'0.72rem',color:'var(--text-primary)'}}>Ignore intentional connections</div>
+                  <div style=${{fontSize:'0.63rem',color:'var(--text-faint)'}}>Skip doors in walls, assembly parts, openings</div>
+                </div>
+                <${MiniToggle} on=${rules.useSemanticFilter!==false} onToggle=${function(){d({t:A.UPD_RULES,u:{useSemanticFilter:rules.useSemanticFilter===false?true:false}})}} />
+              </div>
+              <div style=${TOGROW}>
+                <div>
+                  <div style=${{fontSize:'0.72rem',color:'var(--text-primary)'}}>Include duplicate hits</div>
+                  <div style=${{fontSize:'0.63rem',color:'var(--text-faint)'}}>Same pair clashing in multiple locations</div>
+                </div>
+                <${MiniToggle} on=${rules.duplicates} onToggle=${function(){d({t:A.UPD_RULES,u:{duplicates:!rules.duplicates}})}} />
+              </div>
+              <div style=${TOGROW}>
+                <div>
+                  <div style=${{fontSize:'0.72rem',color:'var(--text-primary)'}}>Only changed elements</div>
+                  <div style=${{fontSize:'0.63rem',color:'var(--text-faint)'}}>Skip elements unchanged since last run</div>
+                </div>
+                <${MiniToggle} on=${rules.changeAware} onToggle=${function(){d({t:A.UPD_RULES,u:{changeAware:!rules.changeAware}})}} />
+              </div>
+            </div>
+          </div>
+
+          <!-- Self-clashes -->
+          <div style=${{display:'flex',alignItems:'center',gap:'.35rem'}}>
+            <span style=${{fontSize:'0.72rem',color:'var(--text-primary)',whiteSpace:'nowrap'}}>Check within same model</span>
+            <select value=${rules.selfClashGroup||(rules.excludeSelf?'none':'both')} onChange=${function(e){d({t:A.UPD_RULES,u:{selfClashGroup:e.target.value,excludeSelf:e.target.value==='none'}})}}
+              style=${{...S_INPUT,fontSize:'0.72rem',padding:'.2rem .3rem',flex:1}}>
+              <option value="none">No</option>
+              <option value="both">Yes, both groups</option>
+              <option value="a">Yes, first group only</option>
+              <option value="b">Yes, second group only</option>
+            </select>
+          </div>
+
+          <!-- Min overlap volume -->
+          ${rules.hard && html`<div style=${{display:'flex',alignItems:'center',gap:'.35rem'}}>
+            <span style=${{fontSize:'0.72rem',color:'var(--text-primary)',whiteSpace:'nowrap'}}>Ignore overlaps smaller than</span>
+            <input type="number" min="0" max="500" value=${Math.round((rules.minOverlapVolM3||0)*1e6)}
               onInput=${function(e){d({t:A.UPD_RULES,u:{minOverlapVolM3:+e.target.value/1e6}})}}
-              style=${{flex:1,height:4}} />
-            <span style=${{fontSize:'0.75rem',color:'var(--accent-subtle)',fontWeight:600,minWidth:30,textAlign:'right'}}>${Math.round((rules.minOverlapVolM3||0)*1e6)}</span>
-          </div>
+              style=${{...S_INPUT,fontSize:'0.72rem',width:48,padding:'.15rem .25rem',textAlign:'right'}} />
+            <span style=${{fontSize:'0.69rem',color:'var(--text-faint)'}}>cm\u00B3</span>
+          </div>`}
+
+          <!-- Type-pair tolerances -->
+          ${_renderTypePairTolerances(rules, models, tpState, setTPState, d)}
+
+          <!-- Run button -->
+          <button onClick=${runDetection} disabled=${!canRun}
+            style=${{...S_BTN,width:'100%',padding:'.4rem',background:canRun?'var(--accent)':'var(--bg-secondary)',color:canRun?'#fff':'var(--text-faint)',fontWeight:600,fontSize:'0.78rem',borderRadius:6}}>
+            ${s.detecting ? 'Detecting...' : 'Run Detection'}
+          </button>
         </div>
-        ${function(){
-          var tpPairs = rules.toleranceByTypePair||{};
-          var tpKeys = Object.keys(tpPairs);
-          // Collect IFC types from loaded models for dropdowns
-          var ifcTypes = {};
-          models.forEach(function(m){ (m.elements||[]).forEach(function(el){ if(el.props&&el.props.ifcType) ifcTypes[el.props.ifcType]=true; }); });
-          var typeList = Object.keys(ifcTypes).sort();
-          return html`<div style=${{marginBottom:'.25rem'}}>
-            <span style=${{...FL,cursor:'help'}} class="cc-tip cc-tip-delay" data-tip="Override max gap per IFC type pair. Set 0 for hard-clash-only on that pair.">Type-pair tolerances</span>
-            ${tpKeys.length>0 && tpKeys.map(function(k){
-              return html`<div key=${k} style=${{display:'flex',alignItems:'center',gap:'.2rem',marginBottom:'.15rem'}}>
-                <span style=${{fontSize:'0.67rem',color:'var(--text-secondary)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${k.replace(':',' ↔ ').replace(/Ifc/g,'')}</span>
-                <span style=${{fontSize:'0.67rem',color:'var(--accent-subtle)',fontWeight:600}}>${tpPairs[k]}mm</span>
-                <button onClick=${function(){var u=Object.assign({},tpPairs);delete u[k];d({t:A.UPD_RULES,u:{toleranceByTypePair:u}})}}
-                  style=${{...S_BTN,fontSize:'0.57rem',padding:'0 3px',background:'none',color:'var(--text-faint)'}}>✕</button>
-              </div>`;
-            })}
-            ${typeList.length>=2 && function(){
-              var tp=tpState.a?tpState:{a:typeList[0]||'',b:typeList[1]||typeList[0]||'',mm:'50'};
-              return html`<div style=${{display:'flex',gap:'.15rem',alignItems:'center',flexWrap:'wrap'}}>
-                <select value=${tp.a} onChange=${function(e){setTPState(Object.assign({},tp,{a:e.target.value}))}}
-                  style=${{...S_INPUT,fontSize:'0.63rem',padding:'1px 2px',flex:1,minWidth:60}}>${typeList.map(function(t){return html`<option key=${t} value=${t}>${t.replace('Ifc','')}</option>`})}</select>
-                <select value=${tp.b} onChange=${function(e){setTPState(Object.assign({},tp,{b:e.target.value}))}}
-                  style=${{...S_INPUT,fontSize:'0.63rem',padding:'1px 2px',flex:1,minWidth:60}}>${typeList.map(function(t){return html`<option key=${t} value=${t}>${t.replace('Ifc','')}</option>`})}</select>
-                <input type="number" value=${tp.mm} onInput=${function(e){setTPState(Object.assign({},tp,{mm:e.target.value}))}}
-                  style=${{...S_INPUT,fontSize:'0.63rem',padding:'1px 2px',width:35}} placeholder="mm" />
-                <button onClick=${function(){
-                  if(!tp.a||!tp.b||tp.a===tp.b) return;
-                  var key=tp.a<tp.b?tp.a+':'+tp.b:tp.b+':'+tp.a;
-                  var u=Object.assign({},tpPairs);u[key]=+tp.mm||0;
-                  d({t:A.UPD_RULES,u:{toleranceByTypePair:u}});
-                }} style=${{...S_BTN,fontSize:'0.63rem',padding:'1px 5px',background:'var(--accent-bg)',color:'var(--accent-subtle)'}}>Add</button>
-              </div>`;
-            }()}
-          </div>`;
-        }()}
-        <div style=${TOGROW}>
-          <span class="cc-tip cc-tip-delay" data-tip="Include clashes where the same pair of elements overlap in multiple locations. Off by default to reduce noise." style=${{fontSize:'0.78rem',color:'var(--text-primary)',cursor:'help'}}>Duplicates</span>
-          <${MiniToggle} on=${rules.duplicates} onToggle=${function(){d({t:A.UPD_RULES,u:{duplicates:!rules.duplicates}})}} />
-        </div>
-        <div style=${{marginBottom:'.25rem'}}>
-          <span style=${{...FL,cursor:'help'}} class="cc-tip cc-tip-delay" data-tip="Check elements within the same model for clashes. Can target just Model A, just Model B, or both.">Self-clashes</span>
-          <select value=${rules.selfClashGroup||(rules.excludeSelf?'none':'both')} onChange=${function(e){d({t:A.UPD_RULES,u:{selfClashGroup:e.target.value,excludeSelf:e.target.value==='none'}})}}
-            style=${{...S_INPUT,fontSize:'0.75rem',padding:'.2rem .3rem'}}>
-            <option value="none">Off</option>
-            <option value="both">Both groups</option>
-            <option value="a">Model A only</option>
-            <option value="b">Model B only</option>
-          </select>
-        </div>
-        <div style=${TOGROW}>
-          <span class="cc-tip cc-tip-delay" data-tip="Only report clashes involving elements that changed since the last detection run. Useful for iterative workflows on evolving models." style=${{fontSize:'0.78rem',color:'var(--text-primary)',cursor:'help'}}>Change-aware</span>
-          <${MiniToggle} on=${rules.changeAware} onToggle=${function(){d({t:A.UPD_RULES,u:{changeAware:!rules.changeAware}})}} />
-        </div>
-        <div style=${TOGROW}>
-          <span class="cc-tip cc-tip-delay" data-tip="Suppress hard clashes between intentionally related elements such as doors in walls, assembly parts, and openings. Uses IFC relationship data." style=${{fontSize:'0.78rem',color:'var(--text-primary)',cursor:'help'}}>Semantic filter</span>
-          <${MiniToggle} on=${rules.useSemanticFilter!==false} onToggle=${function(){d({t:A.UPD_RULES,u:{useSemanticFilter:rules.useSemanticFilter===false?true:false}})}} />
-        </div>
-        <button onClick=${runDetection} disabled=${!canRun}
-          style=${{...S_BTN,width:'100%',background:canRun?'var(--accent)':'var(--bg-secondary)',color:canRun?'#fff':'var(--text-faint)',marginTop:'.3rem',fontWeight:600}}>
-          ${s.detecting ? 'Detecting...' : 'Run Detection'}
-        </button>
       </div>`}
     </div>`;
   }
