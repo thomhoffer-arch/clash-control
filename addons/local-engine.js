@@ -1,18 +1,18 @@
 // ── ClashControl Addon: ClashControlEngine ──────────────────────
 // Connects to a localhost Python server (port 19800) for exact mesh
 // intersection. Falls back to the built-in browser OBB engine when
-// the server isn't running. Desktop/PWA only — not loaded in browser.
+// the server isn't running.
+// Install: pip install clashcontrol-engine
+// Run:     clashcontrol-engine
 
 (function() {
   'use strict';
 
-  // Only load in installed PWA (standalone) — not in browser tab
-  var isDesktop = window.matchMedia && window.matchMedia('(display-mode: standalone)').matches;
-  if (!isDesktop) return;
-
   var _localEngineUrl = 'http://localhost:19800';
   var _localEngineWsUrl = 'ws://localhost:19801';
   var _pollTimer = null;
+  var _engineVersion = null;
+  var _engineCores = null;
 
   // ── Download URLs for standalone executables ──────────────────
   var _releaseBase = 'https://github.com/clashcontrol-io/ClashControlEngine/releases/latest/download/';
@@ -55,7 +55,7 @@
     icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg>',
 
     initState: {
-      localEngine: { available: false, active: false, checking: false, installing: false }
+      localEngine: { available: false, active: false, checking: false, installing: false, version: null, cores: null }
     },
 
     reducerCases: {
@@ -77,7 +77,7 @@
       var dl = _downloads[os];
 
       var statusColor = le.available ? '#22c55e' : le.installing ? '#eab308' : le.checking ? '#eab308' : '#64748b';
-      var statusText = le.available ? 'Connected to localhost:19800'
+      var statusText = le.available ? 'Connected' + (le.version ? ' v' + le.version : '') + (le.cores ? ' (' + le.cores + ' cores)' : '')
         : le.installing ? 'Waiting for server\u2026'
         : le.checking ? 'Checking\u2026' : 'Not running';
 
@@ -103,31 +103,34 @@
 
         : html`<div style=${{fontSize:'0.72rem',lineHeight:1.7}}>
           <div style=${{marginBottom:'.5rem',color:'var(--text-muted)'}}>
-            Runs on your machine for faster, more accurate clash detection. No Python or command line needed.
+            Runs on your machine for faster, more accurate clash detection using all CPU cores with exact triangle intersection.
           </div>
           <div style=${{display:'flex',flexDirection:'column',gap:'.35rem'}}>
             <div style=${{display:'flex',alignItems:'center',gap:'.5rem'}}>
               <span style=${{color:'var(--accent)',fontWeight:700,fontSize:'0.75rem',width:18,textAlign:'center'}}>1</span>
-              <span>Download for ${dl.label}:</span>
+              <span>Install via pip (Python 3.8+):</span>
             </div>
-            <div style=${{marginLeft:26,display:'flex',gap:'.3rem',alignItems:'center',flexWrap:'wrap'}}>
-              <a href=${dl.url} download onClick=${function(){d({t:'UPD_LOCAL_ENGINE',u:{installing:true}});_startPolling(d);}}
-                style=${{padding:'.35rem .7rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',border:'none',
-                  background:'var(--accent)',color:'#fff',fontFamily:'inherit',textDecoration:'none',display:'inline-flex',alignItems:'center',gap:'.3rem'}}>
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                </svg> Download</a>
-              ${os!=='win'&&html`<a href=${_downloads.win.url} download style=${{fontSize:'0.65rem',color:'var(--text-faint)',textDecoration:'underline'}}>Windows</a>`}
-              ${os!=='mac'&&html`<a href=${_downloads.mac.url} download style=${{fontSize:'0.65rem',color:'var(--text-faint)',textDecoration:'underline'}}>macOS</a>`}
-              ${os!=='linux'&&html`<a href=${_downloads.linux.url} download style=${{fontSize:'0.65rem',color:'var(--text-faint)',textDecoration:'underline'}}>Linux</a>`}
+            <div style=${{marginLeft:26}}>
+              <code style=${{fontSize:'0.69rem',background:'var(--tag-bg)',padding:'.2rem .4rem',borderRadius:4,display:'inline-block',userSelect:'all'}}>pip install clashcontrol-engine</code>
             </div>
             <div style=${{display:'flex',alignItems:'center',gap:'.5rem',marginTop:'.15rem'}}>
               <span style=${{color:'var(--accent)',fontWeight:700,fontSize:'0.75rem',width:18,textAlign:'center'}}>2</span>
-              <span>Run the downloaded file</span>
+              <span>Run the server:</span>
+            </div>
+            <div style=${{marginLeft:26}}>
+              <code style=${{fontSize:'0.69rem',background:'var(--tag-bg)',padding:'.2rem .4rem',borderRadius:4,display:'inline-block',userSelect:'all'}}>clashcontrol-engine</code>
             </div>
             <div style=${{display:'flex',alignItems:'center',gap:'.5rem',marginTop:'.15rem'}}>
               <span style=${{color:'var(--accent)',fontWeight:700,fontSize:'0.75rem',width:18,textAlign:'center'}}>3</span>
               <span>ClashControl connects automatically</span>
+            </div>
+            <div style=${{marginTop:'.3rem',marginLeft:26,fontSize:'0.65rem',color:'var(--text-faint)'}}>
+              Or download a standalone binary:
+              <a href=${dl.url} download onClick=${function(){d({t:'UPD_LOCAL_ENGINE',u:{installing:true}});_startPolling(d);}}
+                style=${{color:'var(--accent)',textDecoration:'underline',marginLeft:'.3rem'}}>${dl.label}</a>
+              ${os!=='win'&&html` · <a href=${_downloads.win.url} download style=${{color:'var(--text-faint)',textDecoration:'underline'}}>Windows</a>`}
+              ${os!=='mac'&&html` · <a href=${_downloads.mac.url} download style=${{color:'var(--text-faint)',textDecoration:'underline'}}>macOS</a>`}
+              ${os!=='linux'&&html` · <a href=${_downloads.linux.url} download style=${{color:'var(--text-faint)',textDecoration:'underline'}}>Linux</a>`}
             </div>
           </div>
           ${le.installing&&html`<div style=${{marginTop:'.4rem',fontSize:'0.65rem',color:'#eab308',display:'flex',alignItems:'center',gap:'.3rem'}}>
@@ -159,7 +162,9 @@
       .then(function(r){ return r.json(); })
       .then(function(j){
         var ready = j && j.status === 'ready';
-        if (d) d({t:'UPD_LOCAL_ENGINE', u:{available:ready, checking:false}});
+        _engineVersion = j && j.version || null;
+        _engineCores = j && j.cores || null;
+        if (d) d({t:'UPD_LOCAL_ENGINE', u:{available:ready, checking:false, version:_engineVersion, cores:_engineCores}});
         if (ready) {
           try { localStorage.setItem('cc_local_engine','1'); } catch(e){}
           if (d) d({t:'UPD_LOCAL_ENGINE', u:{active:true}});
@@ -204,7 +209,10 @@
         });
       });
     });
-    return {elements:elements, rules:{modelA:rules.modelA, modelB:rules.modelB, maxGap:rules.maxGap||0, mode:rules.mode||'hard'}};
+    var r = {modelA:rules.modelA, modelB:rules.modelB, maxGap:rules.maxGap||0, mode:rules.mode||'hard'};
+    if (rules.excludeSelf != null) r.excludeSelf = rules.excludeSelf;
+    if (rules.excludeTypePairs) r.excludeTypePairs = rules.excludeTypePairs;
+    return {elements:elements, rules:r};
   }
 
   function _detectOnLocalEngine(models, rules, onProgress) {
@@ -213,7 +221,11 @@
     try {
       progressWs = new WebSocket(_localEngineWsUrl);
       progressWs.onmessage = function(e) {
-        try { var msg = JSON.parse(e.data); if (msg.type === 'progress' && onProgress && msg.total > 0) onProgress(msg.done, msg.total); } catch(ex){}
+        try {
+          var msg = JSON.parse(e.data);
+          if (msg.type === 'progress' && onProgress && msg.total > 0) onProgress(msg.done, msg.total);
+          if (msg.type === 'complete') console.log('%c[Engine] Done: ' + msg.clashCount + ' clashes in ' + msg.duration_ms + 'ms', 'color:#4ade80');
+        } catch(ex){}
       };
     } catch(ex){}
 
@@ -221,10 +233,18 @@
     .then(function(r){ return r.json(); })
     .then(function(result) {
       if (progressWs) try{progressWs.close();}catch(ex){}
+      if (result && result.error) { console.warn('[Engine] Server error:', result.error); return null; }
       if (!result || !result.clashes) return [];
+      // Log stats if available
+      if (result.stats) {
+        console.log('%c[Engine] ' + result.stats.elementCount + ' elements, ' + result.stats.candidatePairs + ' candidates, ' +
+          result.stats.clashCount + ' clashes, ' + result.stats.duration_ms + 'ms (' + result.stats.threads + ' threads)', 'color:#60a5fa');
+      }
+      // Build lookup map for faster element resolution
+      var elMap = {};
+      models.forEach(function(m) { if (!m.elements) return; m.elements.forEach(function(el) { elMap[el.expressId||el.id] = el; }); });
       return result.clashes.map(function(c) {
-        var elA = null, elB = null;
-        models.forEach(function(m) { if (!m.elements) return; m.elements.forEach(function(el) { var eid = el.expressId||el.id; if(eid===c.elementA)elA=el; if(eid===c.elementB)elB=el; }); });
+        var elA = elMap[c.elementA], elB = elMap[c.elementB];
         if (!elA || !elB) return null;
         var pt = c.point ? new THREE.Vector3(c.point[0], c.point[1], c.point[2]) : new THREE.Vector3();
         return {id:c.id||(c.elementA+'_'+c.elementB), elementA:elA, elementB:elB, point:pt,
@@ -234,7 +254,7 @@
     })
     .catch(function(err) {
       if (progressWs) try{progressWs.close();}catch(ex){}
-      console.warn('Local engine detection failed, falling back to browser:', err);
+      console.warn('[Engine] Detection failed, falling back to browser:', err);
       return null;
     });
   }
