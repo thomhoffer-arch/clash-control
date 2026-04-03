@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.9.1 (2026-04-03)
+- style: use shaded ghost material instead of flat unlit
+
 ## v4.9.0 (2026-04-03)
 - fix: persist local engine state across page refresh
 
