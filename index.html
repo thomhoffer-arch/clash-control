@@ -13097,12 +13097,12 @@ function startApp() {
         if (typeof action.maxGap === 'number') upd.maxGap = action.maxGap;
         return {_clashSetup:true, rules:upd, nameA:mA?mA.name:'All models', nameB:mB?mB.name:'All models'};
       }
-      case 'set_max_gap': if (typeof action.value !== 'number') return null; d({t:A.UPD_RULES, u:{maxGap:action.value}}); return 'Max gap set to '+action.value+'mm.';
-      case 'set_duplicates': d({t:A.UPD_RULES, u:{duplicates:!!action.enabled}}); return action.enabled ? 'Duplicates included.' : 'Duplicates excluded.';
-      case 'filter_status': var sv = {open:'open',resolved:'resolved',all:'all'}[action.status]||'all'; d({t:A.UPD_FILTERS, u:{status:sv}}); d({t:A.TAB,v:'clashes'}); return sv==='all'?'Showing all.':'Filtered to '+sv+'.';
-      case 'reset_filters': d({t:A.RESET_FILTERS}); return 'Filters cleared.';
+      case 'set_max_gap': if (typeof action.value !== 'number') return null; d({t:A.UPD_RULES, u:{maxGap:action.value}}); return 'Gap set to '+action.value+'mm.';
+      case 'set_duplicates': d({t:A.UPD_RULES, u:{duplicates:!!action.enabled}}); return action.enabled ? 'Got it — duplicates included.' : 'Got it — duplicates excluded.';
+      case 'filter_status': var sv = {open:'open',resolved:'resolved',all:'all'}[action.status]||'all'; d({t:A.UPD_FILTERS, u:{status:sv}}); d({t:A.TAB,v:'clashes'}); return sv==='all'?'Showing everything.':'Showing '+sv+' only.';
+      case 'reset_filters': d({t:A.RESET_FILTERS}); return 'Filters cleared — showing everything.';
       case 'group_by': var gv = {storey:'storey',floor:'storey',level:'storey',discipline:'discipline',status:'status',type:'type',none:'none'}[action.groupBy]||'none'; d({t:A.CLASH_GROUP_BY,v:gv}); d({t:A.TAB,v:'clashes'}); return 'Grouped by '+gv+'.';
-      case 'export_bcf': if (!s.issues.length&&!s.clashes.length) return 'Nothing to export.'; var items=s.issues.length?s.issues:s.clashes; exportBCF(items,'2.1',s.viewpoints); return 'Exported '+items.length+' items as BCF.';
+      case 'export_bcf': if (!s.issues.length&&!s.clashes.length) return 'Nothing to export yet.'; var items=s.issues.length?s.issues:s.clashes; exportBCF(items,'2.1',s.viewpoints); return 'Done — '+items.length+' items exported as BCF.';
       case 'query': return processNLCommand(action.query||'', s, d);
       case 'help': return processNLCommand('help', s, d);
       default: return null;
@@ -13146,7 +13146,7 @@ function startApp() {
         if (expResult) return Promise.resolve(_captureNL(expResult, 'followup'));
       }
       if (/how\s+many|count/i.test(raw)) {
-        var countMsg = _nlLastContext.clashCount + ' clashes total. Last action: ' + (_nlLastContext.input || 'unknown') + '.';
+        var countMsg = _nlLastContext.clashCount + ' clashes. (Last: ' + (_nlLastContext.input || '?') + ')';
         return Promise.resolve(_captureNL(countMsg, 'followup'));
       }
     }
@@ -13258,11 +13258,11 @@ function startApp() {
     // ── Short-form / single-word commands ──────────────────────────
     // These catch minimal inputs that users naturally try
     if (/^summary$|^stats$|^report$/i.test(text)) return processNLCommand('analyze clashes', s, d) || 'No data yet. Load models and run detection first.';
-    if (/^clashes?\s*\??$|^results?\s*\??$/i.test(text)) { d({t:A.TAB,v:'clashes'}); return s.clashes.length ? s.clashes.length + ' clashes. Opened Clashes tab.' : 'No clashes yet.'; }
-    if (/^issues?\s*\??$/i.test(text)) { d({t:A.TAB,v:'issues'}); return s.issues.length ? s.issues.length + ' issues. Opened Issues tab.' : 'No issues yet.'; }
-    if (/^models?\s*\??$/i.test(text)) { d({t:A.TAB,v:'models'}); return s.models.length ? s.models.length + ' model'+(s.models.length>1?'s':'')+' loaded.' : 'No models loaded.'; }
-    if (/^settings?$/i.test(text)) { d({t:A.SETTINGS,v:true}); return 'Opened settings.'; }
-    if (/^bcf$/i.test(text)) { if(!s.issues.length&&!s.clashes.length)return 'Nothing to export.'; exportBCF(s.issues.length?s.issues:s.clashes,'2.1',s.viewpoints); return 'BCF exported.'; }
+    if (/^clashes?\s*\??$|^results?\s*\??$/i.test(text)) { d({t:A.TAB,v:'clashes'}); return s.clashes.length ? s.clashes.length + ' clashes — here\'s the list.' : 'No clashes yet.'; }
+    if (/^issues?\s*\??$/i.test(text)) { d({t:A.TAB,v:'issues'}); return s.issues.length ? s.issues.length + ' issues — here\'s the list.' : 'No issues yet.'; }
+    if (/^models?\s*\??$/i.test(text)) { d({t:A.TAB,v:'models'}); return s.models.length ? s.models.length + ' model'+(s.models.length>1?'s':'')+' loaded — here they are.' : 'No models loaded yet.'; }
+    if (/^settings?$/i.test(text)) { d({t:A.SETTINGS,v:true}); return 'Here are your settings.'; }
+    if (/^bcf$/i.test(text)) { if(!s.issues.length&&!s.clashes.length)return 'Nothing to export yet.'; exportBCF(s.issues.length?s.issues:s.clashes,'2.1',s.viewpoints); return 'Done — BCF exported.'; }
     if (/^ifc$/i.test(text)) { if(window._ccOpenIFC) window._ccOpenIFC(); return 'Opening IFC file picker...'; }
     if (/^(?:undo|cancel\s+that|never\s*mind|oops)$/i.test(text)) return 'Can\'t undo, but try "clear filters", "show all", or "reset view" to get back.';
     if (/^(?:thanks?|thank\s+you|ty|thx|cheers)$/i.test(text)) return 'No problem!';
@@ -13299,11 +13299,11 @@ function startApp() {
       var storeyCounts = {};
       s.clashes.forEach(function(c){ var st = c.storey||'Unknown'; storeyCounts[st]=(storeyCounts[st]||0)+1; });
       var worst = Object.keys(storeyCounts).sort(function(a,b){return storeyCounts[b]-storeyCounts[a];})[0];
-      return 'Most clashes on: ' + worst + ' (' + storeyCounts[worst] + ' clashes).';
+      return 'Most clashes on ' + worst + ' — ' + storeyCounts[worst] + ' total.';
     }
     if (/what.*project|current project|active project/.test(text)) {
       var proj = (s.projectList||[]).find(function(p){return p.id===s.activeProject;});
-      return proj ? 'Active project: ' + proj.name + '.' : 'No active project.';
+      return proj ? 'You\'re on: ' + proj.name + '.' : 'No active project right now.';
     }
     // Q&A: hard/soft/duplicate breakdown
     if (/how many (?:hard|soft|duplicate)|(?:hard|soft|duplicate)\s+clash(?:es)?\s*\??/.test(text)) {
@@ -13318,7 +13318,7 @@ function startApp() {
       if (!s.clashes.length) return 'No clashes to analyse yet.';
       var discCounts = {};
       s.clashes.forEach(function(c){ (c.disciplines||[]).forEach(function(dd){ discCounts[dd]=(discCounts[dd]||0)+1; }); });
-      if (!Object.keys(discCounts).length) return 'No discipline data available on current clashes.';
+      if (!Object.keys(discCounts).length) return 'No discipline data on these clashes.';
       var sorted = Object.keys(discCounts).sort(function(a,b){return discCounts[b]-discCounts[a];});
       return 'Clashes by discipline: ' + sorted.map(function(k){return k+' ('+discCounts[k]+')';}).join(', ') + '.';
     }
@@ -13330,7 +13330,7 @@ function startApp() {
         var tA = (c.elemAType||'').replace(/^Ifc/,''), tB = (c.elemBType||'').replace(/^Ifc/,'');
         if (tA && tB) { var pair = tA < tB ? tA+' vs '+tB : tB+' vs '+tA; tpCounts[pair]=(tpCounts[pair]||0)+1; }
       });
-      if (!Object.keys(tpCounts).length) return 'No type data available.';
+      if (!Object.keys(tpCounts).length) return 'No type data on these clashes.';
       var topPairs = Object.keys(tpCounts).sort(function(a,b){return tpCounts[b]-tpCounts[a];}).slice(0,5);
       return 'Top clashing pairs:\n' + topPairs.map(function(p,i){return (i+1)+'. '+p+' ('+tpCounts[p]+')';}).join('\n');
     }
@@ -13627,14 +13627,14 @@ function startApp() {
       var gv2 = gapSet[1]||gapSet[3], gu = gapSet[2]||gapSet[4];
       var gmm = gu==='cm' ? Math.round(parseFloat(gv2)*10) : Math.round(parseFloat(gv2));
       d({t:A.UPD_RULES, u:{maxGap:gmm}});
-      return 'Max gap set to ' + gmm + 'mm. Re-run detection to apply.';
+      return 'Gap set to ' + gmm + 'mm. Run detection again to apply.';
     }
-    if (/(?:include|enable)\s+duplicates?/.test(text)) { d({t:A.UPD_RULES,u:{duplicates:true}}); return 'Duplicates included.'; }
-    if (/(?:exclude|ignore|no)\s+duplicates?/.test(text)) { d({t:A.UPD_RULES,u:{duplicates:false}}); return 'Duplicates excluded.'; }
-    if (/cross[\s-]*(?:model\s+)?only|no\s+self[\s-]*clash|exclude\s+self|not?\s+with\s+itself/.test(text)) { d({t:A.UPD_RULES,u:{excludeSelf:true}}); return 'Cross-model only — self-clashes excluded.'; }
-    if (/(?:include|enable|allow)\s+self[\s-]*clash|self[\s-]*clash.*on/.test(text)) { d({t:A.UPD_RULES,u:{excludeSelf:false}}); return 'Self-clashes included.'; }
-    if (/(?:enable|turn\s+on|activate)\s+semantic[\s-]*filter/.test(text)) { d({t:A.UPD_RULES,u:{useSemanticFilter:true}}); return 'Semantic filter enabled — intentional relationships (doors in walls, assembly parts) will suppress hard clashes.'; }
-    if (/(?:disable|turn\s+off|deactivate)\s+semantic[\s-]*filter/.test(text)) { d({t:A.UPD_RULES,u:{useSemanticFilter:false}}); return 'Semantic filter disabled — all geometric intersections will be reported.'; }
+    if (/(?:include|enable)\s+duplicates?/.test(text)) { d({t:A.UPD_RULES,u:{duplicates:true}}); return 'Got it — duplicates will be included.'; }
+    if (/(?:exclude|ignore|no)\s+duplicates?/.test(text)) { d({t:A.UPD_RULES,u:{duplicates:false}}); return 'Got it — duplicates excluded.'; }
+    if (/cross[\s-]*(?:model\s+)?only|no\s+self[\s-]*clash|exclude\s+self|not?\s+with\s+itself/.test(text)) { d({t:A.UPD_RULES,u:{excludeSelf:true}}); return 'Cross-model only — no self-clashes.'; }
+    if (/(?:include|enable|allow)\s+self[\s-]*clash|self[\s-]*clash.*on/.test(text)) { d({t:A.UPD_RULES,u:{excludeSelf:false}}); return 'Self-clashes turned on.'; }
+    if (/(?:enable|turn\s+on|activate)\s+semantic[\s-]*filter/.test(text)) { d({t:A.UPD_RULES,u:{useSemanticFilter:true}}); return 'Semantic filter on — intentional fits (doors in walls, assembly parts) won\'t flag as hard clashes.'; }
+    if (/(?:disable|turn\s+off|deactivate)\s+semantic[\s-]*filter/.test(text)) { d({t:A.UPD_RULES,u:{useSemanticFilter:false}}); return 'Semantic filter off — all intersections will be reported.'; }
 
     // ── Overlap volume threshold ──────────────────────────────────
     var ovMatch = text.match(/(?:min(?:imum)?\s+)?overlap\s+(?:volume?\s+)?(\d+(?:\.\d+)?)\s*(?:cm3|cm³)?/i);
@@ -13642,7 +13642,7 @@ function startApp() {
     if (ovMatch) {
       var cm3 = parseFloat(ovMatch[1]);
       d({t:A.UPD_RULES, u:{minOverlapVolM3:cm3/1e6}});
-      return 'Minimum overlap volume set to ' + cm3 + ' cm³. Re-run detection to apply.';
+      return 'Overlap threshold set to ' + cm3 + ' cm³. Run detection again to apply.';
     }
 
     // ── Per-type-pair tolerance ───────────────────────────────────
@@ -13672,7 +13672,7 @@ function startApp() {
       var presets = _getClashPresets();
       presets.push({id:Date.now().toString(36), name:pName, rules:Object.assign({},s.rules)});
       _saveClashPresets(presets);
-      return 'Saved current rules as "' + pName + '".';
+      return 'Saved as "' + pName + '".';
     }
     var runPresetMatch = text.match(/(?:run|load|use|apply)\s+(?:preset\s+)?["""]?(.+?)["""]?\s*$/i);
     if (runPresetMatch && !/(?:run|start|do)\s+(?:it|the|detection|clash)/i.test(text)) {
@@ -13685,9 +13685,9 @@ function startApp() {
           var merged = Object.assign({}, s.rules, found.rules);
           d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
           detectClashesAsync(s.models, merged).then(function(result){ classifyClashes(result); d({t:A.MERGE_CLASHES, v:result}); });
-          return 'Running "' + found.name + '" preset…';
+          return 'Running "' + found.name + '"…';
         }
-        return 'Loaded preset "' + found.name + '". Say "run" to detect.';
+        return 'Loaded "' + found.name + '". Say "run" to start.';
       }
     }
 
@@ -13697,11 +13697,11 @@ function startApp() {
         /^(?:find|detect|check\s+for|scan\s+for)\s+(?:all\s+)?(?:clashes?|conflicts?|collisions?)$/.test(text) ||
         /^(?:run|detect)\s+(?:it\s+)?again$/.test(text)) {
       if (!s.models.length) return 'No models loaded yet.';
-      if (s.detecting) return 'Already running…';
+      if (s.detecting) return 'Already on it…';
       d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
       detectClashesAsync(s.models,s.rules).then(function(result){ classifyClashes(result); d({t:A.MERGE_CLASHES, v:result}); });
       var r2 = s.rules;
-      return 'Running clash detection' + (r2.maxGap ? ' with ' + r2.maxGap + 'mm max gap' : '') + '…';
+      return 'Running detection' + (r2.maxGap ? ' (max gap ' + r2.maxGap + 'mm)' : '') + '…';
     }
 
     // ── Result filtering & grouping ────────────────────────────────
@@ -13710,18 +13710,18 @@ function startApp() {
     if (swMatch && /show|display|filter|view|see|only|just|list|give|get|want|need|find|clashes?|issues?/.test(text)) {
       var sw = swMatch[1];
       d({t:A.UPD_FILTERS, u:{status:statusMap[sw]||'all'}}); d({t:A.TAB,v:'clashes'});
-      return sw==='all' ? 'Showing all clashes.' : 'Filtered to ' + sw + ' clashes.';
+      return sw==='all' ? 'Showing everything.' : 'Showing ' + sw + ' clashes only.';
     }
     if (/reset\s+filters?|clear\s+filters?|show\s+all|remove\s+filters?|no\s+filter/.test(text)) {
       d({t:A.RESET_FILTERS});
-      return 'Filters cleared.';
+      return 'Filters cleared — showing everything.';
     }
     var groupMatch = text.match(/(?:group|grouped|organize|organise|sort|arrange|categorize|categorise)\s+(?:\w+\s+)?by\s+(storey|floor|level|discipline|status|type|none)/);
     if (!groupMatch) groupMatch = text.match(/by\s+(storey|floor|level|discipline|status|type)\b/);
     if (groupMatch) {
       var gv = {storey:'storey',floor:'storey',level:'storey',discipline:'discipline',status:'status',type:'type',none:'none'}[groupMatch[1]];
       d({t:A.CLASH_GROUP_BY,v:gv}); d({t:A.TAB,v:'clashes'});
-      return 'Grouped by ' + groupMatch[1] + '.';
+      return 'Grouped by ' + groupMatch[1] + ' — check the clashes tab.';
     }
 
     // ── Batch Operations ───────────────────────────────────────────
@@ -13738,7 +13738,7 @@ function startApp() {
       else if (filterKey === 'soft') targets = pool.filter(function(x){return x.type==='soft';});
       var actionT = isIssue ? 'UPD_ISSUE' : 'UPD_CLASH';
       targets.forEach(function(x){ d({t:actionT, id:x.id, u:{status:newStatus}}); });
-      return 'Updated ' + targets.length + (isIssue?' issues':' clashes') + ' to ' + newStatus + '.';
+      return 'Done — ' + targets.length + (isIssue?' issues':' clashes') + ' set to ' + newStatus + '.';
     }
 
     var batchAssignMatch = text.match(/(?:assign|give|set)\s+all\s+(?:(open|unassigned)\s+)?issues?\s+to\s+(.+)/i);
@@ -13749,7 +13749,7 @@ function startApp() {
       if (assignFilter === 'open') issueTargets = issueTargets.filter(function(i){return i.status==='open';});
       else if (assignFilter === 'unassigned') issueTargets = issueTargets.filter(function(i){return !i.assignee;});
       issueTargets.forEach(function(i){ d({t:A.UPD_ISSUE, id:i.id, u:{assignee:assignee}}); });
-      return 'Assigned ' + issueTargets.length + ' issues to ' + assignee + '.';
+      return 'Done — ' + issueTargets.length + ' issues assigned to ' + assignee + '.';
     }
 
     // Batch by severity: "resolve all info clashes", "mark all critical clashes as in_progress"
@@ -13759,7 +13759,7 @@ function startApp() {
       var sevStatus = batchSevMatch[2] ? batchSevMatch[2].replace(/\s+/g,'_') : 'resolved';
       var sevTargets = s.clashes.filter(function(c){return c.aiSeverity===sevKey;});
       sevTargets.forEach(function(c){ d({t:A.UPD_CLASH, id:c.id, u:{status:sevStatus}}); });
-      return 'Updated ' + sevTargets.length + ' ' + sevKey + ' clashes to ' + sevStatus + '.';
+      return 'Done — ' + sevTargets.length + ' ' + sevKey + ' clashes set to ' + sevStatus + '.';
     }
 
     // Batch by discipline: "resolve all MEP clashes", "mark all structural clashes as confirmed"
@@ -13772,7 +13772,7 @@ function startApp() {
         return discs.indexOf(discKey) >= 0;
       });
       discTargets.forEach(function(c){ d({t:A.UPD_CLASH, id:c.id, u:{status:discStatus}}); });
-      return 'Updated ' + discTargets.length + ' ' + discKey + ' clashes to ' + discStatus + '.';
+      return 'Done — ' + discTargets.length + ' ' + discKey + ' clashes set to ' + discStatus + '.';
     }
 
     // Batch by storey: "resolve all Level 3 clashes", "mark all Ground Floor clashes as resolved"
@@ -13787,7 +13787,7 @@ function startApp() {
       });
       if (storeyTargets.length > 0) {
         storeyTargets.forEach(function(c){ d({t:A.UPD_CLASH, id:c.id, u:{status:storeyStatus}}); });
-        return 'Updated ' + storeyTargets.length + ' clashes on ' + storeyKey + ' to ' + storeyStatus + '.';
+        return 'Done — ' + storeyTargets.length + ' clashes on ' + storeyKey + ' set to ' + storeyStatus + '.';
       }
     }
 
@@ -13803,7 +13803,7 @@ function startApp() {
         return false;
       });
       prioTargets.forEach(function(c){ d({t:A.UPD_CLASH, id:c.id, u:{priority:newPrio}}); });
-      return 'Set ' + prioTargets.length + ' ' + prioFilter + ' clashes to ' + newPrio + ' priority.';
+      return 'Done — ' + prioTargets.length + ' ' + prioFilter + ' clashes set to ' + newPrio + ' priority.';
     }
 
     // Analyze / report commands → open Revit Bridge if configured, else give summary
@@ -13813,9 +13813,9 @@ function startApp() {
       var hotStorey = Object.keys(storeys).sort(function(a,b){return storeys[b]-storeys[a];})[0];
       var pct = cl.length>0 ? Math.round((cl.length - op.length) / cl.length * 100) : 0;
       var lines = [cl.length + ' total clashes: ' + hd.length + ' hard, ' + sf.length + ' soft, ' + op.length + ' open.'];
-      lines.push('Resolution progress: ' + pct + '%.');
-      if (hotStorey) lines.push('Hotspot: ' + hotStorey + ' (' + storeys[hotStorey] + ' clashes).');
-      if (s.revitBridge && s.revitBridge.provider && s.revitBridge.apiKey) lines.push('Tip: Use Revit Bridge for deeper AI-powered analysis.');
+      lines.push(pct + '% resolved so far.');
+      if (hotStorey) lines.push('Hotspot: ' + hotStorey + ' (' + storeys[hotStorey] + ').');
+      if (s.revitBridge && s.revitBridge.provider && s.revitBridge.apiKey) lines.push('Try the Revit Bridge for deeper AI analysis.');
       return lines.join('\n');
     }
 
@@ -13824,14 +13824,14 @@ function startApp() {
       if (!s.issues.length && !s.clashes.length) return 'Nothing to export yet.';
       var items = s.issues.length ? s.issues : s.clashes;
       exportBCF(items, '2.1', s.viewpoints);
-      return 'Exported ' + items.length + ' item' + (items.length===1?'':'s') + ' as BCF 2.1.';
+      return 'Done — ' + items.length + ' item' + (items.length===1?'':'s') + ' exported as BCF 2.1.';
     }
 
     // ── Theme ──────────────────────────────────────────────────────
     if (/(?:switch|change|toggle|set|go)\s+(?:to\s+)?(?:light|dark)\s*(?:mode|theme)?/.test(text) || /(?:light|dark)\s+(?:mode|theme)/.test(text)) {
       var wantLight = /light/.test(text);
       d({t:A.UPD_PREFS,u:{theme:wantLight?'light':'dark'}});
-      return 'Switched to ' + (wantLight?'light':'dark') + ' mode.';
+      return (wantLight?'Light':'Dark') + ' mode — there you go.';
     }
 
     // ── Reload ─────────────────────────────────────────────────
@@ -13855,37 +13855,37 @@ function startApp() {
     }
 
     // ── Tab Navigation ───────────────────────────────────────────
-    if (/(?:show|open|go\s+to|switch\s+to)\s+(?:the\s+)?models?\s*(?:tab|panel|sidebar)?/.test(text)) { d({t:A.TAB,v:'models'}); return 'Opened Models tab.'; }
-    if (/(?:show|open|go\s+to|switch\s+to)\s+(?:the\s+)?clashes?\s*(?:tab|panel|sidebar)?/.test(text)) { d({t:A.TAB,v:'clashes'}); return 'Opened Clashes tab.'; }
-    if (/(?:show|open|go\s+to|switch\s+to)\s+(?:the\s+)?issues?\s*(?:tab|panel|sidebar)?/.test(text)) { d({t:A.TAB,v:'issues'}); return 'Opened Issues tab.'; }
-    if (/(?:show|open|go\s+to|switch\s+to)\s+(?:the\s+)?(?:explorer?|navigator)\s*(?:tab|panel)?/.test(text)) { d({t:A.TAB,v:'navigator'}); return 'Opened Navigator tab.'; }
+    if (/(?:show|open|go\s+to|switch\s+to)\s+(?:the\s+)?models?\s*(?:tab|panel|sidebar)?/.test(text)) { d({t:A.TAB,v:'models'}); return 'Here\'s the Models tab.'; }
+    if (/(?:show|open|go\s+to|switch\s+to)\s+(?:the\s+)?clashes?\s*(?:tab|panel|sidebar)?/.test(text)) { d({t:A.TAB,v:'clashes'}); return 'Here\'s the Clashes tab.'; }
+    if (/(?:show|open|go\s+to|switch\s+to)\s+(?:the\s+)?issues?\s*(?:tab|panel|sidebar)?/.test(text)) { d({t:A.TAB,v:'issues'}); return 'Here\'s the Issues tab.'; }
+    if (/(?:show|open|go\s+to|switch\s+to)\s+(?:the\s+)?(?:explorer?|navigator)\s*(?:tab|panel)?/.test(text)) { d({t:A.TAB,v:'navigator'}); return 'Here\'s the Navigator.'; }
 
     // ── Training Mode ─────────────────────────────────────────────
     if (/training\s*mode|(?:enable|start|activate|turn\s+on)\s+training|(?:open|show)\s+(?:the\s+)?training/.test(text)) {
       if(!s.trainingMode) d({t:A.TRAINING_MODE});
-      return s.trainingMode ? 'Training Mode is already active. Use thumbs up/down on clash rows to label data.' : 'Training Mode enabled. Use the thumbs up/down buttons on each clash to label true/false positives.';
+      return s.trainingMode ? 'Training mode\'s already on — use the thumbs on each clash to label.' : 'Training mode on. Use thumbs up/down on each clash to label true vs false positives.';
     }
     if (/(?:disable|stop|deactivate|turn\s+off|exit)\s+training/.test(text)) {
       if(s.trainingMode){if(window._ccToggleTraining)window._ccToggleTraining();else d({t:A.TRAINING_MODE});}
-      return s.trainingMode ? 'Check the warning popup to confirm.' : 'Training Mode is already off.';
+      return s.trainingMode ? 'Check the popup to confirm.' : 'Training mode\'s already off.';
     }
 
     // ── Settings & Modals ────────────────────────────────────────
-    if (/(?:open|show)\s+(?:the\s+)?settings?/.test(text)) { d({t:A.SETTINGS,v:true}); return 'Opened settings.'; }
-    if (/(?:open|show)\s+(?:the\s+)?(?:revit\s+)?bridge/.test(text)) { d({t:A.REVIT_BRIDGE,v:true}); return 'Opened Revit Bridge.'; }
-    if (/(?:new|create|add)\s+(?:an?\s+)?issue/.test(text)) { d({t:A.MODAL,v:true}); return 'Opened new issue form.'; }
+    if (/(?:open|show)\s+(?:the\s+)?settings?/.test(text)) { d({t:A.SETTINGS,v:true}); return 'Here are your settings.'; }
+    if (/(?:open|show)\s+(?:the\s+)?(?:revit\s+)?bridge/.test(text)) { d({t:A.REVIT_BRIDGE,v:true}); return 'Revit Bridge is open.'; }
+    if (/(?:new|create|add)\s+(?:an?\s+)?issue/.test(text)) { d({t:A.MODAL,v:true}); return 'Here\'s the issue form.'; }
 
     // ── Viewer Controls ──────────────────────────────────────────
     if (/(?:reset|home|default)\s+(?:the\s+)?(?:view|camera)|(?:fit|zoom)\s+(?:to\s+)?all/.test(text)) {
       if(_resetView) _resetView();
-      return 'View reset to default.';
+      return 'View reset.';
     }
 
     // Section planes
-    if (/(?:section|cut|slice)\s+(?:plane\s+)?(?:on\s+)?x|x\s+(?:section|cut)/.test(text)) { d({t:A.SECTION,axis:'x'}); return 'Section plane set on X axis.'; }
-    if (/(?:section|cut|slice)\s+(?:plane\s+)?(?:on\s+)?y|y\s+(?:section|cut)/.test(text)) { d({t:A.SECTION,axis:'y'}); return 'Section plane set on Y axis.'; }
-    if (/(?:section|cut|slice)\s+(?:plane\s+)?(?:on\s+)?z|z\s+(?:section|cut)/.test(text)) { d({t:A.SECTION,axis:'z'}); return 'Section plane set on Z axis.'; }
-    if (/(?:remove|clear|off|disable|hide)\s+(?:the\s+)?(?:section|cut|slice|clipping)/.test(text)) { d({t:A.SECTION,axis:null}); d({t:A.SECTION_BOX,v:null}); return 'Section planes cleared.'; }
+    if (/(?:section|cut|slice)\s+(?:plane\s+)?(?:on\s+)?x|x\s+(?:section|cut)/.test(text)) { d({t:A.SECTION,axis:'x'}); return 'Section on X.'; }
+    if (/(?:section|cut|slice)\s+(?:plane\s+)?(?:on\s+)?y|y\s+(?:section|cut)/.test(text)) { d({t:A.SECTION,axis:'y'}); return 'Section on Y.'; }
+    if (/(?:section|cut|slice)\s+(?:plane\s+)?(?:on\s+)?z|z\s+(?:section|cut)/.test(text)) { d({t:A.SECTION,axis:'z'}); return 'Section on Z.'; }
+    if (/(?:remove|clear|off|disable|hide)\s+(?:the\s+)?(?:section|cut|slice|clipping)/.test(text)) { d({t:A.SECTION,axis:null}); d({t:A.SECTION_BOX,v:null}); return 'Sections cleared.'; }
 
     // Camera views: top, front, back, left, right, bottom, isometric
     var viewDirs = {top:[0,1,0],bottom:[0,-1,0],front:[0,0,1],back:[0,0,-1],left:[-1,0,0],right:[1,0,0]};
@@ -13904,7 +13904,7 @@ function startApp() {
         }
         return vName.charAt(0).toUpperCase()+vName.slice(1)+' view.';
       }
-      return 'No 3D view available.';
+      return 'No 3D view loaded yet.';
     }
 
     // Visibility: hide/show/isolate by type
@@ -13914,7 +13914,7 @@ function startApp() {
       if (resolved) {
         var ids = [];
         s.models.forEach(function(m){(m.elements||[]).forEach(function(el){if(el.props&&el.props.ifcType===resolved)el.meshes.forEach(function(mesh){ids.push(mesh.userData.expressId);});});});
-        if (ids.length && window._ccTempHide) { window._ccTempHide(ids); return 'Hidden ' + ids.length + ' ' + resolved.replace('Ifc','') + ' elements. Say "show all" to restore.'; }
+        if (ids.length && window._ccTempHide) { window._ccTempHide(ids); return 'Hidden ' + ids.length + ' ' + resolved.replace('Ifc','') + ' elements. "Show all" to bring them back.'; }
       }
     }
     var isolateMatch = text.match(/(?:isolate|show\s+only|only\s+show)\s+(?:all\s+)?(\w+?)s?\s*$/);
@@ -13923,7 +13923,7 @@ function startApp() {
       if (isoType) {
         var isoIds = [];
         s.models.forEach(function(m){(m.elements||[]).forEach(function(el){if(el.props&&el.props.ifcType===isoType)el.meshes.forEach(function(mesh){isoIds.push(mesh.userData.expressId);});});});
-        if (isoIds.length && window._ccIsolate) { window._ccIsolate(isoIds); return 'Isolated ' + isoIds.length + ' ' + isoType.replace('Ifc','') + ' elements. Say "show all" to restore.'; }
+        if (isoIds.length && window._ccIsolate) { window._ccIsolate(isoIds); return 'Isolated ' + isoIds.length + ' ' + isoType.replace('Ifc','') + ' elements. "Show all" to bring them back.'; }
       }
     }
     if (/(?:show|restore|unhide)\s+all\s*(?:elements?)?$|^show\s+all$/.test(text)) {
@@ -13941,59 +13941,59 @@ function startApp() {
         var count = 0;
         s.models.forEach(function(m){(m.elements||[]).forEach(function(el){if(el.props&&el.props.ifcType===findType)count++;});});
         if (count && window._ccToggleFinder) { window._ccToggleFinder(); }
-        return count + ' ' + findType.replace('Ifc','') + ' element'+(count===1?'':'s')+' found. Use the element finder (Ctrl+F) to navigate.';
+        return 'Found ' + count + ' ' + findType.replace('Ifc','') + ' element'+(count===1?'':'s')+'. Use Ctrl+F to browse them.';
       }
     }
 
     // Render style
     var renderMatch = text.match(/(?:switch|change|set)\s+(?:to\s+)?(?:render\s+)?(?:style\s+)?(?:to\s+)?(standard|shaded|rendered|wireframe)/);
     if (!renderMatch) renderMatch = text.match(/(standard|shaded|rendered|wireframe)\s+(?:mode|style|view|render)/);
-    if (renderMatch) { d({t:A.UPD_PREFS,u:{renderStyle:renderMatch[1]}}); return 'Render style set to ' + renderMatch[1] + '.'; }
+    if (renderMatch) { d({t:A.UPD_PREFS,u:{renderStyle:renderMatch[1]}}); return 'Switched to ' + renderMatch[1] + '.'; }
 
     // Clash markers
-    if (/(?:show|enable|turn\s+on|display)\s+markers?/.test(text)) { d({t:A.UPD_PREFS,u:{showMarkers:true}}); return 'Markers enabled.'; }
-    if (/(?:hide|disable|turn\s+off|remove)\s+markers?/.test(text)) { d({t:A.UPD_PREFS,u:{showMarkers:false}}); return 'Markers disabled.'; }
+    if (/(?:show|enable|turn\s+on|display)\s+markers?/.test(text)) { d({t:A.UPD_PREFS,u:{showMarkers:true}}); return 'Markers on.'; }
+    if (/(?:hide|disable|turn\s+off|remove)\s+markers?/.test(text)) { d({t:A.UPD_PREFS,u:{showMarkers:false}}); return 'Markers off.'; }
 
     // Grid & axes
-    if (/(?:show|enable|turn\s+on)\s+(?:the\s+)?grid/.test(text)) { d({t:A.UPD_PREFS,u:{showGrid:true}}); return 'Grid enabled.'; }
-    if (/(?:hide|disable|turn\s+off|remove)\s+(?:the\s+)?grid/.test(text)) { d({t:A.UPD_PREFS,u:{showGrid:false}}); return 'Grid hidden.'; }
-    if (/(?:show|enable|turn\s+on)\s+(?:the\s+)?axes?/.test(text)) { d({t:A.UPD_PREFS,u:{showAxes:true}}); return 'Axes enabled.'; }
-    if (/(?:hide|disable|turn\s+off|remove)\s+(?:the\s+)?axes?/.test(text)) { d({t:A.UPD_PREFS,u:{showAxes:false}}); return 'Axes hidden.'; }
+    if (/(?:show|enable|turn\s+on)\s+(?:the\s+)?grid/.test(text)) { d({t:A.UPD_PREFS,u:{showGrid:true}}); return 'Grid on.'; }
+    if (/(?:hide|disable|turn\s+off|remove)\s+(?:the\s+)?grid/.test(text)) { d({t:A.UPD_PREFS,u:{showGrid:false}}); return 'Grid off.'; }
+    if (/(?:show|enable|turn\s+on)\s+(?:the\s+)?axes?/.test(text)) { d({t:A.UPD_PREFS,u:{showAxes:true}}); return 'Axes on.'; }
+    if (/(?:hide|disable|turn\s+off|remove)\s+(?:the\s+)?axes?/.test(text)) { d({t:A.UPD_PREFS,u:{showAxes:false}}); return 'Axes off.'; }
 
     // Ghost / unghost
     if (/(?:unghost|unghostall|clear\s+ghost|show\s+all\s+elements?|restore\s+all)/.test(text)) { if(_unghostAll)_unghostAll(); return 'All elements restored.'; }
 
     // Measurements
-    if (/(?:measure|measurement)\s+(?:length|distance)/.test(text)) { d({t:A.MEASURE_MODE,v:'length'}); return 'Length measurement mode activated. Click two points.'; }
-    if (/(?:measure|measurement)\s+angle/.test(text)) { d({t:A.MEASURE_MODE,v:'angle'}); return 'Angle measurement mode activated.'; }
-    if (/(?:measure|measurement)\s+area/.test(text)) { d({t:A.MEASURE_MODE,v:'area'}); return 'Area measurement mode activated.'; }
-    if (/(?:stop|exit|cancel|end)\s+measur/.test(text)) { d({t:A.MEASURE_MODE,v:null}); return 'Measurement mode deactivated.'; }
-    if (/(?:clear|delete|remove)\s+(?:all\s+)?measurements?/.test(text)) { d({t:A.CLEAR_MEASUREMENTS}); return 'All measurements cleared.'; }
+    if (/(?:measure|measurement)\s+(?:length|distance)/.test(text)) { d({t:A.MEASURE_MODE,v:'length'}); return 'Measure mode on — click two points.'; }
+    if (/(?:measure|measurement)\s+angle/.test(text)) { d({t:A.MEASURE_MODE,v:'angle'}); return 'Measuring angles — click three points.'; }
+    if (/(?:measure|measurement)\s+area/.test(text)) { d({t:A.MEASURE_MODE,v:'area'}); return 'Measuring area — click to define.'; }
+    if (/(?:stop|exit|cancel|end)\s+measur/.test(text)) { d({t:A.MEASURE_MODE,v:null}); return 'Measurement off.'; }
+    if (/(?:clear|delete|remove)\s+(?:all\s+)?measurements?/.test(text)) { d({t:A.CLEAR_MEASUREMENTS}); return 'Measurements cleared.'; }
 
     // Save viewpoint
     if (/(?:save|capture|store)\s+(?:this\s+)?(?:view|viewpoint|camera)/.test(text)) {
       if(_captureViewpoint) { _captureViewpoint('Viewpoint ' + (s.viewpoints.length+1)); return 'Viewpoint saved.'; }
-      return 'No 3D view to capture.';
+      return 'No 3D view to capture yet.';
     }
 
     // Save project
     if (/(?:save|store)\s+(?:the\s+)?project/.test(text)) { if(typeof saveProject==='function') saveProject(s); return 'Project saved.'; }
 
     // Floor plan
-    if (/(?:exit|close|leave|cancel)\s+(?:the\s+)?(?:floor\s*plan|plan\s+view|2d\s+view)/.test(text)) { d({t:A.FLOOR_PLAN,v:null}); return 'Exited floor plan view.'; }
+    if (/(?:exit|close|leave|cancel)\s+(?:the\s+)?(?:floor\s*plan|plan\s+view|2d\s+view)/.test(text)) { d({t:A.FLOOR_PLAN,v:null}); return 'Back to 3D.'; }
 
     // Classifications / color by
     if (/color\s+by\s+(type|storey|discipline|material)/.test(text)) {
       var cbMatch = text.match(/color\s+by\s+(type|storey|discipline|material)/);
       var cbView = 'by'+cbMatch[1].charAt(0).toUpperCase()+cbMatch[1].slice(1);
       d({t:A.COLOR_BY_CLASS,v:cbView});
-      return 'Coloring by ' + cbMatch[1] + '.';
+      return 'Colored by ' + cbMatch[1] + '.';
     }
-    if (/(?:remove|clear|reset)\s+color/.test(text)) { d({t:A.COLOR_BY_CLASS,v:null}); return 'Color-by-class cleared.'; }
+    if (/(?:remove|clear|reset)\s+color/.test(text)) { d({t:A.COLOR_BY_CLASS,v:null}); return 'Colors reset.'; }
 
     // Model tree
-    if (/(?:show|open)\s+(?:the\s+)?(?:model\s+)?tree/.test(text)) { d({t:A.TREE,v:true}); return 'Model tree opened.'; }
-    if (/(?:hide|close)\s+(?:the\s+)?(?:model\s+)?tree/.test(text)) { d({t:A.TREE,v:false}); return 'Model tree closed.'; }
+    if (/(?:show|open)\s+(?:the\s+)?(?:model\s+)?tree/.test(text)) { d({t:A.TREE,v:true}); return 'Tree opened.'; }
+    if (/(?:hide|close)\s+(?:the\s+)?(?:model\s+)?tree/.test(text)) { d({t:A.TREE,v:false}); return 'Tree closed.'; }
 
     // ── Fuzzy intent fallback ─────────────────────────────────────
     // Catches near-misses when rigid regex patterns above don't fire.
@@ -14086,7 +14086,7 @@ function startApp() {
       // Store pending action for yes/no response via _fuzzyPending
       window._ccFuzzyPending = {action:_pendingAction, input:text};
       var guess = bestIntent[0].slice(0, 3).join(' ');
-      return 'Did you mean **' + guess + '**? *(yes/no)*';
+      return 'Did you mean **' + guess + '**? (yes/no)';
     }
 
     return null;
