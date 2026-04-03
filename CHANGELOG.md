@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.8.1 (2026-04-03)
+- revert: restore download buttons for local engine install
+
 ## v4.8.0 (2026-04-03)
 - fix: reactive AI Chat tab highlight on mobile nav
 
