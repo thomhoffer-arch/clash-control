@@ -13408,8 +13408,11 @@ function startApp() {
       // Reset exclusions for new detection setups — only carry forward if user re-specifies
       if (!updRules.excludeTypes) updRules.excludeTypes = [];
       if (!updRules.excludeTypePairs) updRules.excludeTypePairs = [];
+      // Default to hard-only unless the user explicitly mentions gap/soft/proximity
+      var wantsSoft = /\bnear[\s-]*miss|\bproximity\b|\bwithin\b|\bnearby\b|\bclose\s+to\b|\bgap\b|\bsoft\b|\bclearance\b|\bmm\b|\bcm\b/.test(text);
       var gap = parseMM(text); if (gap !== null) { updRules.maxGap = gap; updRules.hard = true; }
-      if (/\bnear[\s-]*miss|\bproximity\b|\bwithin\b|\bnearby\b|\bclose\s+to\b|\bgap\b/.test(text)) { if (!gap) updRules.maxGap = updRules.maxGap || 50; updRules.hard = true; }
+      if (wantsSoft) { if (!gap) updRules.maxGap = updRules.maxGap || 50; updRules.hard = true; }
+      else if (!gap && updRules.maxGap === undefined) { updRules.maxGap = 0; }
       if (/hard\s+only|no\s+gap|gap\s*(?:=\s*)?0/.test(text)) { updRules.hard=true; updRules.maxGap=0; }
       if (/\bduplicates?\b/.test(text) && !/no\s+dup|exclude\s+dup|ignore\s+dup/.test(text)) updRules.duplicates=true;
       if (/\bcross[\s-]*(?:model\s+)?only\b|\bno\s+self[\s-]*clash|\bexclude\s+self|\bnot?\s+with\s+itself|\b(?:against|vs)\s+(?:all\s+)?others?\b/.test(text)) updRules.excludeSelf=true;
