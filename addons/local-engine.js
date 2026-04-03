@@ -130,7 +130,9 @@
             <span style=${{margin:'0 .2rem'}}>\u00b7</span>
             Or: <code style=${{fontSize:'0.63rem',background:'var(--tag-bg)',padding:'1px 4px',borderRadius:3}}>pip install clashcontrol-engine</code>
           </div>
-          <div style=${{display:'flex',gap:'.3rem',marginTop:'.4rem'}}>
+          <div style=${{display:'flex',gap:'.3rem',alignItems:'center',justifyContent:'space-between',marginTop:'.4rem'}}>
+            <a href="https://github.com/clashcontrol-io/ClashControlEngine" target="_blank" rel="noopener"
+              style=${{fontSize:'0.63rem',color:'var(--accent)',textDecoration:'none'}}>GitHub repo</a>
             <button onClick=${function(){_checkLocalEngine(d);}} disabled=${le.checking}
               style=${{padding:'.25rem .5rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',
                 border:'1px solid var(--border)',background:'none',color:'var(--text-faint)',fontFamily:'inherit',
