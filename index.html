@@ -440,7 +440,7 @@ function startApp() {
   var A = {
     ADD_MODEL:'ADD_MODEL', DEL_MODEL:'DEL_MODEL', REPLACE_MODEL:'REPLACE_MODEL', UPD_MODEL:'UPD_MODEL',
     TOGGLE_STOREY:'TOGGLE_STOREY', TOGGLE_ALL_STOREYS:'TOGGLE_ALL_STOREYS',
-    SET_CLASHES:'SET_CLASHES', MERGE_CLASHES:'MERGE_CLASHES', DETECTING:'DETECTING',
+    SET_CLASHES:'SET_CLASHES', MERGE_CLASHES:'MERGE_CLASHES', DETECTING:'DETECTING', STOP_DETECT:'STOP_DETECT',
     SWITCHING_PROJECT:'SWITCHING_PROJECT',
     ADD_ISSUE:'ADD_ISSUE', UPD_ISSUE:'UPD_ISSUE', BATCH_UPD_ISSUE:'BATCH_UPD_ISSUE',
     AI_FEEDBACK:'AI_FEEDBACK', CLEAR_TRAINING_DATA:'CLEAR_TRAINING_DATA',
@@ -566,6 +566,7 @@ function startApp() {
       case A.SET_CLASHES: /* falls through to MERGE_CLASHES with no prev clashes */
       case A.MERGE_CLASHES: var _mr=mergeDetectionResults(a.v, a.t===A.MERGE_CLASHES?s.clashes:[]); _gcEvent('clash-detection', _mr.clashes.length+' clashes'); var _st={clashes:_mr.clashes,detecting:false,activeId:null,floors:deriveFloors(_mr.clashes),lastDeltaSummary:_mr.deltaSummary}; if(a.detectionSettings)_st.detectionSettings=a.detectionSettings; if(s.prefs.resetFiltersOnRun!==false)_st.filters=Object.assign({},INIT_FILTERS); return Object.assign({},s,_st);
       case A.DETECTING:   return Object.assign({},s,{detecting:true});
+      case A.STOP_DETECT: return Object.assign({},s,{detecting:false});
       case A.SWITCHING_PROJECT: return Object.assign({},s,{switchingProject:!!a.v});
       case A.ADD_ISSUE:
         _gcEvent('issue-created');
@@ -2770,6 +2771,7 @@ function startApp() {
   window._ccDetectProgress = null; // {done, total, pct} — updated during async detection
   function detectClashesAsync(models, rules, onProgress) {
     // Cancel any previous in-flight async detection
+    _detectCancelled = false;
     var gen = ++_ccDetectGeneration;
     var _userCb = onProgress;
     onProgress = function(done, total) {
@@ -2790,6 +2792,16 @@ function startApp() {
     }
     return _browserDetect(models, rules, onProgress, gen);
   }
+
+  var _detectCancelled = false;
+  function cancelDetection() {
+    _ccDetectGeneration++;
+    _detectCancelled = true;
+    if (window._ccDispatch) window._ccDispatch({t:'STOP_DETECT'});
+    window._ccDetectProgress = null;
+    console.log('[Detection] Cancelled by user');
+  }
+  window._ccCancelDetection = cancelDetection;
 
   function _browserDetect(models, rules, onProgress, gen) {
     return _preExtractGLBGeometry(models).then(function() {
@@ -9326,11 +9338,14 @@ function startApp() {
           <!-- Type-pair tolerances -->
           ${_renderTypePairTolerances(rules, models, tpState, setTPState, d)}
 
-          <!-- Run button -->
-          <button onClick=${runDetection} disabled=${!canRun}
+          <!-- Run / Stop button -->
+          ${s.detecting ? html`<button onClick=${function(){cancelDetection()}}
+            style=${{...S_BTN,width:'100%',padding:'.4rem',background:'#dc2626',color:'#fff',fontWeight:600,fontSize:'0.78rem',borderRadius:6}}>
+            Stop Detection
+          </button>` : html`<button onClick=${runDetection} disabled=${!canRun}
             style=${{...S_BTN,width:'100%',padding:'.4rem',background:canRun?'var(--accent)':'var(--bg-secondary)',color:canRun?'#fff':'var(--text-faint)',fontWeight:600,fontSize:'0.78rem',borderRadius:6}}>
-            ${s.detecting ? 'Detecting...' : 'Run Detection'}
-          </button>
+            Run Detection
+          </button>`}
         </div>
       </div>`}
     </div>`;
@@ -13692,6 +13707,12 @@ function startApp() {
     }
 
     // ── Plain run ──────────────────────────────────────────────────
+    // Stop detection
+    if (/^(?:stop|cancel|abort|halt)(?:\s+(?:detection|detecting|clash|scan))?$/i.test(text)) {
+      if (s.detecting) { cancelDetection(); return 'Stopped.'; }
+      return 'Nothing running right now.';
+    }
+
     if (/^(?:run|go|start|detect|execute|scan|proceed|re-?run|again)$/.test(text) ||
         /^(?:run|start|do|execute|re-?run)\s+(?:it|the\s+)?(?:detection|clashes?|check|scan|again)?$/.test(text) ||
         /^(?:find|detect|check\s+for|scan\s+for)\s+(?:all\s+)?(?:clashes?|conflicts?|collisions?)$/.test(text) ||
@@ -14323,6 +14344,18 @@ function startApp() {
           return prev.concat([{role:'assistant', detecting:true}]);
         });
       } else if (!s.detecting && was) {
+        if (_detectCancelled) {
+          _detectCancelled = false;
+          setMsgs(function(prev) {
+            var idx = detectMsgIdx.current;
+            var next = prev.slice();
+            if (idx>=0 && idx<next.length) next[idx]={role:'assistant',text:'Detection stopped.'};
+            else next = next.concat([{role:'assistant',text:'Detection stopped.'}]);
+            return next;
+          });
+          detectMsgIdx.current = -1;
+          return;
+        }
         var n = s.clashes.length;
         var op = s.clashes.filter(function(c){return c.status==='open';}).length;
         var nHard = s.clashes.filter(function(c){return c.type==='hard';}).length;
@@ -14831,6 +14864,9 @@ function startApp() {
             return msg+(p>0?' — '+p+'%':'')+'…';
           }()) : (modelLoadMsg || 'Model loading…')}</span>
         </div>
+        ${isDetecting && html`<button onClick=${function(){cancelDetection()}}
+          style=${{...S_BTN,padding:'.35rem .6rem',background:'#dc2626',color:'#fff',fontSize:'0.72rem',fontWeight:600,borderRadius:6,flexShrink:0}}>
+          Stop</button>`}
       </div>` : html`<div style=${{
         padding:'.55rem .65rem', borderTop:'1px solid '+borderCol,
         display:'flex', gap:'.45rem', alignItems:'flex-end', flexShrink:0
@@ -14932,6 +14968,9 @@ function startApp() {
             return msg+(p>0?' — '+p+'%':'')+'…';
           }()) : (modelLoadMsg || 'Model loading…')}</span>
         </div>
+        ${isDetecting && html`<button onClick=${function(){cancelDetection()}}
+          style=${{...S_BTN,padding:'.35rem .6rem',background:'#dc2626',color:'#fff',fontSize:'0.72rem',fontWeight:600,borderRadius:6,flexShrink:0}}>
+          Stop</button>`}
       </div>` : html`<div style=${{
         padding:'.55rem .7rem', borderTop:'1px solid '+borderCol,
         display:'flex', gap:'.45rem', alignItems:'flex-end'
