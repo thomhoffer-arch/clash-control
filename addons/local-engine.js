@@ -43,7 +43,7 @@
         if (ready) {
           _stopPolling();
           console.log('[LocalEngine] Server found! Auto-activating.');
-          d({t:'UPD_LOCAL_ENGINE', u:{available:true, installing:false, active:true}});
+          d({t:'UPD_LOCAL_ENGINE', u:{available:true, installing:false, active:true, wasInstalled:true}});
           try { localStorage.setItem('cc_local_engine','1'); } catch(e){}
         }
       });
@@ -58,7 +58,7 @@
     icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#60a5fa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/><path d="M9 1v3M15 1v3M9 20v3M15 20v3M20 9h3M20 14h3M1 9h3M1 14h3"/></svg>',
 
     initState: {
-      localEngine: { available: false, active: false, checking: false, installing: false, version: null, cores: null }
+      localEngine: { available: false, active: false, checking: false, installing: false, wasInstalled: false, version: null, cores: null }
     },
 
     reducerCases: {
@@ -69,8 +69,28 @@
 
     init: function(dispatch) {
       console.log('[LocalEngine] Addon init');
-      try { if (localStorage.getItem('cc_local_engine') === '1') { console.log('[LocalEngine] Previously active, restoring'); dispatch({t:'UPD_LOCAL_ENGINE', u:{active:true}}); } } catch(e){}
-      _checkLocalEngine(dispatch);
+      var wasActive = false;
+      try { wasActive = localStorage.getItem('cc_local_engine') === '1'; } catch(e){}
+      if (wasActive) {
+        console.log('[LocalEngine] Previously active, restoring');
+        dispatch({t:'UPD_LOCAL_ENGINE', u:{active:true, wasInstalled:true}});
+        // Retry connection up to 5 times (server may still be starting)
+        var attempt = 0;
+        function retryCheck() {
+          attempt++;
+          console.log('[LocalEngine] Reconnect attempt ' + attempt + '/5');
+          _checkLocalEngine(dispatch).then(function(ok) {
+            if (!ok && attempt < 5) setTimeout(retryCheck, 2000);
+            else if (!ok) {
+              console.log('[LocalEngine] Server not found after 5 attempts');
+              dispatch({t:'UPD_LOCAL_ENGINE', u:{wasInstalled:true}});
+            }
+          });
+        }
+        retryCheck();
+      } else {
+        _checkLocalEngine(dispatch);
+      }
     },
 
     destroy: function() { _stopPolling(); },
@@ -80,10 +100,10 @@
       var os = _detectOS();
       var dl = _downloads[os];
 
-      var statusColor = le.available ? '#22c55e' : le.installing ? '#eab308' : le.checking ? '#eab308' : '#64748b';
+      var statusColor = le.available ? '#22c55e' : le.installing ? '#eab308' : le.checking ? '#eab308' : le.wasInstalled ? '#f97316' : '#64748b';
       var statusText = le.available ? 'Connected' + (le.version ? ' v' + le.version : '') + (le.cores ? ' (' + le.cores + ' cores)' : '')
         : le.installing ? 'Waiting for server\u2026'
-        : le.checking ? 'Checking\u2026' : 'Not running';
+        : le.checking ? 'Reconnecting\u2026' : le.wasInstalled ? 'Not running' : 'Not installed';
 
       return html`<div style=${{padding:'.5rem 0',fontSize:'0.78rem',color:'var(--text-secondary)',lineHeight:1.7}}>
         <div style=${{display:'flex',alignItems:'center',gap:'.4rem',marginBottom:'.4rem'}}>
@@ -115,6 +135,26 @@
           </div>
           <button onClick=${function(){_stopPolling();d({t:'UPD_LOCAL_ENGINE',u:{installing:false}});}}
             style=${{marginTop:'.3rem',padding:'.2rem .5rem',borderRadius:5,fontSize:'0.69rem',cursor:'pointer',border:'1px solid var(--border)',background:'none',color:'var(--text-faint)',fontFamily:'inherit'}}>Cancel</button>
+        </div>`
+
+        : le.wasInstalled && !le.available ? html`<div style=${{fontSize:'0.72rem',lineHeight:1.7}}>
+          <div style=${{fontSize:'0.65rem',color:'var(--text-faint)',lineHeight:1.6,marginBottom:'.4rem'}}>
+            Engine was previously connected. Start it to reconnect.
+          </div>
+          <div style=${{display:'flex',gap:'.3rem',flexWrap:'wrap',alignItems:'center'}}>
+            <button onClick=${function(){_checkLocalEngine(d);}} disabled=${le.checking}
+              style=${{padding:'.3rem .6rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',
+                border:'1px solid var(--border)',background:'var(--bg-secondary)',color:'var(--text-secondary)',fontFamily:'inherit',
+                opacity:le.checking?0.5:1}}>
+              ${le.checking?'Checking\u2026':'Reconnect'}</button>
+            <button onClick=${function(){d({t:'UPD_LOCAL_ENGINE',u:{wasInstalled:false}});try{localStorage.removeItem('cc_local_engine');}catch(e){}}}
+              style=${{padding:'.3rem .6rem',borderRadius:6,fontSize:'0.75rem',cursor:'pointer',
+                border:'1px solid var(--border)',background:'none',color:'var(--text-faint)',fontFamily:'inherit'}}>
+              Reinstall</button>
+          </div>
+          <div style=${{fontSize:'0.63rem',color:'var(--text-faint)',marginTop:'.4rem',lineHeight:1.6}}>
+            Run <code style=${{fontSize:'0.63rem',background:'var(--tag-bg)',padding:'1px 4px',borderRadius:3}}>clashcontrol-engine</code> in your terminal, or run the downloaded file.
+          </div>
         </div>`
 
         : html`<div style=${{fontSize:'0.72rem',lineHeight:1.7}}>
@@ -166,7 +206,7 @@
         if (d) d({t:'UPD_LOCAL_ENGINE', u:{available:ready, checking:false, version:_engineVersion, cores:_engineCores}});
         if (ready) {
           try { localStorage.setItem('cc_local_engine','1'); } catch(e){}
-          if (d) d({t:'UPD_LOCAL_ENGINE', u:{active:true}});
+          if (d) d({t:'UPD_LOCAL_ENGINE', u:{active:true, wasInstalled:true}});
         }
         return ready;
       })
