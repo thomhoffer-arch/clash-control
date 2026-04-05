@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.9.3 (2026-04-05)
+- Add GitHub Pages redirect to www.clashcontrol.io
+
 ## v4.9.2 (2026-04-03)
 - perf: skip soft clash tests when not explicitly requested
 
