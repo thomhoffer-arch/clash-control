@@ -14461,6 +14461,9 @@ function startApp() {
     var stW = useState(500), panelW = stW[0], setPanelW = stW[1];
     var stH = useState(300), panelH = stH[0], setPanelH = stH[1];
     var dragRef = useRef(null);
+    // Feedback state — hoisted above the early return for closed state to keep hook order stable
+    var stFeedback = useState({}), feedback = stFeedback[0], setFeedback = stFeedback[1];
+    var stReplyTo = useState(null), replyTo = stReplyTo[0], setReplyTo = stReplyTo[1];
     function onResizeStart(e, dir) {
       e.preventDefault();
       var startX = e.clientX, startY = e.clientY, startW = panelW, startH = panelH;
@@ -14515,10 +14518,6 @@ function startApp() {
         <span style=${{fontSize:'0.69rem', opacity:.5, marginLeft:'.15rem'}}>/</span>
       </button>`;
     }
-
-    // ── Feedback state for AI messages ──
-    var stFeedback = useState({}), feedback = stFeedback[0], setFeedback = stFeedback[1];
-    var stReplyTo = useState(null), replyTo = stReplyTo[0], setReplyTo = stReplyTo[1];
 
     function renderAIFeedback(msgIdx, msgText) {
       var fb = feedback[msgIdx];
