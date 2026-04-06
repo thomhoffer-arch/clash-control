@@ -148,7 +148,7 @@ module.exports = async function handler(req, res) {
   if (cors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
 
-  var key = process.env.GOOGLE_AI_KEY;
+  var key = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_KEY;
   if (!key) return res.status(503).json({ error: 'AI not configured' });
 
   var body = req.body;

@@ -1,7 +1,7 @@
 // ClashControl — Health check endpoint
 // Returns AI and DB connection status
 
-var { cors } = require('./_lib');
+var { cors, dbUrl } = require('./_lib');
 
 module.exports = async function handler(req, res) {
   if (cors(req, res, 'GET')) return;
@@ -10,16 +10,17 @@ module.exports = async function handler(req, res) {
   var status = { ai: false, db: false, model: null };
 
   // Check AI (Google AI Studio / Gemma 4)
-  if (process.env.GOOGLE_AI_KEY) {
+  if (process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_KEY) {
     status.ai = true;
-    status.model = 'gemma-4-27b-it';
+    status.model = 'gemma-3-27b-it';
   }
 
-  // Check DB (Neon Postgres)
-  if (process.env.DATABASE_URL) {
+  // Check DB (Vercel Postgres / Neon)
+  var url = dbUrl();
+  if (url) {
     try {
       var { neon } = require('@neondatabase/serverless');
-      var sql = neon(process.env.DATABASE_URL);
+      var sql = neon(url);
       await sql`SELECT 1`;
       status.db = true;
     } catch (e) {

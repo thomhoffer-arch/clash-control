@@ -8921,8 +8921,10 @@ function startApp() {
 
   function ClashStatsBar(props) {
     var items = props.items, isClash = props.isClash, delta = props.delta;
+    var stTitlesBusy = useState(false), titlesBusy = stTitlesBusy[0], setTitlesBusy = stTitlesBusy[1];
     if (!items.length) return null;
     var total = items.length;
+    var untitled = isClash ? items.filter(function(c){return !c.aiTitle;}).length : 0;
     var open = items.filter(function(c){return c.status==='open';}).length;
     var inProg = items.filter(function(c){return c.status==='in_progress';}).length;
     var resolved = items.filter(function(c){return c.status==='resolved'||c.status==='closed';}).length;
@@ -8955,6 +8957,19 @@ function startApp() {
         ${isClash && hard > 0 && CHIP('Hard', hard, '#7f1d1d', '#fca5a5')}
         ${isClash && soft > 0 && CHIP('Soft', soft, '#78350f', '#fcd34d')}
         ${isClash && dup > 0 && CHIP('Dup', dup, '#4c1d95', '#c4b5fd')}
+        ${isClash && untitled > 0 && html`<button onClick=${function(){
+          if (titlesBusy || !window._ccGenerateAITitles) return;
+          setTitlesBusy(true);
+          window._ccGenerateAITitles().then(function(){ setTitlesBusy(false); });
+        }} disabled=${titlesBusy}
+          title=${'Generate human-readable AI titles for the next '+Math.min(untitled,20)+' clash'+(Math.min(untitled,20)===1?'':'es')}
+          style=${{marginLeft:'auto',fontSize:'0.65rem',padding:'.1rem .4rem',borderRadius:99,
+            background:titlesBusy?'var(--bg-secondary)':'rgba(124,58,237,0.18)',
+            color:titlesBusy?'var(--text-faint)':'#c4b5fd',
+            border:'1px solid '+(titlesBusy?'var(--border)':'rgba(167,139,250,0.4)'),
+            cursor:titlesBusy?'wait':'pointer',fontWeight:600,whiteSpace:'nowrap'}}>
+          ${titlesBusy ? '… generating' : '✦ AI titles ('+Math.min(untitled,20)+')'}
+        </button>`}
       </div>
       ${isClash && delta && html`<div style=${{display:'flex',gap:'.3rem',marginTop:'.25rem',alignItems:'center',flexWrap:'wrap'}}>
         <span style=${{fontSize:'0.63rem',color:'var(--text-faint)',flexShrink:0}}>This run:</span>
@@ -12024,20 +12039,22 @@ function startApp() {
             ${spId && html`<div style=${TROW}>
               <div>
                 <div style=${TLBL}>Project Key</div>
-                <div style=${TSUB}>Share this key with your team so they can sync issues.</div>
+                <div style=${TSUB}>Share this key with your team. Issue status, priority, assignee, title and description sync automatically.</div>
               </div>
               <div style=${{display:'flex',gap:'.3rem',alignItems:'center',flexShrink:0}}>
                 <code style=${{fontSize:'0.78rem',background:'var(--bg-secondary)',padding:'.2rem .5rem',borderRadius:4,fontFamily:'monospace',color:'var(--accent)'}}>${spId}</code>
                 <button onClick=${function(){navigator.clipboard.writeText(spId);}}
                   style=${{...S_BTN,padding:'.3rem .5rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',fontSize:'0.72rem',border:'1px solid var(--border)',borderRadius:6}}>Copy</button>
-                <button onClick=${function(){try{localStorage.removeItem('cc_sharedProjectId');localStorage.removeItem('cc_sharedProjectName');}catch(e){}d({t:A.UPD_PREFS,u:{_sharedRefresh:Date.now()}});}}
+                <button onClick=${function(){if(window._ccSharedPull)window._ccSharedPull();}}
+                  style=${{...S_BTN,padding:'.3rem .5rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',fontSize:'0.72rem',border:'1px solid var(--border)',borderRadius:6}}>Sync now</button>
+                <button onClick=${function(){if(window._ccSharedStop)window._ccSharedStop();try{localStorage.removeItem('cc_sharedProjectId');localStorage.removeItem('cc_sharedProjectName');}catch(e){}d({t:A.UPD_PREFS,u:{_sharedRefresh:Date.now()}});}}
                   style=${{...S_BTN,padding:'.3rem .5rem',background:'var(--bg-secondary)',color:'#f87171',fontSize:'0.72rem',border:'1px solid #ef444444',borderRadius:6}}>Leave</button>
               </div>
             </div>`}
             ${!spId && html`<div style=${TROW}>
               <div>
-                <div style=${TLBL}>Join a shared project</div>
-                <div style=${TSUB}>Enter a project key to sync clashes and issues with your team. No account needed.</div>
+                <div style=${TLBL}>Shared project</div>
+                <div style=${TSUB}>Sync clash decisions with your team. No account needed — just share the project key.</div>
               </div>
               <div style=${{display:'flex',gap:'.3rem',flexShrink:0}}>
                 <input type="text" placeholder="e.g. MEP-abc123" id="cc-join-key"
@@ -12049,11 +12066,21 @@ function startApp() {
                     .then(function(r){if(!r.ok)throw new Error();return r.json();})
                     .then(function(data){
                       try{localStorage.setItem('cc_sharedProjectId',key);localStorage.setItem('cc_sharedProjectName',data.project.name);}catch(e){}
+                      if(window._ccSharedStart)window._ccSharedStart();
                       d({t:A.UPD_PREFS,u:{_sharedRefresh:Date.now()}});
                     })
                     .catch(function(){alert('Project not found. Check the key and try again.');});
                 }}
-                  style=${{...S_BTN,padding:'.3rem .6rem',background:'var(--accent)',color:'#fff',fontSize:'0.78rem',fontWeight:600,borderRadius:6,whiteSpace:'nowrap'}}>Join</button>
+                  style=${{...S_BTN,padding:'.3rem .6rem',background:'var(--bg-secondary)',color:'var(--text-secondary)',fontSize:'0.78rem',fontWeight:500,borderRadius:6,whiteSpace:'nowrap',border:'1px solid var(--border)'}}>Join</button>
+                <button onClick=${function(){
+                  var name = prompt('Name your shared project:', 'My ClashControl Project');
+                  if (!name) return;
+                  if (!window._ccSharedCreate) return;
+                  window._ccSharedCreate(name)
+                    .then(function(data){ d({t:A.UPD_PREFS,u:{_sharedRefresh:Date.now()}}); })
+                    .catch(function(){ alert('Could not create shared project. Server may be unavailable.'); });
+                }}
+                  style=${{...S_BTN,padding:'.3rem .6rem',background:'var(--accent)',color:'#fff',fontSize:'0.78rem',fontWeight:600,borderRadius:6,whiteSpace:'nowrap'}}>Create</button>
               </div>
             </div>`}
           </div>`;
@@ -12926,6 +12953,191 @@ function startApp() {
         return { ai: false, db: false };
       });
   }
+
+  // ── Shared Project sync (Phase 6F) ───────────────────────────────
+  // Push/pull minimal shared records to /api/project. Local-only fields
+  // (geometry, IFC metadata, etc.) stay client-side and are re-derived
+  // from each user's loaded model via GlobalIds.
+
+  var _sharedPushQueue = {};   // id -> item (debounced batch)
+  var _sharedPushTimer = null;
+  var _sharedPullTimer = null;
+  var _sharedLastPullAt = 0;
+  var SHARED_PUSH_DEBOUNCE = 3000;
+  var SHARED_PULL_INTERVAL = 30000;
+
+  function _sharedProjectId() {
+    try { return localStorage.getItem('cc_sharedProjectId') || null; } catch(e) { return null; }
+  }
+
+  // Strip an item to the minimal shared shape (mirrors server stripToShared)
+  function _sharedStrip(item) {
+    return {
+      id: item.id,
+      globalIdA: item.globalIdA || null,
+      globalIdB: item.globalIdB || null,
+      point: item.point || null,
+      type: item.type || null,
+      distance: item.distance != null ? item.distance : null,
+      status: item.status || 'open',
+      priority: item.priority || 'normal',
+      assignee: item.assignee || null,
+      title: item.title || '',
+      description: item.description || null,
+      category: item.category || null,
+      dueDate: item.dueDate || null,
+      source: item.source || null,
+      createdAt: item.createdAt || null,
+      _updatedAt: item._updatedAt || new Date().toISOString(),
+    };
+  }
+
+  function _sharedEnqueue(item) {
+    if (!_sharedProjectId()) return;
+    if (!item || !item.id) return;
+    _sharedPushQueue[item.id] = _sharedStrip(item);
+    if (_sharedPushTimer) return;
+    _sharedPushTimer = setTimeout(_sharedFlushPush, SHARED_PUSH_DEBOUNCE);
+  }
+
+  function _sharedFlushPush() {
+    _sharedPushTimer = null;
+    var key = _sharedProjectId();
+    if (!key) { _sharedPushQueue = {}; return; }
+    var items = Object.keys(_sharedPushQueue).map(function(k){ return _sharedPushQueue[k]; });
+    if (!items.length) return;
+    _sharedPushQueue = {};
+    var user = (typeof _ccChangelogUser !== 'undefined' && _ccChangelogUser) || 'anonymous';
+    fetch('/api/project?id=' + encodeURIComponent(key), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ issues: items, user: user }),
+    }).catch(function(){ /* offline — silent, next push will retry these if re-edited */ });
+  }
+
+  // Apply incoming shared records into local state via UPD_CLASH/UPD_ISSUE
+  // with _fromSync:true so the wrapped dispatch skips changelog + re-enqueue
+  function _sharedHydrate(records) {
+    var d = window._ccDispatch;
+    var s = window._ccLatestState;
+    if (!d || !s || !records || !records.length) return;
+    var clashById = {};
+    (s.clashes || []).forEach(function(c){ clashById[c.id] = c; });
+    var issueById = {};
+    (s.issues || []).forEach(function(i){ issueById[i.id] = i; });
+    var SHARED_FIELDS = ['status','priority','assignee','title','description','category','dueDate'];
+    records.forEach(function(rec) {
+      if (!rec || !rec.id) return;
+      // Skip if our local copy was edited more recently than the server's
+      var localUpdatedAt = (clashById[rec.id] && clashById[rec.id]._updatedAt) || (issueById[rec.id] && issueById[rec.id]._updatedAt);
+      if (localUpdatedAt && rec._updatedAt && new Date(localUpdatedAt) > new Date(rec._updatedAt)) return;
+      var u = {};
+      SHARED_FIELDS.forEach(function(f){ if (rec[f] != null) u[f] = rec[f]; });
+      u._updatedAt = rec._updatedAt;
+      u._updatedBy = rec._updatedBy;
+      if (clashById[rec.id]) {
+        d({ t: A.UPD_CLASH, id: rec.id, u: u, _fromSync: true });
+      } else if (issueById[rec.id]) {
+        d({ t: A.UPD_ISSUE, id: rec.id, u: u, _fromSync: true });
+      }
+      // If neither exists locally, we silently drop it — the user hasn't loaded
+      // the model that contains this element. They'll see the shared record
+      // automatically when they load the matching IFC.
+    });
+  }
+
+  function _sharedPull() {
+    var key = _sharedProjectId();
+    if (!key) return Promise.resolve();
+    return fetch('/api/project?id=' + encodeURIComponent(key))
+      .then(function(r){ if (!r.ok) throw new Error('pull failed'); return r.json(); })
+      .then(function(data){
+        _sharedLastPullAt = Date.now();
+        if (data && data.issues) _sharedHydrate(data.issues);
+      })
+      .catch(function(){ /* silent */ });
+  }
+
+  function _sharedStartPolling() {
+    if (_sharedPullTimer) return;
+    if (!_sharedProjectId()) return;
+    _sharedPull(); // initial pull
+    _sharedPullTimer = setInterval(function(){
+      if (!_sharedProjectId()) { _sharedStopPolling(); return; }
+      _sharedPull();
+    }, SHARED_PULL_INTERVAL);
+  }
+
+  function _sharedStopPolling() {
+    if (_sharedPullTimer) { clearInterval(_sharedPullTimer); _sharedPullTimer = null; }
+  }
+
+  // Create a brand-new shared project on the server
+  function _sharedCreateProject(name) {
+    return fetch('/api/project', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name || 'ClashControl Project' }),
+    })
+      .then(function(r){ if (!r.ok) throw new Error('create failed'); return r.json(); })
+      .then(function(data){
+        try {
+          localStorage.setItem('cc_sharedProjectId', data.id);
+          localStorage.setItem('cc_sharedProjectName', data.name);
+        } catch(e) {}
+        _sharedStartPolling();
+        return data;
+      });
+  }
+
+  // Expose for UI buttons
+  window._ccSharedCreate = _sharedCreateProject;
+  window._ccSharedPull = _sharedPull;
+  window._ccSharedStart = _sharedStartPolling;
+  window._ccSharedStop = _sharedStopPolling;
+
+  // ── AI clash titles (Phase 5) ────────────────────────────────────
+  // Batch-generates human titles via /api/title for clashes that don't
+  // have one yet. Caps at 20 per call to control quota; user can re-click.
+  var _aiTitlesBusy = false;
+  function _aiGenerateTitles() {
+    if (_aiTitlesBusy) return Promise.resolve({skipped:true});
+    var s = window._ccLatestState;
+    var d = window._ccDispatch;
+    if (!s || !d) return Promise.resolve({skipped:true});
+    var todo = (s.clashes || []).filter(function(c){ return !c.aiTitle; }).slice(0, 20);
+    if (!todo.length) return Promise.resolve({done:0});
+    _aiTitlesBusy = true;
+    return fetch('/api/title', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ clashes: todo.map(function(c){
+        return {
+          id: c.id,
+          elemAType: c.elemAType, elemAName: c.elemAName,
+          elemBType: c.elemBType, elemBName: c.elemBName,
+          modelA: c.modelA, modelB: c.modelB,
+          type: c.type, distance: c.distance,
+          storey: c.elemAStorey || c.elemBStorey,
+        };
+      })}),
+    })
+      .then(function(r){ if (!r.ok) throw new Error('title api failed'); return r.json(); })
+      .then(function(data){
+        if (!data || !Array.isArray(data.titles)) return {done:0};
+        data.titles.forEach(function(t) {
+          if (!t || !t.id) return;
+          var u = { aiTitle: t.title, title: t.title };
+          if (t.severity) u.aiSeverity = t.severity;
+          if (t.resolution) u.aiResolutionHint = t.resolution;
+          d({ t: A.UPD_CLASH, id: t.id, u: u });
+        });
+        return { done: data.titles.length };
+      })
+      .catch(function(e){ console.warn('[AI titles]', e); return { done:0, error:true }; })
+      .then(function(r){ _aiTitlesBusy = false; return r; });
+  }
+  window._ccGenerateAITitles = _aiGenerateTitles;
 
   // ── Server NL call ──────────────────────────────────────────────
   function callServerNL(command, context, replyContext) {
@@ -14368,7 +14580,10 @@ function startApp() {
     }
 
     function send(overrideText) {
-      var text = (overrideText || input).trim();
+      // Guard against being bound directly to onClick — React passes the event
+      // as the first arg, which would otherwise be treated as the override text.
+      var override = (typeof overrideText === 'string') ? overrideText : null;
+      var text = (override || input).trim();
       if (!text) return;
       setInput('');
       // Multi-step: split on ";" or " then " (but not inside quotes)
@@ -15756,15 +15971,43 @@ function startApp() {
 
   function AIChatPanel(props) {
     var s=props.s, d=props.d;
-    var widthSt=useState(320), panelW=widthSt[0], setPanelW=widthSt[1];
+    var widthSt=useState(function(){
+      try { var w=parseInt(localStorage.getItem('cc_ai_panel_w')||'',10); return (w>=250&&w<=600)?w:320; } catch(e) { return 320; }
+    }), panelW=widthSt[0], setPanelW=widthSt[1];
+    var collSt=useState(function(){
+      try { return localStorage.getItem('cc_ai_panel_collapsed')==='1'; } catch(e) { return false; }
+    }), collapsed=collSt[0], setCollapsed=collSt[1];
     var dragRef=useRef(null);
-    var onResizeDown = _makeResizeHandler(dragRef, setPanelW, 250, 600, true);
+    var onResizeDown = _makeResizeHandler(dragRef, function(w){ setPanelW(w); try{localStorage.setItem('cc_ai_panel_w',String(w));}catch(e){} }, 250, 600, true);
+
+    // Collapsed: thin tab on the right edge
+    if (collapsed) {
+      return html`<button onClick=${function(){ setCollapsed(false); try{localStorage.setItem('cc_ai_panel_collapsed','0');}catch(e){} }}
+        title="Open AI chat"
+        style=${{
+          position:'absolute', right:0, top:'50%', transform:'translateY(-50%)',
+          zIndex:1100, background:'var(--bg-secondary)', border:'1px solid var(--border)',
+          borderRight:'none', borderRadius:'8px 0 0 8px', padding:'.6rem .35rem',
+          cursor:'pointer', color:'var(--text-secondary)', fontSize:'0.78rem',
+          writingMode:'vertical-rl', boxShadow:'var(--shadow-md)'
+        }}>AI Chat ›</button>`;
+    }
+
+    // Floating overlay: absolute on the right edge, viewer keeps full width
     return html`<div class="cc-side-panel cc-ai-panel" style=${{
-      width:panelW,flexShrink:0,display:'flex',flexDirection:'column',overflow:'hidden',
-      background:'var(--bg-primary)',borderLeft:'1px solid var(--border-subtle)',position:'relative'
+      width:panelW, position:'absolute', right:0, top:0, bottom:0,
+      display:'flex', flexDirection:'column', overflow:'hidden',
+      background:'var(--bg-primary)', borderLeft:'1px solid var(--border-subtle)',
+      boxShadow:'-4px 0 18px rgba(0,0,0,0.18)', zIndex:1100
     }}>
       <div onMouseDown=${onResizeDown} style=${{position:'absolute',left:0,top:0,bottom:0,width:8,cursor:'col-resize',zIndex:10,
         background:'transparent',transition:'background .15s'}} onMouseEnter=${function(e){e.currentTarget.style.background='rgba(59,130,246,0.3)';}} onMouseLeave=${function(e){e.currentTarget.style.background='transparent';}}></div>
+      <button onClick=${function(){ setCollapsed(true); try{localStorage.setItem('cc_ai_panel_collapsed','1');}catch(e){} }}
+        title="Collapse AI chat" style=${{
+          position:'absolute', right:6, top:6, zIndex:11, background:'transparent',
+          border:'none', cursor:'pointer', color:'var(--text-muted)', fontSize:'1rem',
+          padding:'.15rem .35rem', lineHeight:1
+        }}>›</button>
       <${NLCommandPanel} s=${s} d=${d} docked=${true} />
     </div>`;
   }
@@ -16360,10 +16603,35 @@ function startApp() {
           var _clEntry = _buildChangelogEntry(a, _clashesRef.current, s);
           if (_clEntry) _rawD({t:A.APPEND_CHANGELOG, v:_clEntry});
         } catch(e2) {}
+        // ── Shared project sync push (Phase 6F) ──
+        try {
+          if (typeof _sharedEnqueue === 'function' && _sharedProjectId()) {
+            var _now = new Date().toISOString();
+            if (a.t === A.UPD_CLASH && a.u) {
+              var _c = _clashesRef.current.find(function(c){return c.id===a.id;});
+              if (_c) _sharedEnqueue(Object.assign({}, _c, a.u, {_updatedAt:_now}));
+            } else if (a.t === A.UPD_ISSUE && a.u) {
+              var _i = (s.issues||[]).find(function(i){return i.id===a.id;});
+              if (_i) _sharedEnqueue(Object.assign({}, _i, a.u, {_updatedAt:_now}));
+            } else if (a.t === A.ADD_ISSUE && a.v) {
+              _sharedEnqueue(Object.assign({}, a.v, {_updatedAt:_now}));
+            } else if (a.t === A.BATCH_UPD_CLASH && a.u) {
+              _clashesRef.current.forEach(function(c){
+                if (s.selected[c.id]) _sharedEnqueue(Object.assign({}, c, a.u, {_updatedAt:_now}));
+              });
+            } else if (a.t === A.BATCH_UPD_ISSUE && a.u) {
+              (s.issues||[]).forEach(function(i){
+                if (s.selected[i.id]) _sharedEnqueue(Object.assign({}, i, a.u, {_updatedAt:_now}));
+              });
+            }
+          }
+        } catch(e3) {}
       }
     }, []);
     window._ccDispatch = d;
     window._ccLatestState = s;
+    // Start shared sync polling once dispatch is available (idempotent)
+    try { if (typeof _sharedStartPolling === 'function') _sharedStartPolling(); } catch(e){}
     // Console helper: compare two loaded models by GlobalId
     // Usage: _ccCompareModels() — lists models
     //        _ccCompareModels(0, 1) — compare by index
@@ -16807,7 +17075,7 @@ function startApp() {
     }
 
     var is2D = s.underlayMode === 'view2d' || s.underlayMode === 'compare';
-    return html`<div style=${{height:'100vh',display:'flex',flexDirection:'row',overflow:'hidden'}}>
+    return html`<div style=${{height:'100vh',display:'flex',flexDirection:'row',overflow:'hidden',position:'relative'}}>
       <input ref=${_gFileRef} type="file" accept=".ifc" multiple style=${{display:'none'}} onChange=${_gOnFiles} />
       <input ref=${_gFile2dRef} type="file" accept=".dxf,.pdf,.dwg" multiple style=${{display:'none'}} onChange=${_gOnFiles} />
       <${LeftRail} s=${s} d=${d} />

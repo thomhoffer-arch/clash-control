@@ -1,7 +1,7 @@
 // ClashControl — Training data ingestion endpoint
 // Replaces Google Forms beacons with proper Postgres storage
 
-var { cors, rateLimit, clientIp } = require('./_lib');
+var { cors, rateLimit, clientIp, dbUrl: getDbUrl } = require('./_lib');
 
 module.exports = async function handler(req, res) {
   if (cors(req, res)) return;
@@ -14,15 +14,15 @@ module.exports = async function handler(req, res) {
 
   if (rateLimit(clientIp(req), 10)) return res.status(429).json({ error: 'Too many requests' });
 
-  var dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) return res.status(503).json({ error: 'Database not configured' });
+  var url = getDbUrl();
+  if (!url) return res.status(503).json({ error: 'Database not configured' });
 
   var body = req.body;
   if (!body || !body.type) return res.status(400).json({ error: 'Missing type' });
 
   try {
     var { neon } = require('@neondatabase/serverless');
-    var sql = neon(dbUrl);
+    var sql = neon(url);
 
     switch (body.type) {
       case 'nl_command': {

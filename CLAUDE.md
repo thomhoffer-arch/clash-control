@@ -94,8 +94,8 @@ api/title.js                — AI clash title generation (batch, Gemma 4)
 The app is deployed at `www.clashcontrol.io` on Vercel. The backend consists of serverless functions in the `api/` directory.
 
 ### Environment Variables (set in Vercel dashboard)
-- `GOOGLE_AI_KEY` — Google AI Studio API key for Gemma 4
-- `DATABASE_URL` — Neon Postgres connection string
+- `GEMINI_API_KEY` — Google AI Studio API key for Gemma 4 (legacy `GOOGLE_AI_KEY` also accepted)
+- `POSTGRES_URL` — Vercel Postgres / Neon connection string (auto-injected when you link a Vercel Postgres database; legacy `DATABASE_URL` also accepted)
 
 ### API Endpoints
 - `GET /api/health` — Returns `{ ai: bool, db: bool, model: string }`
