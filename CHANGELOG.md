@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.9.6 (2026-04-06)
+- Fix Send button on mobile chat panel
+
 ## v4.9.5 (2026-04-06)
 - fix: hoist Chat feedback hooks above closed-state early return
 
