@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.9.5 (2026-04-06)
+- fix: hoist Chat feedback hooks above closed-state early return
+
 ## v4.9.4 (2026-04-06)
 - Update sw.js and CLAUDE.md for backend architecture
 
