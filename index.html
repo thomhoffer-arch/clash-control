@@ -14317,7 +14317,7 @@ function startApp() {
     window._ccNLIsOpen = function(){ return open; };
     window._ccNLSetInput = function(text){ setInput(text); };
     window._ccNLSetStatus = function(status, back){ setLLMStatus(status); setBackend(back); };
-    var stMsgs = useState([{role:'assistant', text:'Hey! Type what you need, or pick a suggestion below. I work best with short commands like "check walls vs pipes" or "group by storey".'}]);
+    var stMsgs = useState([{role:'assistant', text:'Hi! I\'m Gemma, your ClashControl assistant. Tell me what you need, or pick a suggestion below. I work best with short commands like "check walls vs pipes" or "group by storey".'}]);
     var msgs = stMsgs[0], setMsgs = stMsgs[1];
     var stInput = useState(''), input = stInput[0], setInput = stInput[1];
     var stLoading = useState(false), loading = stLoading[0], setLoading = stLoading[1];
