@@ -14580,7 +14580,10 @@ function startApp() {
     }
 
     function send(overrideText) {
-      var text = (overrideText || input).trim();
+      // Guard against being bound directly to onClick — React passes the event
+      // as the first arg, which would otherwise be treated as the override text.
+      var override = (typeof overrideText === 'string') ? overrideText : null;
+      var text = (override || input).trim();
       if (!text) return;
       setInput('');
       // Multi-step: split on ";" or " then " (but not inside quotes)
