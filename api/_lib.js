@@ -36,4 +36,14 @@ function clientIp(req) {
   return req.headers['x-forwarded-for'] || req.socket.remoteAddress || 'unknown';
 }
 
-module.exports = { cors, rateLimit, clientIp };
+// Resolve a Postgres connection string from any of the env var names that
+// Vercel Postgres / Neon / generic setups inject. Vercel Postgres auto-injects
+// POSTGRES_URL (and several variants) when you link a database to the project.
+function dbUrl() {
+  return process.env.POSTGRES_URL
+    || process.env.POSTGRES_URL_NON_POOLING
+    || process.env.DATABASE_URL
+    || null;
+}
+
+module.exports = { cors, rateLimit, clientIp, dbUrl };

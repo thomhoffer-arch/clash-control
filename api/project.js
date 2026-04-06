@@ -1,7 +1,7 @@
 // ClashControl — Shared project & issues sync endpoint
 // No login required — uses shareable project keys
 
-var { cors, rateLimit, clientIp } = require('./_lib');
+var { cors, rateLimit, clientIp, dbUrl: getDbUrl } = require('./_lib');
 
 // Generate a short project key: PREFIX-XXXXXX
 function generateKey(name) {
@@ -50,11 +50,11 @@ module.exports = async function handler(req, res) {
 
   if (rateLimit(clientIp(req), 30)) return res.status(429).json({ error: 'Too many requests' });
 
-  var dbUrl = process.env.DATABASE_URL;
-  if (!dbUrl) return res.status(503).json({ error: 'Database not configured' });
+  var url = getDbUrl();
+  if (!url) return res.status(503).json({ error: 'Database not configured' });
 
   var { neon } = require('@neondatabase/serverless');
-  var sql = neon(dbUrl);
+  var sql = neon(url);
 
   var projectId = req.query.id || null;
 

@@ -95,7 +95,7 @@ The app is deployed at `www.clashcontrol.io` on Vercel. The backend consists of 
 
 ### Environment Variables (set in Vercel dashboard)
 - `GEMINI_API_KEY` — Google AI Studio API key for Gemma 4 (legacy `GOOGLE_AI_KEY` also accepted)
-- `DATABASE_URL` — Neon Postgres connection string
+- `POSTGRES_URL` — Vercel Postgres / Neon connection string (auto-injected when you link a Vercel Postgres database; legacy `DATABASE_URL` also accepted)
 
 ### API Endpoints
 - `GET /api/health` — Returns `{ ai: bool, db: bool, model: string }`
