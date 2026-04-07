@@ -169,7 +169,6 @@
     }
     *{box-sizing:border-box;margin:0;padding:0}
     body{background:var(--bg-primary);color:var(--text-primary);font-family:system-ui,-apple-system,sans-serif;overflow:hidden}
-    @media not all and (display-mode: standalone){body{border-top:2px solid var(--accent)}}
     input[type=range]{accent-color:var(--accent)}input[type=checkbox]{accent-color:var(--accent)}
     ::-webkit-scrollbar{width:7px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--text-faint);border-radius:4px}::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}
     select,select option{background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border)}
@@ -192,6 +191,35 @@
     .cc-btn-press{transition:background var(--duration-fast) var(--ease-standard),transform var(--duration-fast) var(--ease-standard),color var(--duration-fast) var(--ease-standard),border-color var(--duration-fast) var(--ease-standard)}
     .cc-btn-press:active:not(:disabled){transform:translateY(1px)}
     .cc-status-pill{display:inline-flex;align-items:center;gap:.2rem;padding:.1rem .45rem;border-radius:var(--radius-pill);font-size:var(--text-2xs);font-weight:var(--weight-semibold);letter-spacing:.04em;text-transform:uppercase;line-height:1.4;white-space:nowrap}
+    /* ── PatternFly-inspired tree view ── */
+    .cc-tv{--cc-tv-indent:1.25rem;--cc-tv-row-pad-y:.3rem;--cc-tv-row-pad-x:var(--space-3);--cc-tv-icon-size:14px;--cc-tv-toggle-size:14px;list-style:none;margin:0;padding:0;font-size:var(--text-sm);color:var(--text-primary)}
+    .cc-tv ul{list-style:none;margin:0;padding:0}
+    .cc-tv__item{position:relative}
+    .cc-tv__content{display:flex;align-items:center;gap:var(--space-2);padding:var(--cc-tv-row-pad-y) var(--cc-tv-row-pad-x);cursor:pointer;color:var(--text-primary);border:none;background:none;width:100%;text-align:left;font:inherit;line-height:var(--leading-base);transition:background var(--duration-fast) var(--ease-standard),color var(--duration-fast) var(--ease-standard);border-radius:var(--radius-xs);min-height:28px}
+    .cc-tv__content:hover{background:var(--bg-secondary)}
+    .cc-tv__content.cc-tv-current{background:var(--accent-bg);color:var(--text-primary);font-weight:var(--weight-medium)}
+    .cc-tv__content.cc-tv-current::before{content:'';position:absolute;left:0;top:4px;bottom:4px;width:3px;background:var(--accent);border-radius:0 var(--radius-xs) var(--radius-xs) 0}
+    .cc-tv__content:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+    .cc-tv__toggle{flex-shrink:0;width:var(--cc-tv-toggle-size);height:var(--cc-tv-toggle-size);display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted);background:none;border:none;padding:0;cursor:pointer;border-radius:var(--radius-xs);transition:transform var(--duration-base) var(--ease-standard),color var(--duration-fast) var(--ease-standard);font-size:9px;line-height:1}
+    .cc-tv__toggle:hover{color:var(--text-primary)}
+    .cc-tv__toggle.cc-tv-expanded{transform:rotate(90deg)}
+    .cc-tv__toggle-spacer{flex-shrink:0;width:var(--cc-tv-toggle-size);height:var(--cc-tv-toggle-size);display:inline-block}
+    .cc-tv__icon{flex-shrink:0;width:var(--cc-tv-icon-size);height:var(--cc-tv-icon-size);display:inline-flex;align-items:center;justify-content:center;color:var(--accent-subtle);font-size:11px;line-height:1}
+    .cc-tv__icon svg{width:100%;height:100%;fill:currentColor}
+    .cc-tv__text{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+    .cc-tv__text-secondary{color:var(--text-muted);font-size:var(--text-xs);margin-left:var(--space-1)}
+    .cc-tv__count{flex-shrink:0;font-size:var(--text-2xs);color:var(--text-muted);background:var(--bg-secondary);padding:.05rem var(--space-2);border-radius:var(--radius-pill);font-weight:var(--weight-medium);min-width:1.5rem;text-align:center}
+    .cc-tv__content:hover .cc-tv__count,.cc-tv__content.cc-tv-current .cc-tv__count{background:var(--bg-tertiary)}
+    .cc-tv__list--guides{position:relative}
+    .cc-tv__list--guides::before{content:'';position:absolute;top:0;bottom:.5rem;left:calc(var(--cc-tv-toggle-size)/2);width:1px;background:var(--border-subtle)}
+    .cc-tv__list--nested{padding-left:var(--cc-tv-indent)}
+    .cc-tv__check{flex-shrink:0;width:14px;height:14px;border:1.5px solid var(--border);border-radius:var(--radius-xs);background:var(--bg-tertiary);cursor:pointer;display:inline-flex;align-items:center;justify-content:center;transition:background var(--duration-fast) var(--ease-standard),border-color var(--duration-fast) var(--ease-standard);padding:0}
+    .cc-tv__check.cc-tv-checked{background:var(--accent);border-color:var(--accent)}
+    .cc-tv__check.cc-tv-checked::after{content:'';width:7px;height:4px;border-left:1.5px solid #fff;border-bottom:1.5px solid #fff;transform:rotate(-45deg) translate(1px,-1px)}
+    .cc-tv__check.cc-tv-indeterminate{background:var(--accent);border-color:var(--accent)}
+    .cc-tv__check.cc-tv-indeterminate::after{content:'';width:7px;height:0;border-top:1.5px solid #fff}
+    .cc-tv__empty{padding:var(--space-6) var(--space-4);text-align:center;color:var(--text-faint);font-size:var(--text-sm)}
+    .cc-tv__truncate{padding:var(--space-1) var(--space-3);text-align:center;color:var(--text-faint);font-size:var(--text-2xs);font-style:italic}
     @media(prefers-reduced-motion: reduce){
       *,*::before,*::after{animation-duration:.001ms!important;animation-iteration-count:1!important;transition-duration:.001ms!important}
       .cc-modal-card,.cc-modal-backdrop{animation:none!important}
@@ -7093,7 +7121,7 @@ function startApp() {
       setRenaming(false);
     }
 
-    return html`<header class="cc-header" style=${{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'var(--space-2) var(--space-4)',background:'var(--bg-primary)',borderBottom:'1px solid var(--border)',flexShrink:0,gap:'var(--space-3)'}}>
+    return html`<header class="cc-header" style=${{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'var(--space-2) var(--space-4)',background:'var(--bg-primary)',flexShrink:0,gap:'var(--space-3)'}}>
       <div style=${{display:'flex',alignItems:'center',gap:'var(--space-3)'}}>
         <div style=${{position:'relative'}}>
           <div style=${{width:32,height:32,background:'var(--accent)',borderRadius:'var(--radius-md)',display:'flex',alignItems:'center',justifyContent:'center',cursor:'pointer',boxShadow:'var(--shadow-sm)'}} title="ClashControl — tap for version info" onClick=${function(){setShowVer(!showVer);}}><span style=${{color:'#fff',fontWeight:900,fontSize:14}}>CC</span></div>
@@ -8742,144 +8770,162 @@ function startApp() {
       return function(){document.removeEventListener('keydown', onKey);};
     },[s.tab, viewMode, s.models, expanded, treeSearch, explorerFocus]);
 
-    return html`<div style=${{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
-      <div style=${{padding:'.4rem',borderBottom:'1px solid var(--border-subtle)',flexShrink:0}}>
-        <div style=${{display:'flex',gap:'.2rem',flexWrap:'wrap',marginBottom:'.3rem'}}>
-          ${VIEWS.map(function(v){return html`<button key=${v.id} onClick=${function(){setViewMode(v.id)}}
-            style=${{...S_BTN,fontSize:'0.75rem',padding:'.2rem .4rem',background:viewMode===v.id?'#2563eb':'var(--bg-secondary)',color:viewMode===v.id?'#fff':'var(--text-secondary)'}}>${v.label}</button>`})}
+    // ── PatternFly tree-view node helper ──
+    function tvNode(opts) {
+      var hasChildren = !!opts.hasChildren;
+      var expanded = !!opts.expanded;
+      var selected = !!opts.selected;
+      return html`<li role="treeitem" aria-level=${opts.level||1} aria-expanded=${hasChildren?String(expanded):undefined} class="cc-tv__item">
+        <div tabindex="0" data-tree-key=${opts.key}
+          class=${'cc-tv__content'+(selected?' cc-tv-current':'')}
+          style=${opts.italic?{fontStyle:'italic'}:null}
+          onClick=${opts.onClick}
+          onDblClick=${opts.onDblClick}
+          title=${opts.title||null}>
+          ${hasChildren
+            ? html`<button type="button" class=${'cc-tv__toggle'+(expanded?' cc-tv-expanded':'')}
+                aria-label=${expanded?'Collapse':'Expand'}
+                onClick=${function(e){e.stopPropagation();opts.onToggle&&opts.onToggle();}}>▶</button>`
+            : html`<span class="cc-tv__toggle-spacer"></span>`}
+          ${opts.icon!=null && html`<span class="cc-tv__icon" style=${opts.iconColor?{color:opts.iconColor}:null}>${opts.icon}</span>`}
+          <span class="cc-tv__text">${opts.label}${opts.secondary!=null && html`<span class="cc-tv__text-secondary">${opts.secondary}</span>`}</span>
+          ${opts.count!=null && html`<span class="cc-tv__count">${opts.count}</span>`}
         </div>
-        ${viewMode==='tree' && html`<div>
+        ${hasChildren && expanded && html`<ul role="group" class="cc-tv__list--nested cc-tv__list--guides">${opts.children}</ul>`}
+      </li>`;
+    }
+
+    return html`<div style=${{flex:1,display:'flex',flexDirection:'column',overflow:'hidden'}}>
+      <div style=${{padding:'var(--space-2) var(--space-3)',borderBottom:'1px solid var(--border-subtle)',flexShrink:0,display:'flex',flexDirection:'column',gap:'var(--space-2)'}}>
+        <div style=${{display:'flex',gap:'var(--space-1)',flexWrap:'wrap'}}>
+          ${VIEWS.map(function(v){return html`<button class="cc-btn-press" key=${v.id} onClick=${function(){setViewMode(v.id)}}
+            style=${{...S_BTN,fontSize:'var(--text-xs)',padding:'var(--space-1) var(--space-2)',background:viewMode===v.id?'var(--accent)':'var(--bg-secondary)',color:viewMode===v.id?'#fff':'var(--text-secondary)',fontWeight:viewMode===v.id?'var(--weight-semibold)':'var(--weight-medium)'}}>${v.label}</button>`})}
+        </div>
+        ${(viewMode==='tree'||viewMode==='spatial') && html`<div style=${{display:'flex',flexDirection:'column',gap:'var(--space-2)'}}>
           <input type="text" placeholder="Search elements…" value=${treeSearch}
             onInput=${function(e){setTreeSearch(e.target.value);}}
-            style=${{...S_INPUT,fontSize:'0.75rem',padding:'.2rem .4rem',marginBottom:'.3rem'}} />
-          <div style=${{display:'flex',gap:'.2rem'}}>
-            <button onClick=${expandAll} style=${{...S_BTN,fontSize:'0.75rem',padding:'.15rem .4rem',background:'var(--bg-primary)',color:'var(--text-secondary)'}}>Expand all</button>
-            <button onClick=${function(){setExpanded({});}} style=${{...S_BTN,fontSize:'0.75rem',padding:'.15rem .4rem',background:'var(--bg-primary)',color:'var(--text-secondary)'}}>Collapse all</button>
+            style=${{...S_INPUT,fontSize:'var(--text-xs)',padding:'var(--space-1) var(--space-2)'}} />
+          <div style=${{display:'flex',gap:'var(--space-1)'}}>
+            <button class="cc-btn-press" onClick=${expandAll} style=${{...S_BTN,fontSize:'var(--text-xs)',padding:'var(--space-1) var(--space-2)',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border-subtle)'}}>Expand all</button>
+            <button class="cc-btn-press" onClick=${function(){setExpanded({});}} style=${{...S_BTN,fontSize:'var(--text-xs)',padding:'var(--space-1) var(--space-2)',background:'var(--bg-secondary)',color:'var(--text-secondary)',border:'1px solid var(--border-subtle)'}}>Collapse all</button>
           </div>
         </div>`}
-        ${classView && total>0 && html`<div style=${{display:'flex',justifyContent:'space-between',alignItems:'center',marginTop:'.15rem'}}>
-          <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
-            <span onClick=${function(){if(hiddenCount>0){d({t:A.SHOW_ALL_CLASSES})}else{d({t:A.HIDE_ALL_CLASSES,view:classView})}}}
-              style=${{width:12,height:12,borderRadius:2,border:'2px solid '+(hiddenCount===0?'#3b82f6':hiddenCount<keys.length?'#64748b':'#475569'),background:hiddenCount===0?'#3b82f6':hiddenCount<keys.length?'#334155':'transparent',cursor:'pointer',flexShrink:0,display:'flex',alignItems:'center',justifyContent:'center'}}
-              title=${hiddenCount>0?'Show all':'Hide all'}>
-              ${hiddenCount===0 && html`<span style=${{color:'#fff',fontSize:8}}>✓</span>`}
-              ${hiddenCount>0 && hiddenCount<keys.length && html`<span style=${{color:'#fff',fontSize:8}}>-</span>`}
-            </span>
-            <span style=${{fontSize:'0.63rem',color:'var(--text-faint)'}}>${keys.length} groups · ${total} elements</span>
+        ${classView && total>0 && html`<div style=${{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+          <div style=${{display:'flex',alignItems:'center',gap:'var(--space-2)'}}>
+            <button type="button" class=${'cc-tv__check'+(hiddenCount===0?' cc-tv-checked':hiddenCount<keys.length?' cc-tv-indeterminate':'')}
+              onClick=${function(){if(hiddenCount>0){d({t:A.SHOW_ALL_CLASSES})}else{d({t:A.HIDE_ALL_CLASSES,view:classView})}}}
+              aria-label=${hiddenCount>0?'Show all':'Hide all'}
+              title=${hiddenCount>0?'Show all':'Hide all'}></button>
+            <span style=${{fontSize:'var(--text-2xs)',color:'var(--text-muted)'}}>${keys.length} groups · ${total} elements</span>
           </div>
-          <div style=${{display:'flex',gap:'.2rem'}}>
-            <button onClick=${function(){d({t:A.COLOR_BY_CLASS,v:classView})}}
-              style=${{...S_BTN,fontSize:'0.57rem',padding:'.1rem .3rem',background:s.colorByClass===classView?'#7c3aed':'var(--bg-secondary)',color:s.colorByClass===classView?'#fff':'var(--text-faint)'}}
-              title="Color elements by this classification">Color</button>
-          </div>
+          <button class="cc-btn-press" onClick=${function(){d({t:A.COLOR_BY_CLASS,v:classView})}}
+            style=${{...S_BTN,fontSize:'var(--text-2xs)',padding:'var(--space-1) var(--space-2)',background:s.colorByClass===classView?'#7c3aed':'var(--bg-secondary)',color:s.colorByClass===classView?'#fff':'var(--text-faint)',fontWeight:'var(--weight-medium)'}}
+            title="Color elements by this classification">Color</button>
         </div>`}
-        ${classView && hiddenCount>0 && html`<div style=${{fontSize:'0.57rem',color:'#f59e0b',marginTop:'.15rem'}}>${hiddenCount} group${hiddenCount>1?'s':''} hidden</div>`}
+        ${classView && hiddenCount>0 && html`<div style=${{fontSize:'var(--text-2xs)',color:'var(--color-warning-fg)'}}>${hiddenCount} group${hiddenCount>1?'s':''} hidden</div>`}
       </div>
-      <div ref=${explorerScrollRef} style=${{flex:1,overflowY:'auto',fontSize:'0.69rem'}}>
-        ${s.models.length===0 && html`<div style=${{textAlign:'center',color:'var(--text-faint)',fontSize:'0.8rem',padding:'2rem 1rem'}}>Load models to explore</div>`}
-        ${viewMode==='spatial' && s.models.filter(function(m){return m.visible!==false}).map(function(model){
+      <div ref=${explorerScrollRef} role=${(viewMode==='spatial'||viewMode==='tree')?'tree':null} aria-label=${viewMode==='spatial'?'Spatial structure':viewMode==='tree'?'Model tree':null} class="cc-tv" style=${{flex:1,overflowY:'auto',padding:'var(--space-1) 0'}}>
+        ${s.models.length===0 && html`<div class="cc-tv__empty">Load models to explore</div>`}
+        ${viewMode==='spatial' && html`<ul role="group" class="cc-tv__list">${s.models.filter(function(m){return m.visible!==false}).map(function(model){
           var sh = model.spatialHierarchy||{};
           var projName = sh.project ? sh.project.name : model.name;
           var sites = sh.sites && sh.sites.length ? sh.sites : [{name:'Default Site'}];
           var buildings = sh.buildings && sh.buildings.length ? sh.buildings : [{name:'Default Building'}];
           var pKey='sp_'+model.id;
-          var pOpen=!!expanded[pKey];
-          var disc = DISC.find(function(x){return x.id===model.discipline;});
-          return html`<div key=${model.id}>
-            <div data-tree-key=${pKey} class=${explorerFocus===pKey?'cc-tree-focus':''} onClick=${function(){toggle(pKey);setExplorerFocus(pKey);}} style=${{padding:'.3rem .5rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.3rem',background:explorerFocus===pKey?'rgba(37,99,235,.15)':pOpen?'var(--bg-secondary)':'transparent',borderBottom:'1px solid var(--border-subtle)'}}>
-              <span style=${{color:'var(--text-faint)',fontSize:'0.57rem'}}>${pOpen?'▼':'▶'}</span>
-              <span style=${{color:'#60a5fa',fontSize:'0.63rem',flexShrink:0}}>PRJ</span>
-              <span style=${{color:'var(--text-primary)',fontWeight:500,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${projName}</span>
-            </div>
-            ${pOpen && sites.map(function(site,si){
+          // Element row builder reused across storeys
+          function _elNode(el, level) {
+            var p=el.props||{};
+            var eKey='e_'+el.expressId;
+            return tvNode({
+              key:eKey, level:level,
+              icon:'▪', iconColor:'#c084fc',
+              label:p.name||('#'+el.expressId),
+              secondary:p.ifcType||'Element',
+              hasChildren:false,
+              selected:explorerFocus===eKey,
+              onClick:function(){if(_highlightById)_highlightById(el.expressId,false);setExplorerFocus(eKey);setSelectedElProps(p);},
+              onDblClick:function(e){e.stopPropagation();if(_fitToElement){var isFloor=(p.ifcType||'').match(/slab|floor/i);_fitToElement(el.expressId,isFloor?{normal:[0,1,0]}:null);}if(_highlightById)_highlightById(el.expressId);}
+            });
+          }
+          return tvNode({
+            key:pKey, level:1,
+            icon:'⌂', iconColor:'var(--color-info-fg)',
+            label:projName, secondary:'Project',
+            hasChildren:true, expanded:!!expanded[pKey],
+            selected:explorerFocus===pKey,
+            onClick:function(){toggle(pKey);setExplorerFocus(pKey);},
+            onToggle:function(){toggle(pKey);setExplorerFocus(pKey);},
+            children:sites.map(function(site,si){
               var siKey='ss_'+model.id+'_'+si;
-              var siOpen=!!expanded[siKey];
-              return html`<div key=${si} style=${{paddingLeft:'.5rem'}}>
-                <div data-tree-key=${siKey} class=${explorerFocus===siKey?'cc-tree-focus':''} onClick=${function(){toggle(siKey);setExplorerFocus(siKey);}} style=${{padding:'.2rem .4rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===siKey?'rgba(37,99,235,.15)':'transparent'}}>
-                  <span style=${{color:'var(--text-faint)',fontSize:'0.52rem'}}>${siOpen?'▼':'▶'}</span>
-                  <span style=${{color:'#22d3ee',fontSize:'0.63rem',flexShrink:0}}>SITE</span>
-                  <span style=${{color:'#22d3ee',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${site.name}</span>
-                </div>
-                ${siOpen && buildings.map(function(bld,bi){
+              return tvNode({
+                key:siKey, level:2,
+                icon:'◉', iconColor:'#22d3ee',
+                label:site.name, secondary:'Site',
+                hasChildren:true, expanded:!!expanded[siKey],
+                selected:explorerFocus===siKey,
+                onClick:function(){toggle(siKey);setExplorerFocus(siKey);},
+                onToggle:function(){toggle(siKey);setExplorerFocus(siKey);},
+                children:buildings.map(function(bld,bi){
                   var bKey='sb_'+model.id+'_'+bi;
-                  var bOpen=!!expanded[bKey];
-                  return html`<div key=${bi} style=${{paddingLeft:'.4rem'}}>
-                    <div data-tree-key=${bKey} class=${explorerFocus===bKey?'cc-tree-focus':''} onClick=${function(){toggle(bKey);setExplorerFocus(bKey);}} style=${{padding:'.2rem .4rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===bKey?'rgba(37,99,235,.15)':'transparent'}}>
-                      <span style=${{color:'var(--text-faint)',fontSize:'0.52rem'}}>${bOpen?'▼':'▶'}</span>
-                      <span style=${{color:'#f59e0b',fontSize:'0.63rem',flexShrink:0}}>BLD</span>
-                      <span style=${{color:'#f59e0b',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${bld.name}</span>
-                    </div>
-                    ${bOpen && html`<div style=${{paddingLeft:'.4rem'}}>
-                      ${(model.storeyData||[]).map(function(sd){
+                  return tvNode({
+                    key:bKey, level:3,
+                    icon:'▤', iconColor:'var(--color-warning-fg)',
+                    label:bld.name, secondary:'Building',
+                    hasChildren:true, expanded:!!expanded[bKey],
+                    selected:explorerFocus===bKey,
+                    onClick:function(){toggle(bKey);setExplorerFocus(bKey);},
+                    onToggle:function(){toggle(bKey);setExplorerFocus(bKey);},
+                    children:[].concat(
+                      (model.storeyData||[]).map(function(sd){
                         var stKey='st_'+model.id+'_'+sd.name;
-                        var stOpen=!!expanded[stKey];
                         var stEls = (model.elements||[]).filter(function(el){return el.props&&el.props.storey===sd.name;});
-                        return html`<div key=${sd.name}>
-                          <div data-tree-key=${stKey} class=${explorerFocus===stKey?'cc-tree-focus':''} onClick=${function(){toggle(stKey);setExplorerFocus(stKey);}} style=${{padding:'.2rem .4rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===stKey?'rgba(37,99,235,.15)':'transparent'}}>
-                            <span style=${{color:'var(--text-faint)',fontSize:'0.52rem'}}>${stOpen?'▼':'▶'}</span>
-                            <span style=${{color:'#34d399',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${sd.name}</span>
-                            <span style=${{color:'var(--text-faint)',fontSize:'0.63rem'}}>${sd.elevation.toFixed(1)}m</span>
-                            <span style=${{color:'var(--text-faint)'}}>${stEls.length}</span>
-                          </div>
-                          ${stOpen && html`<div style=${{paddingLeft:'.4rem'}}>
-                            ${stEls.slice(0,200).map(function(el){
-                              var p=el.props||{};
-                              var eKey='e_'+el.expressId;
-                              return html`<div key=${el.expressId} data-tree-key=${eKey} class=${explorerFocus===eKey?'cc-tree-focus':''}
-                                onClick=${function(){if(_highlightById)_highlightById(el.expressId,false);setExplorerFocus(eKey);setSelectedElProps(p);}}
-                                onDblClick=${function(e){e.stopPropagation();if(_fitToElement){var isFloor=(p.ifcType||'').match(/slab|floor/i);_fitToElement(el.expressId,isFloor?{normal:[0,1,0]}:null);}if(_highlightById)_highlightById(el.expressId);}}
-                                style=${{padding:'.15rem .3rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.2rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===eKey?'rgba(37,99,235,.15)':'transparent'}}>
-                                <span style=${{color:'#c084fc',flexShrink:0}}>${p.ifcType||'Element'}</span>
-                                <span style=${{color:'var(--text-secondary)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${p.name||'#'+el.expressId}</span>
-                              </div>`;
-                            })}
-                            ${stEls.length>200 && html`<div style=${{color:'var(--text-faint)',padding:'.2rem',textAlign:'center'}}>+${stEls.length-200} more</div>`}
-                          </div>`}
-                        </div>`;
-                      })}
-                      ${function(){var noSt=(model.elements||[]).filter(function(el){return !el.props||!el.props.storey;});
-                        if(!noSt.length) return null;
+                        return tvNode({
+                          key:stKey, level:4,
+                          icon:'▬', iconColor:'var(--color-success-fg)',
+                          label:sd.name, secondary:sd.elevation.toFixed(1)+'m',
+                          count:stEls.length,
+                          hasChildren:stEls.length>0, expanded:!!expanded[stKey],
+                          selected:explorerFocus===stKey,
+                          onClick:function(){toggle(stKey);setExplorerFocus(stKey);},
+                          onToggle:function(){toggle(stKey);setExplorerFocus(stKey);},
+                          children:[].concat(
+                            stEls.slice(0,200).map(function(el){return _elNode(el, 5);}),
+                            stEls.length>200 ? [html`<li class="cc-tv__truncate" key="trunc">+${stEls.length-200} more…</li>`] : []
+                          )
+                        });
+                      }),
+                      function(){
+                        var noSt=(model.elements||[]).filter(function(el){return !el.props||!el.props.storey;});
+                        if(!noSt.length) return [];
                         var nsKey='st_'+model.id+'_none';
-                        var nsOpen=!!expanded[nsKey];
-                        return html`<div>
-                          <div data-tree-key=${nsKey} class=${explorerFocus===nsKey?'cc-tree-focus':''} onClick=${function(){toggle(nsKey);setExplorerFocus(nsKey);}} style=${{padding:'.2rem .4rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',borderBottom:'1px solid var(--border-subtle)',fontStyle:'italic',background:explorerFocus===nsKey?'rgba(37,99,235,.15)':'transparent'}}>
-                            <span style=${{color:'var(--text-faint)',fontSize:'0.52rem'}}>${nsOpen?'▼':'▶'}</span>
-                            <span style=${{color:'var(--text-muted)',flex:1}}>(No storey)</span>
-                            <span style=${{color:'var(--text-faint)'}}>${noSt.length}</span>
-                          </div>
-                          ${nsOpen && html`<div style=${{paddingLeft:'.4rem'}}>
-                            ${noSt.slice(0,100).map(function(el){
-                              var p=el.props||{};
-                              var eKey='e_'+el.expressId;
-                              return html`<div key=${el.expressId} data-tree-key=${eKey} class=${explorerFocus===eKey?'cc-tree-focus':''}
-                                onClick=${function(){if(_highlightById)_highlightById(el.expressId,false);setExplorerFocus(eKey);setSelectedElProps(p);}}
-                                onDblClick=${function(e){e.stopPropagation();if(_fitToElement)_fitToElement(el.expressId);if(_highlightById)_highlightById(el.expressId);}}
-                                style=${{padding:'.15rem .3rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.2rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===eKey?'rgba(37,99,235,.15)':'transparent'}}>
-                                <span style=${{color:'#c084fc',flexShrink:0}}>${p.ifcType||'Element'}</span>
-                                <span style=${{color:'var(--text-secondary)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${p.name||'#'+el.expressId}</span>
-                              </div>`;
-                            })}
-                          </div>`}
-                        </div>`;
-                      }()}
-                    </div>`}
-                  </div>`;
-                })}
-              </div>`;
-            })}
-          </div>`;
-        })}
-        ${viewMode==='tree' && s.models.filter(function(m){return m.visible!==false}).map(function(model){
+                        return [tvNode({
+                          key:nsKey, level:4,
+                          label:'(No storey)',
+                          count:noSt.length, italic:true,
+                          hasChildren:true, expanded:!!expanded[nsKey],
+                          selected:explorerFocus===nsKey,
+                          onClick:function(){toggle(nsKey);setExplorerFocus(nsKey);},
+                          onToggle:function(){toggle(nsKey);setExplorerFocus(nsKey);},
+                          children:noSt.slice(0,100).map(function(el){return _elNode(el, 5);})
+                        })];
+                      }()
+                    )
+                  });
+                })
+              });
+            })
+          });
+        })}</ul>`}
+        ${viewMode==='tree' && html`<ul role="group" class="cc-tv__list">${s.models.filter(function(m){return m.visible!==false}).map(function(model){
           var mKey = 'm_'+model.id;
-          var mOpen = !!expanded[mKey];
           var disc = DISC.find(function(x){return x.id===model.discipline;});
           var storeyGroups = {};
           var noStorey = [];
           // Build host-child map for this model (GlobalId → expressId → children)
           var _gidToEl = {};
           (model.elements||[]).forEach(function(el){ if(el.props&&el.props.globalId) _gidToEl[el.props.globalId]=el; });
-          var _childrenMap = {}; // parentExpressId → [childEl, ...]
-          var _hasParent = {}; // childExpressId → true
+          var _childrenMap = {};
+          var _hasParent = {};
           (model.elements||[]).forEach(function(el){
             var hGid = el.props&&(el.props.hostId||el.props.host_global_id);
             if(!hGid) return;
@@ -8897,95 +8943,89 @@ function startApp() {
           });
           var storeyKeys = Object.keys(storeyGroups).sort();
           var q = treeSearch.toLowerCase();
-          return html`<div key=${model.id}>
-            <div data-tree-key=${mKey} class=${explorerFocus===mKey?'cc-tree-focus':''} onClick=${function(){toggle(mKey);setExplorerFocus(mKey);}} style=${{padding:'.3rem .5rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.3rem',background:explorerFocus===mKey?'rgba(37,99,235,.15)':mOpen?'var(--bg-secondary)':'transparent',borderBottom:'1px solid var(--border-subtle)',outline:explorerFocus===mKey?'1px solid rgba(59,130,246,.5)':'none'}}>
-              <span style=${{color:'var(--text-faint)',fontSize:'0.57rem'}}>${mOpen?'▼':'▶'}</span>
-              <span style=${{width:8,height:8,borderRadius:'50%',background:disc?disc.c:'var(--text-muted)',flexShrink:0}}></span>
-              <span style=${{color:'var(--text-primary)',fontWeight:500,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${model.name}</span>
-              <span style=${{color:'var(--text-faint)'}}>${(model.elements||[]).length}</span>
-            </div>
-            ${mOpen && html`<div style=${{paddingLeft:'.5rem'}}>
-              ${storeyKeys.map(function(st){
-                var sKey='s_'+model.id+'_'+st;
-                var sOpen=!!expanded[sKey];
-                var els=storeyGroups[st];
-                var filtered = q ? els.filter(function(el){var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1||String(el.expressId).indexOf(q)!==-1;}) : els;
-                if(q && filtered.length===0) return null;
-                return html`<div key=${st}>
-                  <div data-tree-key=${sKey} class=${explorerFocus===sKey?'cc-tree-focus':''} onClick=${function(){toggle(sKey);setExplorerFocus(sKey);}} style=${{padding:'.2rem .4rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===sKey?'rgba(37,99,235,.15)':'transparent',outline:explorerFocus===sKey?'1px solid rgba(59,130,246,.5)':'none'}}>
-                    <span style=${{color:'var(--text-faint)',fontSize:'0.52rem'}}>${sOpen?'▼':'▶'}</span>
-                    <span style=${{color:'#34d399',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title=${st}>${st}</span>
-                    <span style=${{color:'var(--text-faint)'}}>${filtered.length}</span>
-                  </div>
-                  ${sOpen && html`<div style=${{paddingLeft:'.4rem'}}>
-                    ${function(){
-                      var topLevel = filtered.filter(function(el){ return !_hasParent[el.expressId]; });
-                      return html`<div>
-                        ${topLevel.slice(0,200).map(function(el){
-                          var p=el.props||{};
-                          var eKey='e_'+el.expressId;
-                          var cKey='ec_'+el.expressId;
-                          var elChildren=_childrenMap[el.expressId]||[];
-                          var hasChildren=elChildren.length>0;
-                          var cOpen=hasChildren&&!!expanded[cKey];
-                          return html`<div key=${el.expressId}>
-                            <div data-tree-key=${eKey} class=${explorerFocus===eKey?'cc-tree-focus':''}
-                              onClick=${function(){if(_highlightById)_highlightById(el.expressId,false);setExplorerFocus(eKey);setSelectedElProps(p);}}
-                              onDblClick=${function(e){e.stopPropagation();if(_fitToElement){var isFloor=(p.ifcType||'').match(/slab|floor/i);_fitToElement(el.expressId,isFloor?{normal:[0,1,0]}:null);}if(_highlightById)_highlightById(el.expressId);}}
-                              style=${{padding:'.15rem .3rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.2rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===eKey?'rgba(37,99,235,.15)':'transparent',outline:explorerFocus===eKey?'1px solid rgba(59,130,246,.5)':'none'}}>
-                              ${hasChildren
-                                ? html`<span onClick=${function(e2){e2.stopPropagation();toggle(cKey);}} style=${{color:'var(--text-faint)',fontSize:'0.52rem',flexShrink:0,cursor:'pointer',minWidth:8}}>${cOpen?'▼':'▶'}</span>`
-                                : html`<span style=${{minWidth:8,flexShrink:0}}></span>`}
-                              <span style=${{color:'#c084fc',flexShrink:0}}>${p.ifcType||'Element'}</span>
-                              <span style=${{color:'var(--text-secondary)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${p.name||'#'+el.expressId}</span>
-                              ${hasChildren && html`<span style=${{fontSize:'0.57rem',color:'var(--text-faint)',flexShrink:0}}>${elChildren.length}</span>`}
-                            </div>
-                            ${cOpen && html`<div style=${{paddingLeft:'.8rem'}}>
-                              ${elChildren.map(function(child){
-                                var cp=child.props||{};
-                                var ceKey='e_'+child.expressId;
-                                return html`<div key=${child.expressId} data-tree-key=${ceKey} class=${explorerFocus===ceKey?'cc-tree-focus':''}
-                                  onClick=${function(){if(_highlightById)_highlightById(child.expressId,false);setExplorerFocus(ceKey);setSelectedElProps(cp);}}
-                                  onDblClick=${function(e){e.stopPropagation();if(_fitToElement){var isFloor=(cp.ifcType||'').match(/slab|floor/i);_fitToElement(child.expressId,isFloor?{normal:[0,1,0]}:null);}if(_highlightById)_highlightById(child.expressId);}}
-                                  style=${{padding:'.12rem .3rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.2rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===ceKey?'rgba(37,99,235,.15)':'transparent',outline:explorerFocus===ceKey?'1px solid rgba(59,130,246,.5)':'none'}}>
-                                  <span style=${{minWidth:8,flexShrink:0}}></span>
-                                  <span style=${{color:'#a78bfa',flexShrink:0,fontSize:'0.63rem'}}>${cp.ifcType||'El'}</span>
-                                  <span style=${{color:'var(--text-secondary)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap',fontSize:'0.63rem'}}>${cp.name||'#'+child.expressId}</span>
-                                </div>`;
-                              })}
-                            </div>`}
-                          </div>`;
-                        })}
-                        ${topLevel.length>200 && html`<div style=${{color:'var(--text-faint)',padding:'.2rem',textAlign:'center'}}>+${topLevel.length-200} more</div>`}
-                      </div>`;
-                    }()}
-                  </div>`}
-                </div>`;
-              })}
-              ${noStorey.length>0 && html`<div>
-                <div data-tree-key=${'s_'+model.id+'_none'} class=${explorerFocus==='s_'+model.id+'_none'?'cc-tree-focus':''} onClick=${function(){toggle('s_'+model.id+'_none');setExplorerFocus('s_'+model.id+'_none');}} style=${{padding:'.2rem .4rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.25rem',borderBottom:'1px solid var(--border-subtle)',fontStyle:'italic',background:explorerFocus==='s_'+model.id+'_none'?'rgba(37,99,235,.15)':'transparent',outline:explorerFocus==='s_'+model.id+'_none'?'1px solid rgba(59,130,246,.5)':'none'}}>
-                  <span style=${{color:'var(--text-faint)',fontSize:'0.52rem'}}>${expanded['s_'+model.id+'_none']?'▼':'▶'}</span>
-                  <span style=${{color:'var(--text-muted)',flex:1}}>(No storey)</span>
-                  <span style=${{color:'var(--text-faint)'}}>${noStorey.length}</span>
-                </div>
-                ${expanded['s_'+model.id+'_none'] && html`<div style=${{paddingLeft:'.4rem'}}>
-                  ${noStorey.filter(function(el){if(!q)return true;var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1;}).slice(0,100).map(function(el){
-                    var p=el.props||{};
-                    var eKey2='e_'+el.expressId;
-                    return html`<div key=${el.expressId} data-tree-key=${eKey2} class=${explorerFocus===eKey2?'cc-tree-focus':''}
-                      onClick=${function(){if(_highlightById)_highlightById(el.expressId,false);setExplorerFocus(eKey2);setSelectedElProps(p);}}
-                      onDblClick=${function(e){e.stopPropagation();if(_fitToElement){var isFloor=(p.ifcType||'').match(/slab|floor/i);_fitToElement(el.expressId,isFloor?{normal:[0,1,0]}:null);}if(_highlightById)_highlightById(el.expressId);}}
-                      style=${{padding:'.15rem .3rem',cursor:'pointer',display:'flex',alignItems:'center',gap:'.2rem',borderBottom:'1px solid var(--border-subtle)',background:explorerFocus===eKey2?'rgba(37,99,235,.15)':'transparent',outline:explorerFocus===eKey2?'1px solid rgba(59,130,246,.5)':'none'}}>
-                      <span style=${{color:'#c084fc',flexShrink:0}}>${p.ifcType||'Element'}</span>
-                      <span style=${{color:'var(--text-secondary)',flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${p.name||'#'+el.expressId}</span>
-                    </div>`;
-                  })}
-                </div>`}
-              </div>`}
-            </div>`}
-          </div>`;
-        })}
-        ${classView && !hasCls && html`<div style=${{textAlign:'center',color:'var(--text-faint)',fontSize:'0.86rem',padding:'2rem 1rem'}}>Load models to see classification</div>`}
+          // Element row builder (with optional host-children)
+          function _elNode(el, level) {
+            var p=el.props||{};
+            var eKey='e_'+el.expressId;
+            var cKey='ec_'+el.expressId;
+            var elChildren=_childrenMap[el.expressId]||[];
+            var hasChildren=elChildren.length>0;
+            return tvNode({
+              key:eKey, level:level,
+              icon:'▪', iconColor:'#c084fc',
+              label:p.name||('#'+el.expressId),
+              secondary:p.ifcType||'Element',
+              count:hasChildren?elChildren.length:undefined,
+              hasChildren:hasChildren, expanded:!!expanded[cKey],
+              selected:explorerFocus===eKey,
+              onClick:function(){if(_highlightById)_highlightById(el.expressId,false);setExplorerFocus(eKey);setSelectedElProps(p);},
+              onDblClick:function(e){e.stopPropagation();if(_fitToElement){var isFloor=(p.ifcType||'').match(/slab|floor/i);_fitToElement(el.expressId,isFloor?{normal:[0,1,0]}:null);}if(_highlightById)_highlightById(el.expressId);},
+              onToggle:function(){toggle(cKey);setExplorerFocus(eKey);},
+              children:elChildren.map(function(child){
+                var cp=child.props||{};
+                var ceKey='e_'+child.expressId;
+                return tvNode({
+                  key:ceKey, level:level+1,
+                  icon:'▫', iconColor:'#a78bfa',
+                  label:cp.name||('#'+child.expressId),
+                  secondary:cp.ifcType||'El',
+                  hasChildren:false,
+                  selected:explorerFocus===ceKey,
+                  onClick:function(){if(_highlightById)_highlightById(child.expressId,false);setExplorerFocus(ceKey);setSelectedElProps(cp);},
+                  onDblClick:function(e){e.stopPropagation();if(_fitToElement){var isFloor=(cp.ifcType||'').match(/slab|floor/i);_fitToElement(child.expressId,isFloor?{normal:[0,1,0]}:null);}if(_highlightById)_highlightById(child.expressId);}
+                });
+              })
+            });
+          }
+          var storeyChildren = [];
+          storeyKeys.forEach(function(st){
+            var sKey='s_'+model.id+'_'+st;
+            var els=storeyGroups[st];
+            var filtered = q ? els.filter(function(el){var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1||String(el.expressId).indexOf(q)!==-1;}) : els;
+            if(q && filtered.length===0) return;
+            var topLevel = filtered.filter(function(el){ return !_hasParent[el.expressId]; });
+            storeyChildren.push(tvNode({
+              key:sKey, level:2,
+              icon:'▬', iconColor:'var(--color-success-fg)',
+              label:st, count:filtered.length,
+              hasChildren:topLevel.length>0, expanded:!!expanded[sKey],
+              selected:explorerFocus===sKey,
+              onClick:function(){toggle(sKey);setExplorerFocus(sKey);},
+              onToggle:function(){toggle(sKey);setExplorerFocus(sKey);},
+              children:[].concat(
+                topLevel.slice(0,200).map(function(el){return _elNode(el, 3);}),
+                topLevel.length>200 ? [html`<li class="cc-tv__truncate" key="trunc">+${topLevel.length-200} more…</li>`] : []
+              )
+            }));
+          });
+          if(noStorey.length>0){
+            var nsKey='s_'+model.id+'_none';
+            var nsFiltered = noStorey.filter(function(el){if(!q)return true;var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1;});
+            if(nsFiltered.length>0){
+              storeyChildren.push(tvNode({
+                key:nsKey, level:2,
+                label:'(No storey)', count:nsFiltered.length, italic:true,
+                hasChildren:true, expanded:!!expanded[nsKey],
+                selected:explorerFocus===nsKey,
+                onClick:function(){toggle(nsKey);setExplorerFocus(nsKey);},
+                onToggle:function(){toggle(nsKey);setExplorerFocus(nsKey);},
+                children:nsFiltered.slice(0,100).map(function(el){return _elNode(el, 3);})
+              }));
+            }
+          }
+          return tvNode({
+            key:mKey, level:1,
+            icon:html`<span style=${{display:'inline-block',width:8,height:8,borderRadius:'50%',background:disc?disc.c:'var(--text-muted)'}}></span>`,
+            label:model.name,
+            count:(model.elements||[]).length,
+            hasChildren:storeyChildren.length>0, expanded:!!expanded[mKey],
+            selected:explorerFocus===mKey,
+            onClick:function(){toggle(mKey);setExplorerFocus(mKey);},
+            onToggle:function(){toggle(mKey);setExplorerFocus(mKey);},
+            children:storeyChildren
+          });
+        })}</ul>`}
+        ${classView && !hasCls && html`<div class="cc-tv__empty">Load models to see classification</div>`}
         ${classView && keys.map(function(k, idx){
           var grp = groups[k];
           var pct = total>0 ? Math.round(grp.count/total*100) : 0;
@@ -9009,10 +9049,10 @@ function startApp() {
           </div>`;
         })}
       </div>
-      ${selectedElProps && html`<div style=${{flexShrink:0,borderTop:'2px solid var(--border)',maxHeight:'40%',overflowY:'auto',background:'var(--bg-tertiary)'}}>
-        <div style=${{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'.3rem .5rem',borderBottom:'1px solid var(--border-subtle)'}}>
-          <span style=${{fontSize:'0.75rem',fontWeight:600,color:'#93c5fd'}}>Properties</span>
-          <button onClick=${function(){setSelectedElProps(null);}} style=${{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',fontSize:'0.86rem',lineHeight:1,padding:'2px 4px'}}>×</button>
+      ${selectedElProps && html`<div style=${{flexShrink:0,borderTop:'1px solid var(--border)',maxHeight:'40%',overflowY:'auto',background:'var(--bg-tertiary)'}}>
+        <div style=${{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'var(--space-2) var(--space-3)',borderBottom:'1px solid var(--border-subtle)'}}>
+          <span style=${{fontSize:'var(--text-xs)',fontWeight:'var(--weight-semibold)',color:'var(--color-info-fg)',textTransform:'uppercase',letterSpacing:'.06em'}}>Properties</span>
+          <button onClick=${function(){setSelectedElProps(null);}} style=${{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',fontSize:'var(--text-base)',lineHeight:1,padding:'2px 4px'}} aria-label="Close properties">×</button>
         </div>
         <${PropBlock} p=${selectedElProps} label=${(selectedElProps.ifcType||'Element')+': '+(selectedElProps.name||'#'+selectedElProps.expressId)} />
       </div>`}
@@ -15618,11 +15658,9 @@ function startApp() {
 
     return html`<div class="cc-left-rail" style=${{
       width:48,flexShrink:0,background:'var(--bg-primary)',
-      borderRight:'1px solid var(--border-subtle)',
       display:'flex',flexDirection:'column',overflow:'visible',userSelect:'none',position:'relative',zIndex:10
     }}>
-      <div style=${{height:48,display:'flex',alignItems:'center',justifyContent:'center',
-        borderBottom:'1px solid var(--border-subtle)',flexShrink:0}}>
+      <div style=${{height:48,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0}}>
         <div class="cc-logo-mark cc-tip" data-tip=${'ClashControl v'+CC_VERSION.v}
           style=${{width:28,height:28,background:'var(--accent)',borderRadius:6,
             display:'flex',alignItems:'center',justifyContent:'center',cursor:'default'}}>
@@ -16331,7 +16369,7 @@ function startApp() {
     var onResizeDown = _makeResizeHandler(dragRef, setPanelW, 200, 600, false);
     return html`<div class="cc-left-panel" style=${{
       width:panelW,flexShrink:0,display:'flex',flexDirection:'column',overflow:'hidden',
-      background:'var(--bg-primary)',borderRight:'1px solid var(--border-subtle)',position:'relative'
+      background:'var(--bg-primary)',position:'relative'
     }}>
       <div onMouseDown=${onResizeDown} style=${{position:'absolute',right:0,top:0,bottom:0,width:8,cursor:'col-resize',zIndex:10,
         background:'transparent',transition:'background .15s'}} onMouseEnter=${function(e){e.currentTarget.style.background='rgba(59,130,246,0.3)';}} onMouseLeave=${function(e){e.currentTarget.style.background='transparent';}}></div>
