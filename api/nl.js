@@ -193,7 +193,11 @@ module.exports = async function handler(req, res) {
     if (!resp.ok) {
       var errText = await resp.text();
       console.error('Gemma API error:', resp.status, errText);
-      return res.status(502).json({ error: 'AI request failed' });
+      return res.status(502).json({
+        error: 'AI request failed',
+        upstreamStatus: resp.status,
+        upstreamBody: errText.slice(0, 1000)
+      });
     }
 
     var data = await resp.json();
