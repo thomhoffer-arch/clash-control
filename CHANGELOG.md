@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.9.14 (2026-04-07)
+- feat: conversational "want me to X?" offers with one-click yes/no
+
 ## v4.9.13 (2026-04-07)
 - feat: project name NL commands + thinking indicator
 
