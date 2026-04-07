@@ -631,7 +631,7 @@ function startApp() {
 
   // Load addon scripts — called after app mounts
   function _loadAddonScripts() {
-    var addonFiles = ['training-data', 'pwa', 'local-engine', 'shared-project', 'revit-bridge'];
+    var addonFiles = ['training-data', 'pwa', 'local-engine', 'shared-project', 'revit-bridge', 'data-quality'];
     addonFiles.forEach(function(name) {
       var script = document.createElement('script');
       script.src = 'addons/' + name + '.js';
