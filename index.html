@@ -351,6 +351,56 @@ function startApp() {
   }
   window._ccRenderChatText = renderChatText;
 
+  // ── Pending offer system ──────────────────────────────────────
+  // When the assistant can't fulfill a command because of a missing
+  // prerequisite (no models, no clashes, etc.) it phrases the reply as
+  // a question — "want me to run a detection?" — and parks a one-click
+  // action in window._ccPendingOffer. The next "yes" / "ok" / "sure"
+  // in chat executes that action; "no" / "cancel" drops it silently.
+  // This runs BEFORE fast-path and BEFORE /api/nl so confirmations are
+  // instant and don't burn API calls.
+  function _setOfferLoadIFC() {
+    window._ccPendingOffer = { label:'load ifc', kind:'load_ifc', action: function() {
+      if (window._ccOpenIFC) { window._ccOpenIFC(); return 'Opening file picker — pick one or more .ifc files.'; }
+      return 'File picker unavailable. Drag an .ifc file onto the window instead.';
+    }};
+  }
+  function _setOfferRunDetection() {
+    // Fully-specified rules so the chat handler can skip the conversational
+    // "self-clashes? gap? ready?" flow and execute straight away via _runNow.
+    window._ccPendingOffer = { label:'run detection', kind:'run_detection', action: function() {
+      return {
+        _clashSetup:true, _runNow:true,
+        rules:{ modelA:'all', modelB:'all', hard:true, maxGap:0, duplicates:false, excludeSelf:true, excludeTypes:[], excludeTypePairs:[] },
+        nameA:'All models', nameB:'All models'
+      };
+    }};
+  }
+  function _offerLoadIFC() { _setOfferLoadIFC(); return 'No models loaded yet — want me to open the file picker?'; }
+  function _offerRunDetection(s) {
+    if (!s || !s.models || !s.models.length) return _offerLoadIFC();
+    _setOfferRunDetection();
+    return 'No clashes yet — want me to run a detection?';
+  }
+  function _offerAnalyze(s) {
+    if (!s || !s.models || !s.models.length) return _offerLoadIFC();
+    if (!s.clashes || !s.clashes.length) { _setOfferRunDetection(); return 'No clashes to analyse yet — want me to run a detection first?'; }
+    return null; // we have clashes, nothing to offer
+  }
+  function _offerExport(s) {
+    if (!s || !s.models || !s.models.length) { _setOfferLoadIFC(); return 'Nothing to export yet — want me to open the file picker and load a model?'; }
+    if ((!s.clashes || !s.clashes.length) && (!s.issues || !s.issues.length)) {
+      _setOfferRunDetection();
+      return 'Nothing to export yet — want me to run a detection first?';
+    }
+    return 'Nothing to export yet.';
+  }
+  function _offerIssuesFromClashes(s) {
+    if (!s || !s.models || !s.models.length) return _offerLoadIFC();
+    if (!s.clashes || !s.clashes.length) { _setOfferRunDetection(); return 'No issues yet — want me to run a detection first so you have clashes to promote?'; }
+    return 'No issues yet — open a clash in the list and save it as an issue.';
+  }
+
   // Expose core utilities for addons
   window._ccUid = uid;
   window._ccDISC = DISC;
@@ -13240,7 +13290,7 @@ function startApp() {
 
     switch (action.intent) {
       case 'run_detection': {
-        if (!s.models.length) return 'No models loaded yet. Drop an IFC file to get started.';
+        if (!s.models.length) return _offerLoadIFC();
         var mA = resolveModel(action.modelA), mB = resolveModel(action.modelB);
         var upd = { modelA: mA?mA.id:'all', modelB: mB?mB.id:'all', hard: action.hard!==false, duplicates: action.duplicates===true };
         if (action.excludeSelf) upd.excludeSelf = true;
@@ -13252,7 +13302,7 @@ function startApp() {
       case 'filter_status': var sv = {open:'open',resolved:'resolved',all:'all'}[action.status]||'all'; d({t:A.UPD_FILTERS, u:{status:sv}}); d({t:A.TAB,v:'clashes'}); return sv==='all'?'Showing everything.':'Showing '+sv+' only.';
       case 'reset_filters': d({t:A.RESET_FILTERS}); return 'Filters cleared — showing everything.';
       case 'group_by': var gv = {storey:'storey',floor:'storey',level:'storey',discipline:'discipline',status:'status',type:'type',none:'none'}[action.groupBy]||'none'; d({t:A.CLASH_GROUP_BY,v:gv}); d({t:A.TAB,v:'clashes'}); return 'Grouped by '+gv+'.';
-      case 'export_bcf': if (!s.issues.length&&!s.clashes.length) return 'Nothing to export yet. Say "run detection" first, then save a clash as an issue.'; var items=s.issues.length?s.issues:s.clashes; exportBCF(items,'2.1',s.viewpoints); return 'Done — '+items.length+' items exported as BCF.';
+      case 'export_bcf': if (!s.issues.length&&!s.clashes.length) return _offerExport(s); var items=s.issues.length?s.issues:s.clashes; exportBCF(items,'2.1',s.viewpoints); return 'Done — '+items.length+' items exported as BCF.';
       case 'query': return processNLCommand(action.metric||action.query||'', s, d);
       case 'help': return processNLCommand('help', s, d);
       case 'load_model': if (window._ccOpenIFC) { window._ccOpenIFC(); return 'Opening file picker — pick one or more .ifc files.'; } return 'File picker unavailable. Drag an .ifc file onto the window instead.';
@@ -13331,6 +13381,10 @@ function startApp() {
     if (/^(?:clash|issue|model)\s+count\s*\??$/.test(t)) return true;
     // List projects (read-only, no model-name resolution)
     if (/^(?:list|show|what)\s+(?:the\s+)?projects?\s*\??$/.test(t)) return true;
+    // Pending-offer confirmations — though the pre-check in
+    // processNLCommandWithLLM catches these first, this is a defense so a
+    // stray "yes" never triggers an AI round-trip even without an offer.
+    if (/^(?:yes|yeah|yep|sure|ok(?:ay)?|y|no|nah|nope|n)\b/.test(t)) return true;
     return false;
   }
   window._ccNLStats = function() {
@@ -13375,6 +13429,25 @@ function startApp() {
           clashCount: s.clashes ? s.clashes.length : 0};
       }
       return result;
+    }
+
+    // -1. Pending offer confirmation: "yes"/"no" after "want me to X?"
+    // This runs before follow-ups, fast-path, and the server — confirmations
+    // are instant and never hit /api/nl.
+    if (window._ccPendingOffer) {
+      var offerTxt = raw.trim().toLowerCase();
+      if (/^(?:yes|yeah|yep|sure|ok(?:ay)?|y|please|do it|go|run it|let'?s go)\b/.test(offerTxt)) {
+        var acceptedOffer = window._ccPendingOffer;
+        window._ccPendingOffer = null;
+        return Promise.resolve(_captureNL(acceptedOffer.action(), 'offer-accept'));
+      }
+      if (/^(?:no|nah|nope|n|not now|later|cancel|never\s*mind)\b/.test(offerTxt)) {
+        window._ccPendingOffer = null;
+        return Promise.resolve(_captureNL('Okay — just let me know when you need it.', 'offer-decline'));
+      }
+      // Neither yes nor no: user typed something else — drop the offer and
+      // fall through to normal processing of the new command.
+      window._ccPendingOffer = null;
     }
 
     // 0. Follow-up resolution: "those", "export those", "how many?"
@@ -13467,7 +13540,8 @@ function startApp() {
         saveProjects(pList);
         d({t:A.SET_PROJECT_LIST, v:pList});
         _switchProject(newId, s, d);
-        return 'Created project **' + newName + '** and switched to it. Drop an IFC file to get started.';
+        _setOfferLoadIFC();
+        return 'Created project **' + newName + '** and switched to it. Want me to open the file picker so you can load a model?';
       } catch(e) { return 'Couldn\'t create the project: ' + (e.message||e); }
     }
     // "rename project to Foo" / "rename the current project Foo" — requires the word "project"
@@ -13517,11 +13591,11 @@ function startApp() {
     // ── Short-form / single-word commands ──────────────────────────
     // These catch minimal inputs that users naturally try
     if (/^summary$|^stats$|^report$/i.test(text)) return processNLCommand('analyze clashes', s, d) || 'No data yet. Load models and run detection first.';
-    if (/^clashes?\s*\??$|^results?\s*\??$/i.test(text)) { d({t:A.TAB,v:'clashes'}); return s.clashes.length ? s.clashes.length + ' clashes — here\'s the list.' : (s.models.length ? 'No clashes yet. Say "run detection" to check.' : 'No clashes yet — and no models loaded. Say "load ifc" to pick a file.'); }
-    if (/^issues?\s*\??$/i.test(text)) { d({t:A.TAB,v:'issues'}); return s.issues.length ? s.issues.length + ' issues — here\'s the list.' : (s.clashes.length ? 'No issues yet. Open a clash and save it as an issue.' : 'No issues yet. Say "run detection" first, then save a clash as an issue.'); }
-    if (/^models?\s*\??$/i.test(text)) { d({t:A.TAB,v:'models'}); return s.models.length ? s.models.length + ' model'+(s.models.length>1?'s':'')+' loaded — here they are.' : 'No models loaded yet. Say "load ifc" to pick a file.'; }
+    if (/^clashes?\s*\??$|^results?\s*\??$/i.test(text)) { d({t:A.TAB,v:'clashes'}); return s.clashes.length ? s.clashes.length + ' clashes — here\'s the list.' : _offerRunDetection(s); }
+    if (/^issues?\s*\??$/i.test(text)) { d({t:A.TAB,v:'issues'}); return s.issues.length ? s.issues.length + ' issues — here\'s the list.' : _offerIssuesFromClashes(s); }
+    if (/^models?\s*\??$/i.test(text)) { d({t:A.TAB,v:'models'}); return s.models.length ? s.models.length + ' model'+(s.models.length>1?'s':'')+' loaded — here they are.' : _offerLoadIFC(); }
     if (/^settings?$/i.test(text)) { d({t:A.SETTINGS,v:true}); return 'Here are your settings.'; }
-    if (/^bcf$/i.test(text)) { if(!s.issues.length&&!s.clashes.length)return 'Nothing to export yet. Say "run detection" first, then save a clash as an issue.'; exportBCF(s.issues.length?s.issues:s.clashes,'2.1',s.viewpoints); return 'Done — BCF exported.'; }
+    if (/^bcf$/i.test(text)) { if(!s.issues.length&&!s.clashes.length)return _offerExport(s); exportBCF(s.issues.length?s.issues:s.clashes,'2.1',s.viewpoints); return 'Done — BCF exported.'; }
     if (/^ifc$/i.test(text)) { if(window._ccOpenIFC) window._ccOpenIFC(); return 'Opening IFC file picker...'; }
     if (/^(?:undo|cancel\s+that|never\s*mind|oops)$/i.test(text)) return 'Can\'t undo, but try "clear filters", "show all", or "reset view" to get back.';
     if (/^(?:thanks?|thank\s+you|ty|thx|cheers)$/i.test(text)) return 'No problem!';
@@ -13529,7 +13603,7 @@ function startApp() {
 
     // ── Q&A ────────────────────────────────────────────────────────
     if (/how many clashes?|clash count|number of clashes?|clashes? (?:found|detected|total|do we have)/.test(text)) {
-      if (!s.clashes.length) return s.models.length ? 'No clashes detected yet. Say "run detection" or describe a check — e.g. "check all models for hard clashes".' : 'No clashes yet — no models loaded. Say "load ifc" to pick a file.';
+      if (!s.clashes.length) return _offerRunDetection(s);
       var total = s.clashes.length;
       var byStatus = {};
       s.clashes.forEach(function(c){ var st = c.status||'new'; byStatus[st]=(byStatus[st]||0)+1; });
@@ -13537,13 +13611,13 @@ function startApp() {
       return total + ' clash' + (total===1?'':'es') + ' — ' + parts.join(', ') + '.';
     }
     if (/how many issues?|issue count|number of issues?/.test(text)) {
-      if (!s.issues.length) return s.clashes.length ? 'No issues yet. Open a clash and save it as an issue.' : 'No issues yet. Say "run detection" first, then save a clash as an issue.';
+      if (!s.issues.length) return _offerIssuesFromClashes(s);
       var ti = s.issues.length;
       var oi = s.issues.filter(function(i){return (i.status||'open')==='open';}).length;
       return ti + ' issue' + (ti===1?'':'s') + ' — ' + oi + ' open, ' + (ti-oi) + ' closed.';
     }
     if (/what models?|models? loaded|which models?|list models?|what.*(?:files?|ifc).*loaded|what.*loaded/.test(text)) {
-      if (!s.models.length) return 'No models loaded yet. Drop an IFC file to get started.';
+      if (!s.models.length) return _offerLoadIFC();
       return 'Loaded: ' + s.models.map(function(m){ return m.name + (m.hidden?' (hidden)':''); }).join(', ') + '.';
     }
     if (/what.*rules?|current.*(?:settings?|setup|config)|clash.*settings?|what(?:'s| is) set up/.test(text)) {
@@ -13554,7 +13628,7 @@ function startApp() {
       return 'Current setup: ' + types + ' clashes, ' + against + ', max gap ' + (r.maxGap||0) + 'mm' + (r.duplicates?', including duplicates':'') + (r.useSemanticFilter!==false?', semantic filter on':', semantic filter off') + '.';
     }
     if (/(?:what|which).*storey|worst.*storey|most clashes.*storey|storey.*most/.test(text)) {
-      if (!s.clashes.length) return 'No clashes to analyse yet. Say "run detection" to check.';
+      if (!s.clashes.length) return _offerRunDetection(s);
       var storeyCounts = {};
       s.clashes.forEach(function(c){ var st = c.storey||'Unknown'; storeyCounts[st]=(storeyCounts[st]||0)+1; });
       var worst = Object.keys(storeyCounts).sort(function(a,b){return storeyCounts[b]-storeyCounts[a];})[0];
@@ -13566,7 +13640,7 @@ function startApp() {
     }
     // Q&A: hard/soft/duplicate breakdown
     if (/how many (?:hard|soft|duplicate)|(?:hard|soft|duplicate)\s+clash(?:es)?\s*\??/.test(text)) {
-      if (!s.clashes.length) return s.models.length ? 'No clashes detected yet. Say "run detection" to check.' : 'No clashes yet — no models loaded. Say "load ifc" to pick a file.';
+      if (!s.clashes.length) return _offerRunDetection(s);
       var hard = s.clashes.filter(function(c){return c.type==='hard';}).length;
       var soft = s.clashes.filter(function(c){return c.type==='soft'||c.type==='clearance';}).length;
       var dup = s.clashes.filter(function(c){return c.type==='duplicate';}).length;
@@ -13574,7 +13648,7 @@ function startApp() {
     }
     // Q&A: discipline breakdown
     if (/(?:which|what)\s+discipline|discipline\s+(?:has|with)\s+most|clashes?\s+by\s+discipline/.test(text)) {
-      if (!s.clashes.length) return 'No clashes to analyse yet. Say "run detection" to check.';
+      if (!s.clashes.length) return _offerRunDetection(s);
       var discCounts = {};
       s.clashes.forEach(function(c){ (c.disciplines||[]).forEach(function(dd){ discCounts[dd]=(discCounts[dd]||0)+1; }); });
       if (!Object.keys(discCounts).length) return 'No discipline data on these clashes.';
@@ -13583,7 +13657,7 @@ function startApp() {
     }
     // Q&A: type pair breakdown
     if (/(?:which|what)\s+types?\s+(?:are\s+)?clash|clash.*type\s+pair|type.*most\s+clash|most\s+common\s+clash/.test(text)) {
-      if (!s.clashes.length) return 'No clashes to analyse yet. Say "run detection" to check.';
+      if (!s.clashes.length) return _offerRunDetection(s);
       var tpCounts = {};
       s.clashes.forEach(function(c){
         var tA = (c.elemAType||'').replace(/^Ifc/,''), tB = (c.elemBType||'').replace(/^Ifc/,'');
@@ -13595,8 +13669,8 @@ function startApp() {
     }
     // Q&A: natural conversational ("any problems?", "what's wrong?", "status?")
     if (/(?:any|are\s+there)\s+(?:problems?|issues?|conflicts?|clashes?|collisions?)|what'?s\s+(?:wrong|happening|the\s+status|going\s+on)|status\s*\??$/.test(text)) {
-      if (!s.models.length) return 'No models loaded yet. Drop an IFC file to get started.';
-      if (!s.clashes.length) return s.models.length + ' model' + (s.models.length>1?'s':'') + ' loaded, no clashes detected yet. Say "run detection" to check.';
+      if (!s.models.length) return _offerLoadIFC();
+      if (!s.clashes.length) { _setOfferRunDetection(); return s.models.length + ' model' + (s.models.length>1?'s':'') + ' loaded, no clashes yet — want me to run a detection?'; }
       var op2 = s.clashes.filter(function(c){return c.status==='open';}).length;
       return s.clashes.length + ' clashes found (' + op2 + ' open). Say "summary" for a full breakdown.';
     }
@@ -13758,7 +13832,7 @@ function startApp() {
       return resolveModelSingle(hint.trim());
     }
     function runSetup(rawA, rawB) {
-      if (!s.models.length) return 'No models loaded yet. Drop an IFC file to get started.';
+      if (!s.models.length) return _offerLoadIFC();
       var mA = resolveModel(rawA), mB = resolveModel(rawB);
       var idA = mA ? mA.id : 'all';
       var idB = mB ? mB.id : 'all';
@@ -13773,7 +13847,7 @@ function startApp() {
     // "intra architectural" / "internal mep" / "within structural"
     var selfMatch = text.match(/(?:self\s*[:=]\s*|intra[\s-]*|internal\s+|within\s+)(.+?)(?:\s+with\s+.*)?$/i);
     if (selfMatch && /self|intra|internal|within/.test(text)) {
-      if (!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
+      if (!s.models.length) return _offerLoadIFC();
       var selfTargets = selfMatch[1].split(/\s*[,;&]\s*|\s+and\s+/i).map(function(t){return t.trim();}).filter(Boolean);
       if (selfTargets.length === 1 && /^all$/i.test(selfTargets[0])) {
         // Self-clash every model individually
@@ -13803,7 +13877,7 @@ function startApp() {
 
     // ── "each" / "all self" / "every model against itself" ─────────
     if (/(?:each|every)\s+(?:model|discipline)\s+(?:against|vs\.?|versus)\s+itself|all\s+self[\s-]*clash/i.test(text)) {
-      if (!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
+      if (!s.models.length) return _offerLoadIFC();
       var discs = [];
       DISC.forEach(function(dd) {
         if (s.models.some(function(m){ return m.discipline===dd.id; })) discs.push({id:'disc:'+dd.id, name:dd.label});
@@ -13816,7 +13890,7 @@ function startApp() {
 
     // ── "only between" / "only within" (restrict to same-discipline) ──
     if (/(?:only\s+)?(?:between|within)\s+same\s+(?:discipline|category|type)/i.test(text)) {
-      if (!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
+      if (!s.models.length) return _offerLoadIFC();
       var samePasses = [];
       DISC.forEach(function(dd) {
         if (s.models.some(function(m){ return m.discipline===dd.id; })) samePasses.push({id:'disc:'+dd.id, name:dd.label});
@@ -13854,7 +13928,7 @@ function startApp() {
       });
       if(foundRefs.length>=2) return runSetup(foundRefs[0].word, foundRefs[1].word);
       if(foundRefs.length===1) {
-        if(!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
+        if(!s.models.length) return _offerLoadIFC();
         var ref = foundRefs[0].ref;
         var updSingle = applyClashOpts({ modelA:ref.id, modelB:'all' });
         return {_clashSetup:true, rules:updSingle, nameA:ref.name, nameB:'All models'};
@@ -13864,21 +13938,21 @@ function startApp() {
     // ── "within Xmm" / "near miss" / proximity phrasing ──
     var withinMatch = text.match(/(?:within|closer\s+than|nearer\s+than|distance\s+(?:of\s+)?(?:under|less\s+than|below)?)\s*(\d+(?:\.\d+)?)\s*(mm|cm|m(?!m))/);
     if (withinMatch && /check|find|detect|run|scan|clash|near|proximity|within/.test(text)) {
-      if (!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
+      if (!s.models.length) return _offerLoadIFC();
       var wv = parseFloat(withinMatch[1]), wu = withinMatch[2];
       var wmm = wu==='cm' ? Math.round(wv*10) : wu==='m' ? Math.round(wv*1000) : Math.round(wv);
       var updW = applyClashOpts({ modelA:'all', modelB:'all', maxGap:wmm, hard:true });
       return {_clashSetup:true, rules:updW, nameA:'All models', nameB:'All models'};
     }
     if (/(?:find|check|detect|run|scan)\s+(?:for\s+)?(?:near[\s-]*miss|proximity|soft\s+clash|gap\s+clash)/.test(text)) {
-      if (!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
+      if (!s.models.length) return _offerLoadIFC();
       var updNM = applyClashOpts({ modelA:'all', modelB:'all', maxGap:50, hard:true });
       return {_clashSetup:true, rules:updNM, nameA:'All models', nameB:'All models'};
     }
 
     // ── "run clash …" generic fallback (no model/discipline found) ──
     if (/(?:run|start|do|execute|detect|find|check|scan|re-?run|again)\s+(?:the\s+)?(?:clash|detection|conflicts?|collisions?|scan|check|clashcontrol)/i.test(text)) {
-      if (!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
+      if (!s.models.length) return _offerLoadIFC();
       var updRun = applyClashOpts({ modelA:'all', modelB:'all' });
       return {_clashSetup:true, rules:updRun, nameA:'All models', nameB:'All models'};
     }
@@ -13964,7 +14038,7 @@ function startApp() {
         /^(?:run|start|do|execute|re-?run)\s+(?:it|the\s+)?(?:detection|clashes?|check|scan|again)?$/.test(text) ||
         /^(?:find|detect|check\s+for|scan\s+for)\s+(?:all\s+)?(?:clashes?|conflicts?|collisions?)$/.test(text) ||
         /^(?:run|detect)\s+(?:it\s+)?again$/.test(text)) {
-      if (!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
+      if (!s.models.length) return _offerLoadIFC();
       if (s.detecting) return 'Already on it…';
       d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
       detectClashesAsync(s.models,s.rules).then(function(result){ classifyClashes(result); d({t:A.MERGE_CLASHES, v:result}); });
@@ -14089,7 +14163,7 @@ function startApp() {
 
     // ── Export ─────────────────────────────────────────────────────
     if (/(?:export|download|save|get)\s+(?:as\s+)?bcf|bcf\s+(?:export|download|file)|save\s+as\s+bcf/.test(text)) {
-      if (!s.issues.length && !s.clashes.length) return 'Nothing to export yet. Say "run detection" first, then save a clash as an issue.';
+      if (!s.issues.length && !s.clashes.length) return _offerExport(s);
       var items = s.issues.length ? s.issues : s.clashes;
       exportBCF(items, '2.1', s.viewpoints);
       return 'Done — ' + items.length + ' item' + (items.length===1?'':'s') + ' exported as BCF 2.1.';
@@ -14331,7 +14405,7 @@ function startApp() {
       // Q&A shortcuts
       [['summary','overview','report'],function(){return processNLCommand('analyze clashes',s,d)||'No data yet.';}, 1],
       [['status','problems'],     function(){return processNLCommand('any problems',s,d)||'No data yet.';}, 1],
-      [['count','many','how'],    function(){return processNLCommand('how many clashes',s,d)||'No clashes yet. Say "run detection" to check.';}, 2],
+      [['count','many','how'],    function(){return processNLCommand('how many clashes',s,d)||_offerRunDetection(s);}, 2],
       // Addons tab
       [['addons','addon','plugins'],function(){d({t:A.TAB,v:'ai'});return 'Addons tab.';}, 1]
     ];
@@ -14858,6 +14932,15 @@ function startApp() {
       var replyCtx = replyTo ? replyTo.text : null;
       setReplyTo(null); // clear reply context after capture
       processNLCommandWithLLM(text, s, d, replyCtx).then(function(rawResult) {
+        // Fast-run: the "want me to run a detection?" offer sets _runNow so we
+        // skip the conversational clash-setup flow and execute immediately.
+        if (rawResult && rawResult._clashSetup && rawResult._runNow) {
+          var fnA = rawResult.nameA, fnB = rawResult.nameB, fnRules = rawResult.rules;
+          setMsgs(function(m){ return m.concat([{role:'assistant', text:'Running: ' + fnA + ' vs ' + fnB + (fnRules.hard?' | hard':'') + (fnRules.maxGap?' | max gap '+fnRules.maxGap+'mm':'') + (fnRules.excludeSelf?' | cross-model only':'') + '…'}]); });
+          setTimeout(function(){ executeDetection(fnRules); }, 80);
+          setLoading(false);
+          return;
+        }
         // If it's a clash setup, run through conversation flow
         if (rawResult && rawResult._clashSetup) {
           var convResult = _clashConverse(text, rawResult);
