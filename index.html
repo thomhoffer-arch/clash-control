@@ -12068,6 +12068,14 @@ function startApp() {
         <button onClick=${function(){d({t:A.SETTINGS,v:false})}} style=${{...S_BTN,background:'none',color:'var(--text-muted)',fontSize:'1.26rem',padding:0}} aria-label="Close settings">✕</button>
       </div>
       <div style=${{padding:'.2rem 1.2rem 1rem 1.2rem'}}>
+        <div style=${{display:'flex',alignItems:'center',gap:'.6rem',padding:'.85rem 1rem',margin:'.6rem 0 .2rem',background:'linear-gradient(135deg, rgba(196,181,253,.08), rgba(96,165,250,.06))',border:'1px solid rgba(196,181,253,.25)',borderRadius:10}}>
+          <span style=${{fontSize:'1.15rem',color:'#f472b6',flexShrink:0}}>♥</span>
+          <span style=${{fontSize:'0.92rem',color:'var(--text-primary)',lineHeight:1.45}}>
+            ClashControl is free and open-source.
+            ${' '}<a href="https://github.com/sponsors/clashcontrol-io" target="_blank" rel="noopener"
+              style=${{color:'#c4b5fd',textDecoration:'underline',fontWeight:600}}>Support the project</a> to help keep it running.
+          </span>
+        </div>
         <div style=${SEC}>Viewer</div>
         <div style=${TROW}>
           <div><div style=${TLBL}>Auto fly-to on click</div><div style=${TSUB}>Camera moves to element when selecting a clash or issue</div></div>
@@ -12183,14 +12191,6 @@ function startApp() {
               : 'Offline — basic regex commands still work. Server may be starting up.'}</div>
           </div>
           <span style=${{fontSize:'0.8rem',color:_serverAIAvailable?'#4ade80':'#f87171',flexShrink:0}}>${_serverAIAvailable ? '● Connected' : '○ Offline'}</span>
-        </div>
-        <div style=${{padding:'.3rem 0 .4rem',display:'flex',alignItems:'center',gap:'.4rem'}}>
-          <span style=${{fontSize:'0.72rem',color:'var(--text-faint)'}}>♥</span>
-          <span style=${{fontSize:'0.69rem',color:'var(--text-secondary)',lineHeight:1.4}}>
-            ClashControl is free and open-source.
-            <a href="https://github.com/sponsors/clashcontrol-io" target="_blank" rel="noopener"
-              style=${{color:'#c4b5fd',textDecoration:'underline'}}>Support the project</a> to help keep it running.
-          </span>
         </div>
 
         <div style=${SEC}>Issue Defaults</div>
