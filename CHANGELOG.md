@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.9.16 (2026-04-07)
+- chore: wire up GitHub Sponsors
+
 ## v4.9.15 (2026-04-07)
 - fix: yes/no confirmation loop was stuck when Gemma replied via intent:unknown
 
