@@ -313,6 +313,44 @@ function startApp() {
   function guid() { return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,function(c){var r=Math.random()*16|0;return(c==='x'?r:(r&0x3|0x8)).toString(16)}); }
   function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 
+  // ── Chat text renderer ────────────────────────────────────────
+  // Renders AI/canned chat text with minimal markdown:
+  //   **bold**         → <strong>
+  //   ### heading      → stripped (heading markers gone, text kept on own line)
+  //   * bullet / - item → "• " line
+  //   newlines         → line breaks
+  // Server-side Gemma is also told to avoid markdown, but we sanitize defensively
+  // so stray ### or ** from the model never leak to the user as literal glyphs.
+  function renderChatText(text) {
+    if (text == null) return '';
+    var raw = String(text);
+    // Normalize: some models emit "### **Foo**" inline with no newline — force breaks.
+    raw = raw.replace(/\s*#{1,6}\s+/g, '\n');        // headings → newline
+    raw = raw.replace(/\s*\*\s+(?=[A-Z(])/g, '\n• '); // stray "* " bullets → newline + •
+    raw = raw.replace(/\s*-\s+(?=[A-Z(])/g, '\n• '); // "- " bullets  → newline + •
+    raw = raw.replace(/\n{3,}/g, '\n\n');            // collapse excess blank lines
+    raw = raw.replace(/^\s+|\s+$/g, '');
+    var lines = raw.split('\n');
+    // Tokenize each line into plain strings and <strong> spans for **bold**
+    function renderLine(line) {
+      var out = [];
+      var re = /\*\*([^*]+?)\*\*/g;
+      var last = 0, m;
+      while ((m = re.exec(line)) !== null) {
+        if (m.index > last) out.push(line.slice(last, m.index));
+        out.push(html`<strong>${m[1]}</strong>`);
+        last = m.index + m[0].length;
+      }
+      if (last < line.length) out.push(line.slice(last));
+      // Also strip any lingering single-asterisk emphasis markers
+      return out.map(function(x){ return typeof x === 'string' ? x.replace(/\*/g,'') : x; });
+    }
+    return lines.map(function(line, i) {
+      return html`<div key=${i} style=${{minHeight:'1em'}}>${renderLine(line)}</div>`;
+    });
+  }
+  window._ccRenderChatText = renderChatText;
+
   // Expose core utilities for addons
   window._ccUid = uid;
   window._ccDISC = DISC;
@@ -13214,7 +13252,7 @@ function startApp() {
       case 'filter_status': var sv = {open:'open',resolved:'resolved',all:'all'}[action.status]||'all'; d({t:A.UPD_FILTERS, u:{status:sv}}); d({t:A.TAB,v:'clashes'}); return sv==='all'?'Showing everything.':'Showing '+sv+' only.';
       case 'reset_filters': d({t:A.RESET_FILTERS}); return 'Filters cleared — showing everything.';
       case 'group_by': var gv = {storey:'storey',floor:'storey',level:'storey',discipline:'discipline',status:'status',type:'type',none:'none'}[action.groupBy]||'none'; d({t:A.CLASH_GROUP_BY,v:gv}); d({t:A.TAB,v:'clashes'}); return 'Grouped by '+gv+'.';
-      case 'export_bcf': if (!s.issues.length&&!s.clashes.length) return 'Nothing to export yet.'; var items=s.issues.length?s.issues:s.clashes; exportBCF(items,'2.1',s.viewpoints); return 'Done — '+items.length+' items exported as BCF.';
+      case 'export_bcf': if (!s.issues.length&&!s.clashes.length) return 'Nothing to export yet. Say "run detection" first, then save a clash as an issue.'; var items=s.issues.length?s.issues:s.clashes; exportBCF(items,'2.1',s.viewpoints); return 'Done — '+items.length+' items exported as BCF.';
       case 'query': return processNLCommand(action.metric||action.query||'', s, d);
       case 'help': return processNLCommand('help', s, d);
       case 'load_model': if (window._ccOpenIFC) { window._ccOpenIFC(); return 'Opening file picker — pick one or more .ifc files.'; } return 'File picker unavailable. Drag an .ifc file onto the window instead.';
@@ -13224,7 +13262,7 @@ function startApp() {
       case 'batch_update': return 'Batch update: ' + (action.action || 'updating') + ' ' + (action.filter || 'selected') + ' clashes.';
       case 'create_project': {
         var cpName = (action.name||'').trim();
-        if (!cpName) return 'What should the project be called?';
+        if (!cpName) return 'What should the project be called? Try "new project My Tower".';
         try {
           var cpId = uid();
           var cpList = getProjects().concat([{id:cpId, name:cpName, createdAt:Date.now(), sourceType:'ifc'}]);
@@ -13236,7 +13274,7 @@ function startApp() {
       }
       case 'rename_project': {
         var rpName = (action.name||'').trim();
-        if (!rpName) return 'What should I rename it to?';
+        if (!rpName) return 'What should I rename it to? Try "rename project to My Tower".';
         try {
           var rpId = s.activeProject || 'default';
           var rpList = getProjects().map(function(p){return p.id===rpId?Object.assign({},p,{name:rpName}):p;});
@@ -13479,11 +13517,11 @@ function startApp() {
     // ── Short-form / single-word commands ──────────────────────────
     // These catch minimal inputs that users naturally try
     if (/^summary$|^stats$|^report$/i.test(text)) return processNLCommand('analyze clashes', s, d) || 'No data yet. Load models and run detection first.';
-    if (/^clashes?\s*\??$|^results?\s*\??$/i.test(text)) { d({t:A.TAB,v:'clashes'}); return s.clashes.length ? s.clashes.length + ' clashes — here\'s the list.' : 'No clashes yet.'; }
-    if (/^issues?\s*\??$/i.test(text)) { d({t:A.TAB,v:'issues'}); return s.issues.length ? s.issues.length + ' issues — here\'s the list.' : 'No issues yet.'; }
-    if (/^models?\s*\??$/i.test(text)) { d({t:A.TAB,v:'models'}); return s.models.length ? s.models.length + ' model'+(s.models.length>1?'s':'')+' loaded — here they are.' : 'No models loaded yet.'; }
+    if (/^clashes?\s*\??$|^results?\s*\??$/i.test(text)) { d({t:A.TAB,v:'clashes'}); return s.clashes.length ? s.clashes.length + ' clashes — here\'s the list.' : (s.models.length ? 'No clashes yet. Say "run detection" to check.' : 'No clashes yet — and no models loaded. Say "load ifc" to pick a file.'); }
+    if (/^issues?\s*\??$/i.test(text)) { d({t:A.TAB,v:'issues'}); return s.issues.length ? s.issues.length + ' issues — here\'s the list.' : (s.clashes.length ? 'No issues yet. Open a clash and save it as an issue.' : 'No issues yet. Say "run detection" first, then save a clash as an issue.'); }
+    if (/^models?\s*\??$/i.test(text)) { d({t:A.TAB,v:'models'}); return s.models.length ? s.models.length + ' model'+(s.models.length>1?'s':'')+' loaded — here they are.' : 'No models loaded yet. Say "load ifc" to pick a file.'; }
     if (/^settings?$/i.test(text)) { d({t:A.SETTINGS,v:true}); return 'Here are your settings.'; }
-    if (/^bcf$/i.test(text)) { if(!s.issues.length&&!s.clashes.length)return 'Nothing to export yet.'; exportBCF(s.issues.length?s.issues:s.clashes,'2.1',s.viewpoints); return 'Done — BCF exported.'; }
+    if (/^bcf$/i.test(text)) { if(!s.issues.length&&!s.clashes.length)return 'Nothing to export yet. Say "run detection" first, then save a clash as an issue.'; exportBCF(s.issues.length?s.issues:s.clashes,'2.1',s.viewpoints); return 'Done — BCF exported.'; }
     if (/^ifc$/i.test(text)) { if(window._ccOpenIFC) window._ccOpenIFC(); return 'Opening IFC file picker...'; }
     if (/^(?:undo|cancel\s+that|never\s*mind|oops)$/i.test(text)) return 'Can\'t undo, but try "clear filters", "show all", or "reset view" to get back.';
     if (/^(?:thanks?|thank\s+you|ty|thx|cheers)$/i.test(text)) return 'No problem!';
@@ -13491,7 +13529,7 @@ function startApp() {
 
     // ── Q&A ────────────────────────────────────────────────────────
     if (/how many clashes?|clash count|number of clashes?|clashes? (?:found|detected|total|do we have)/.test(text)) {
-      if (!s.clashes.length) return 'No clashes detected yet. Describe a check and I\'ll run it — e.g. "check all models for hard clashes".';
+      if (!s.clashes.length) return s.models.length ? 'No clashes detected yet. Say "run detection" or describe a check — e.g. "check all models for hard clashes".' : 'No clashes yet — no models loaded. Say "load ifc" to pick a file.';
       var total = s.clashes.length;
       var byStatus = {};
       s.clashes.forEach(function(c){ var st = c.status||'new'; byStatus[st]=(byStatus[st]||0)+1; });
@@ -13499,7 +13537,7 @@ function startApp() {
       return total + ' clash' + (total===1?'':'es') + ' — ' + parts.join(', ') + '.';
     }
     if (/how many issues?|issue count|number of issues?/.test(text)) {
-      if (!s.issues.length) return 'No issues yet. Create one from a clash result.';
+      if (!s.issues.length) return s.clashes.length ? 'No issues yet. Open a clash and save it as an issue.' : 'No issues yet. Say "run detection" first, then save a clash as an issue.';
       var ti = s.issues.length;
       var oi = s.issues.filter(function(i){return (i.status||'open')==='open';}).length;
       return ti + ' issue' + (ti===1?'':'s') + ' — ' + oi + ' open, ' + (ti-oi) + ' closed.';
@@ -13516,7 +13554,7 @@ function startApp() {
       return 'Current setup: ' + types + ' clashes, ' + against + ', max gap ' + (r.maxGap||0) + 'mm' + (r.duplicates?', including duplicates':'') + (r.useSemanticFilter!==false?', semantic filter on':', semantic filter off') + '.';
     }
     if (/(?:what|which).*storey|worst.*storey|most clashes.*storey|storey.*most/.test(text)) {
-      if (!s.clashes.length) return 'No clashes to analyse yet.';
+      if (!s.clashes.length) return 'No clashes to analyse yet. Say "run detection" to check.';
       var storeyCounts = {};
       s.clashes.forEach(function(c){ var st = c.storey||'Unknown'; storeyCounts[st]=(storeyCounts[st]||0)+1; });
       var worst = Object.keys(storeyCounts).sort(function(a,b){return storeyCounts[b]-storeyCounts[a];})[0];
@@ -13524,11 +13562,11 @@ function startApp() {
     }
     if (/what.*project|current project|active project/.test(text)) {
       var proj = (s.projectList||[]).find(function(p){return p.id===s.activeProject;});
-      return proj ? 'You\'re on: ' + proj.name + '.' : 'No active project right now.';
+      return proj ? 'You\'re on: ' + proj.name + '.' : 'No active project. Say "new project <name>" to create one.';
     }
     // Q&A: hard/soft/duplicate breakdown
     if (/how many (?:hard|soft|duplicate)|(?:hard|soft|duplicate)\s+clash(?:es)?\s*\??/.test(text)) {
-      if (!s.clashes.length) return 'No clashes detected yet.';
+      if (!s.clashes.length) return s.models.length ? 'No clashes detected yet. Say "run detection" to check.' : 'No clashes yet — no models loaded. Say "load ifc" to pick a file.';
       var hard = s.clashes.filter(function(c){return c.type==='hard';}).length;
       var soft = s.clashes.filter(function(c){return c.type==='soft'||c.type==='clearance';}).length;
       var dup = s.clashes.filter(function(c){return c.type==='duplicate';}).length;
@@ -13536,7 +13574,7 @@ function startApp() {
     }
     // Q&A: discipline breakdown
     if (/(?:which|what)\s+discipline|discipline\s+(?:has|with)\s+most|clashes?\s+by\s+discipline/.test(text)) {
-      if (!s.clashes.length) return 'No clashes to analyse yet.';
+      if (!s.clashes.length) return 'No clashes to analyse yet. Say "run detection" to check.';
       var discCounts = {};
       s.clashes.forEach(function(c){ (c.disciplines||[]).forEach(function(dd){ discCounts[dd]=(discCounts[dd]||0)+1; }); });
       if (!Object.keys(discCounts).length) return 'No discipline data on these clashes.';
@@ -13545,7 +13583,7 @@ function startApp() {
     }
     // Q&A: type pair breakdown
     if (/(?:which|what)\s+types?\s+(?:are\s+)?clash|clash.*type\s+pair|type.*most\s+clash|most\s+common\s+clash/.test(text)) {
-      if (!s.clashes.length) return 'No clashes to analyse yet.';
+      if (!s.clashes.length) return 'No clashes to analyse yet. Say "run detection" to check.';
       var tpCounts = {};
       s.clashes.forEach(function(c){
         var tA = (c.elemAType||'').replace(/^Ifc/,''), tB = (c.elemBType||'').replace(/^Ifc/,'');
@@ -13735,7 +13773,7 @@ function startApp() {
     // "intra architectural" / "internal mep" / "within structural"
     var selfMatch = text.match(/(?:self\s*[:=]\s*|intra[\s-]*|internal\s+|within\s+)(.+?)(?:\s+with\s+.*)?$/i);
     if (selfMatch && /self|intra|internal|within/.test(text)) {
-      if (!s.models.length) return 'No models loaded yet.';
+      if (!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
       var selfTargets = selfMatch[1].split(/\s*[,;&]\s*|\s+and\s+/i).map(function(t){return t.trim();}).filter(Boolean);
       if (selfTargets.length === 1 && /^all$/i.test(selfTargets[0])) {
         // Self-clash every model individually
@@ -13765,7 +13803,7 @@ function startApp() {
 
     // ── "each" / "all self" / "every model against itself" ─────────
     if (/(?:each|every)\s+(?:model|discipline)\s+(?:against|vs\.?|versus)\s+itself|all\s+self[\s-]*clash/i.test(text)) {
-      if (!s.models.length) return 'No models loaded yet.';
+      if (!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
       var discs = [];
       DISC.forEach(function(dd) {
         if (s.models.some(function(m){ return m.discipline===dd.id; })) discs.push({id:'disc:'+dd.id, name:dd.label});
@@ -13778,7 +13816,7 @@ function startApp() {
 
     // ── "only between" / "only within" (restrict to same-discipline) ──
     if (/(?:only\s+)?(?:between|within)\s+same\s+(?:discipline|category|type)/i.test(text)) {
-      if (!s.models.length) return 'No models loaded yet.';
+      if (!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
       var samePasses = [];
       DISC.forEach(function(dd) {
         if (s.models.some(function(m){ return m.discipline===dd.id; })) samePasses.push({id:'disc:'+dd.id, name:dd.label});
@@ -13816,7 +13854,7 @@ function startApp() {
       });
       if(foundRefs.length>=2) return runSetup(foundRefs[0].word, foundRefs[1].word);
       if(foundRefs.length===1) {
-        if(!s.models.length) return 'No models loaded yet.';
+        if(!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
         var ref = foundRefs[0].ref;
         var updSingle = applyClashOpts({ modelA:ref.id, modelB:'all' });
         return {_clashSetup:true, rules:updSingle, nameA:ref.name, nameB:'All models'};
@@ -13826,21 +13864,21 @@ function startApp() {
     // ── "within Xmm" / "near miss" / proximity phrasing ──
     var withinMatch = text.match(/(?:within|closer\s+than|nearer\s+than|distance\s+(?:of\s+)?(?:under|less\s+than|below)?)\s*(\d+(?:\.\d+)?)\s*(mm|cm|m(?!m))/);
     if (withinMatch && /check|find|detect|run|scan|clash|near|proximity|within/.test(text)) {
-      if (!s.models.length) return 'No models loaded yet.';
+      if (!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
       var wv = parseFloat(withinMatch[1]), wu = withinMatch[2];
       var wmm = wu==='cm' ? Math.round(wv*10) : wu==='m' ? Math.round(wv*1000) : Math.round(wv);
       var updW = applyClashOpts({ modelA:'all', modelB:'all', maxGap:wmm, hard:true });
       return {_clashSetup:true, rules:updW, nameA:'All models', nameB:'All models'};
     }
     if (/(?:find|check|detect|run|scan)\s+(?:for\s+)?(?:near[\s-]*miss|proximity|soft\s+clash|gap\s+clash)/.test(text)) {
-      if (!s.models.length) return 'No models loaded yet.';
+      if (!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
       var updNM = applyClashOpts({ modelA:'all', modelB:'all', maxGap:50, hard:true });
       return {_clashSetup:true, rules:updNM, nameA:'All models', nameB:'All models'};
     }
 
     // ── "run clash …" generic fallback (no model/discipline found) ──
     if (/(?:run|start|do|execute|detect|find|check|scan|re-?run|again)\s+(?:the\s+)?(?:clash|detection|conflicts?|collisions?|scan|check|clashcontrol)/i.test(text)) {
-      if (!s.models.length) return 'No models loaded yet.';
+      if (!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
       var updRun = applyClashOpts({ modelA:'all', modelB:'all' });
       return {_clashSetup:true, rules:updRun, nameA:'All models', nameB:'All models'};
     }
@@ -13926,7 +13964,7 @@ function startApp() {
         /^(?:run|start|do|execute|re-?run)\s+(?:it|the\s+)?(?:detection|clashes?|check|scan|again)?$/.test(text) ||
         /^(?:find|detect|check\s+for|scan\s+for)\s+(?:all\s+)?(?:clashes?|conflicts?|collisions?)$/.test(text) ||
         /^(?:run|detect)\s+(?:it\s+)?again$/.test(text)) {
-      if (!s.models.length) return 'No models loaded yet.';
+      if (!s.models.length) return 'No models loaded yet. Say "load ifc" to pick a file.';
       if (s.detecting) return 'Already on it…';
       d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
       detectClashesAsync(s.models,s.rules).then(function(result){ classifyClashes(result); d({t:A.MERGE_CLASHES, v:result}); });
@@ -14051,7 +14089,7 @@ function startApp() {
 
     // ── Export ─────────────────────────────────────────────────────
     if (/(?:export|download|save|get)\s+(?:as\s+)?bcf|bcf\s+(?:export|download|file)|save\s+as\s+bcf/.test(text)) {
-      if (!s.issues.length && !s.clashes.length) return 'Nothing to export yet.';
+      if (!s.issues.length && !s.clashes.length) return 'Nothing to export yet. Say "run detection" first, then save a clash as an issue.';
       var items = s.issues.length ? s.issues : s.clashes;
       exportBCF(items, '2.1', s.viewpoints);
       return 'Done — ' + items.length + ' item' + (items.length===1?'':'s') + ' exported as BCF 2.1.';
@@ -14293,7 +14331,7 @@ function startApp() {
       // Q&A shortcuts
       [['summary','overview','report'],function(){return processNLCommand('analyze clashes',s,d)||'No data yet.';}, 1],
       [['status','problems'],     function(){return processNLCommand('any problems',s,d)||'No data yet.';}, 1],
-      [['count','many','how'],    function(){return processNLCommand('how many clashes',s,d)||'No clashes yet.';}, 2],
+      [['count','many','how'],    function(){return processNLCommand('how many clashes',s,d)||'No clashes yet. Say "run detection" to check.';}, 2],
       // Addons tab
       [['addons','addon','plugins'],function(){d({t:A.TAB,v:'ai'});return 'Addons tab.';}, 1]
     ];
@@ -15022,7 +15060,7 @@ function startApp() {
               color: isUser ? '#fff' : textCol,
               fontSize:'0.87rem', lineHeight:1.55, wordBreak:'break-word'
             }}>
-              ${m.text}
+              ${isUser ? m.text : renderChatText(m.text)}
             </div>
             ${!isUser && m.text && renderAIFeedback(i, m.text)}
           </div>`;
@@ -15178,7 +15216,7 @@ function startApp() {
               color: isUser ? '#fff' : textCol,
               fontSize:'0.87rem', lineHeight:1.55, wordBreak:'break-word'
             }}>
-              ${m.text}
+              ${isUser ? m.text : renderChatText(m.text)}
             </div>
             ${!isUser && m.text && renderAIFeedback(i, m.text)}
           </div>`;
