@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.9.8 (2026-04-07)
+- Add F12 console debug logging for /api/nl and /api/health
+
 ## v4.9.7 (2026-04-06)
 - Bump SW cache to v4.9.7 to force client refresh
 
