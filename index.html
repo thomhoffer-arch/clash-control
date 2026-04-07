@@ -363,6 +363,22 @@ function startApp() {
   }
   window._ccRenderChatText = renderChatText;
 
+  // Parse a percentage out of an IFC loader progress message.
+  // Loader messages contain things like "Reading properties (5000 / 10000)…",
+  // "Processing elements 5000/10000…" — extract the LAST N/M pair as the
+  // most-specific progress indicator. Returns 0..100 or null when unknown.
+  function _parseLoadPct(msg) {
+    if (!msg) return null;
+    var re = /(\d+)\s*\/\s*(\d+)/g;
+    var m, last = null;
+    while ((m = re.exec(msg)) !== null) last = m;
+    if (!last) return null;
+    var done = parseInt(last[1], 10), total = parseInt(last[2], 10);
+    if (!total || total <= 0) return null;
+    return Math.min(100, Math.max(0, Math.round(done / total * 100)));
+  }
+  window._ccParseLoadPct = _parseLoadPct;
+
   // ── Pending offer system ──────────────────────────────────────
   // When the assistant can't fulfill a command because of a missing
   // prerequisite (no models, no clashes, etc.) it phrases the reply as
@@ -5497,6 +5513,16 @@ function startApp() {
           }
         }
       });
+      // When the viewer is empty, snap the orbit pivot back to (0,0,0) so
+      // rotation happens around the world origin instead of wherever the
+      // last clash/model centroid was. Otherwise users get a confusing
+      // "rotating around nothing visible" feeling after closing all models.
+      if (s.models.length === 0 && S.orbit && S.camera) {
+        S.orbit.target.set(0, 0, 0);
+        S.camera.position.set(30, 25, 30);
+        S.camera.lookAt(S.orbit.target);
+        S.orbit.sync(); S.orbit.apply();
+      }
       invalidate();
     }, [s.models]);
 
@@ -15251,20 +15277,34 @@ function startApp() {
         <div ref=${bottomRef}></div>
       </div>
 
-      ${(isDetecting || modelLoading) ? html`<div style=${{
+      ${modelLoading && !isDetecting && function(){
+        var _lp = _parseLoadPct(modelLoadMsg);
+        return html`<div style=${{
+          padding:'.3rem .65rem', borderTop:'1px solid '+borderCol,
+          background:_lp!=null ? 'linear-gradient(90deg, rgba(96,165,250,.18) '+_lp+'%, transparent '+_lp+'%)' : 'transparent',
+          display:'flex', alignItems:'center', gap:'.4rem', flexShrink:0,
+          transition:'background .3s',
+          animation:_lp==null?'nlBorderPulse 2s ease-in-out infinite':'none'
+        }}>
+          <span class="spin" style=${{display:'inline-block',width:'.6rem',height:'.6rem',borderRadius:'50%',border:'1.4px solid rgba(96,165,250,.3)',borderTopColor:'#60a5fa',flexShrink:0}}></span>
+          <span style=${{fontSize:'0.74rem',color:'#60a5fa',fontWeight:500,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${modelLoadMsg || 'Model loading'}</span>
+          ${_lp!=null && html`<span style=${{fontSize:'0.72rem',color:'#60a5fa',fontWeight:600,fontVariantNumeric:'tabular-nums',flexShrink:0}}>${_lp}%</span>`}
+        </div>`;
+      }()}
+      ${isDetecting ? html`<div style=${{
         padding:'.55rem .65rem', borderTop:'1px solid '+borderCol,
         display:'flex', alignItems:'center', gap:'.45rem', flexShrink:0
       }}>
         <div style=${{
           flex:1, display:'flex', alignItems:'center', gap:'.45rem',
-          background:isDetecting && detectPct>0 ? 'linear-gradient(90deg, rgba(37,99,235,.25) '+detectPct+'%, '+inputBg+' '+detectPct+'%)' : inputBg,
+          background:detectPct>0 ? 'linear-gradient(90deg, rgba(37,99,235,.25) '+detectPct+'%, '+inputBg+' '+detectPct+'%)' : inputBg,
           border:'1px solid rgba(96,165,250,.35)',
           borderRadius:8, padding:'.5rem .65rem',
           transition:'background .3s',
-          animation:(!isDetecting||detectPct===0)?'nlBorderPulse 2s ease-in-out infinite':'none'
+          animation:detectPct===0?'nlBorderPulse 2s ease-in-out infinite':'none'
         }}>
           <span class="spin" style=${{display:'inline-block',width:'.7rem',height:'.7rem',borderRadius:'50%',border:'1.5px solid rgba(96,165,250,.3)',borderTopColor:'#60a5fa',flexShrink:0}}></span>
-          <span style=${{fontSize:'0.85rem',color:'#60a5fa',fontWeight:500}}>${isDetecting ? (function(){
+          <span style=${{fontSize:'0.85rem',color:'#60a5fa',fontWeight:500}}>${(function(){
             var p=detectPct, t=detectElapsed;
             if(t>=240) return 'So… what movie are you watching?'+(p>0?' — '+p+'%':'')+'…';
             if(t>=180) return 'Still going… maybe grab a coffee'+(p>0?' — '+p+'%':'')+'…';
@@ -15274,11 +15314,11 @@ function startApp() {
             else if(t<30) msg=p<50?'Running clash detection':p<93?'Working hard':'Almost done';
             else msg=p===0?'Running clash detection':p<15?'Running clash detection':p<30?'Crunching triangles':p<45?'Working hard':p<60?'Running as fast as I can':p<75?'Almost halfway… just kidding, past it':p<85?'So many clashes to check':p<93?'Wrapping things up':'Final stretch';
             return msg+(p>0?' — '+p+'%':'')+'…';
-          }()) : (modelLoadMsg || 'Model loading…')}</span>
+          }())}</span>
         </div>
-        ${isDetecting && html`<button onClick=${function(){cancelDetection()}}
+        <button onClick=${function(){cancelDetection()}}
           style=${{...S_BTN,padding:'.35rem .6rem',background:'#dc2626',color:'#fff',fontSize:'0.72rem',fontWeight:600,borderRadius:6,flexShrink:0}}>
-          Stop</button>`}
+          Stop</button>
       </div>` : html`<div style=${{
         padding:'.55rem .65rem', borderTop:'1px solid '+borderCol,
         display:'flex', flexDirection:'column', gap:'.3rem', flexShrink:0
@@ -15375,20 +15415,34 @@ function startApp() {
         <div ref=${bottomRef}></div>
       </div>
 
-      ${(isDetecting || modelLoading) ? html`<div style=${{
+      ${modelLoading && !isDetecting && function(){
+        var _lp = _parseLoadPct(modelLoadMsg);
+        return html`<div style=${{
+          padding:'.3rem .7rem', borderTop:'1px solid '+borderCol,
+          background:_lp!=null ? 'linear-gradient(90deg, rgba(96,165,250,.18) '+_lp+'%, transparent '+_lp+'%)' : 'transparent',
+          display:'flex', alignItems:'center', gap:'.4rem',
+          transition:'background .3s',
+          animation:_lp==null?'nlBorderPulse 2s ease-in-out infinite':'none'
+        }}>
+          <span class="spin" style=${{display:'inline-block',width:'.6rem',height:'.6rem',borderRadius:'50%',border:'1.4px solid rgba(96,165,250,.3)',borderTopColor:'#60a5fa',flexShrink:0}}></span>
+          <span style=${{fontSize:'0.74rem',color:'#60a5fa',fontWeight:500,flex:1,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}}>${modelLoadMsg || 'Model loading'}</span>
+          ${_lp!=null && html`<span style=${{fontSize:'0.72rem',color:'#60a5fa',fontWeight:600,fontVariantNumeric:'tabular-nums',flexShrink:0}}>${_lp}%</span>`}
+        </div>`;
+      }()}
+      ${isDetecting ? html`<div style=${{
         padding:'.55rem .7rem', borderTop:'1px solid '+borderCol,
         display:'flex', alignItems:'center', gap:'.45rem'
       }}>
         <div style=${{
           flex:1, display:'flex', alignItems:'center', gap:'.45rem',
-          background:isDetecting && detectPct>0 ? 'linear-gradient(90deg, rgba(37,99,235,.25) '+detectPct+'%, '+inputBg+' '+detectPct+'%)' : inputBg,
+          background:detectPct>0 ? 'linear-gradient(90deg, rgba(37,99,235,.25) '+detectPct+'%, '+inputBg+' '+detectPct+'%)' : inputBg,
           border:'1px solid rgba(96,165,250,.35)',
           borderRadius:8, padding:'.5rem .65rem',
           transition:'background .3s',
-          animation:(!isDetecting||detectPct===0)?'nlBorderPulse 2s ease-in-out infinite':'none'
+          animation:detectPct===0?'nlBorderPulse 2s ease-in-out infinite':'none'
         }}>
           <span class="spin" style=${{display:'inline-block',width:'.7rem',height:'.7rem',borderRadius:'50%',border:'1.5px solid rgba(96,165,250,.3)',borderTopColor:'#60a5fa',flexShrink:0}}></span>
-          <span style=${{fontSize:'0.85rem',color:'#60a5fa',fontWeight:500}}>${isDetecting ? (function(){
+          <span style=${{fontSize:'0.85rem',color:'#60a5fa',fontWeight:500}}>${(function(){
             var p=detectPct, t=detectElapsed;
             if(t>=240) return 'So… what movie are you watching?'+(p>0?' — '+p+'%':'')+'…';
             if(t>=180) return 'Still going… maybe grab a coffee'+(p>0?' — '+p+'%':'')+'…';
@@ -15398,11 +15452,11 @@ function startApp() {
             else if(t<30) msg=p<50?'Running clash detection':p<93?'Working hard':'Almost done';
             else msg=p===0?'Running clash detection':p<15?'Running clash detection':p<30?'Crunching triangles':p<45?'Working hard':p<60?'Running as fast as I can':p<75?'Almost halfway… just kidding, past it':p<85?'So many clashes to check':p<93?'Wrapping things up':'Final stretch';
             return msg+(p>0?' — '+p+'%':'')+'…';
-          }()) : (modelLoadMsg || 'Model loading…')}</span>
+          }())}</span>
         </div>
-        ${isDetecting && html`<button onClick=${function(){cancelDetection()}}
+        <button onClick=${function(){cancelDetection()}}
           style=${{...S_BTN,padding:'.35rem .6rem',background:'#dc2626',color:'#fff',fontSize:'0.72rem',fontWeight:600,borderRadius:6,flexShrink:0}}>
-          Stop</button>`}
+          Stop</button>
       </div>` : html`<div style=${{
         padding:'.55rem .7rem', borderTop:'1px solid '+borderCol,
         display:'flex', gap:'.45rem', alignItems:'flex-end'
@@ -16360,15 +16414,18 @@ function startApp() {
         }}>AI Chat ›</button>`;
     }
 
-    // Floating overlay: absolute on the right edge, viewer keeps full width
+    // Floating card: absolute, with margin from all edges, rounded corners,
+    // full drop shadow. Viewer keeps full width underneath.
     return html`<div class="cc-side-panel cc-ai-panel" style=${{
-      width:panelW, position:'absolute', right:0, top:0, bottom:0,
+      width:panelW, position:'absolute', right:'1rem', top:'1rem', bottom:'1rem',
       display:'flex', flexDirection:'column', overflow:'hidden',
-      background:'var(--bg-primary)', borderLeft:'1px solid var(--border-subtle)',
-      boxShadow:'-4px 0 18px rgba(0,0,0,0.18)', zIndex:1100
+      background:'var(--bg-primary)', border:'1px solid var(--border)',
+      borderRadius:14,
+      boxShadow:'0 12px 32px rgba(0,0,0,0.32), 0 4px 12px rgba(0,0,0,0.18)',
+      zIndex:1100
     }}>
       <div onMouseDown=${onResizeDown} style=${{position:'absolute',left:0,top:0,bottom:0,width:8,cursor:'col-resize',zIndex:10,
-        background:'transparent',transition:'background .15s'}} onMouseEnter=${function(e){e.currentTarget.style.background='rgba(59,130,246,0.3)';}} onMouseLeave=${function(e){e.currentTarget.style.background='transparent';}}></div>
+        background:'transparent',transition:'background .15s',borderRadius:'14px 0 0 14px'}} onMouseEnter=${function(e){e.currentTarget.style.background='rgba(59,130,246,0.3)';}} onMouseLeave=${function(e){e.currentTarget.style.background='transparent';}}></div>
       <button onClick=${function(){ setCollapsed(true); try{localStorage.setItem('cc_ai_panel_collapsed','1');}catch(e){} }}
         title="Collapse AI chat" style=${{
           position:'absolute', right:6, top:6, zIndex:11, background:'transparent',
