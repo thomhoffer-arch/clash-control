@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.10.6 (2026-04-07)
+- Logo: mirror the second C so the mark reads C⊃
+
 ## v4.10.5 (2026-04-07)
 - Logo: shrink "CC" letter size to match the original visual weight
 
