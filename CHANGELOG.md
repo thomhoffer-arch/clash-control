@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.9.18 (2026-04-07)
+- ui: actually float the AI chat panel (margin + rounded + full shadow)
+
 ## v4.9.17 (2026-04-07)
 - chore: prune dead directories and stale planning docs
 
