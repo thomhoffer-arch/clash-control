@@ -154,6 +154,17 @@ module.exports = async function handler(req, res) {
   var body = req.body;
   if (!body || !body.command) return res.status(400).json({ error: 'Missing command' });
 
+  // ── Hybrid model routing ─────────────────────────────────────────
+  // Most chat commands are simple tool routing ("show open clashes",
+  // "filter by storey") and benefit from a fast model. A small subset
+  // need real reasoning power: clash analysis, summaries, reports,
+  // explanations. Route those to the dense 31B; everything else to
+  // the MoE 26B (4B active params, ~5–7× faster).
+  var SMART_RX = /\b(analy[sz]e|summar[iy]|explain|why|describe|breakdown|report|insight|interpret|compare|review|critique|recommend|suggest|root[\s-]?cause|impact)\b/i;
+  var FAST_MODEL = 'gemma-4-26b-a4b-it';
+  var SMART_MODEL = 'gemma-4-31b-it';
+  var pickedModel = SMART_RX.test(body.command) ? SMART_MODEL : FAST_MODEL;
+
   var systemPrompt = buildSystemPrompt(body.context || {});
 
   // Build Gemma 4 request with function calling
@@ -182,7 +193,7 @@ module.exports = async function handler(req, res) {
   }
 
   try {
-    var url = 'https://generativelanguage.googleapis.com/v1beta/models/gemma-4-31b-it:generateContent?key=' + key;
+    var url = 'https://generativelanguage.googleapis.com/v1beta/models/' + pickedModel + ':generateContent?key=' + key;
     var resp = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -214,16 +225,16 @@ module.exports = async function handler(req, res) {
     for (var i = 0; i < answerParts.length; i++) {
       if (answerParts[i].functionCall) {
         var fc = answerParts[i].functionCall;
-        return res.status(200).json({
+        return res.status(200).json(Object.assign({
           intent: fc.name,
-          ...fc.args,
-        });
+          _model: pickedModel,
+        }, fc.args));
       }
     }
 
     // No function call — model responded with text (e.g., unknown intent)
     var text = answerParts.map(function(p) { return p.text || ''; }).join('').trim();
-    return res.status(200).json({ intent: 'unknown', text: text });
+    return res.status(200).json({ intent: 'unknown', text: text, _model: pickedModel });
 
   } catch (e) {
     console.error('NL proxy error:', e);
