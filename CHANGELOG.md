@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.10.8 (2026-04-08)
+- Revert "perf(ifc): skip non-renderable types before geometry decode"
+
 ## v4.10.7 (2026-04-08)
 - perf(ifc): skip non-renderable types before geometry decode
 
