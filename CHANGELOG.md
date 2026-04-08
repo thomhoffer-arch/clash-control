@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.10.20 (2026-04-08)
+- chore(loader): upgrade web-ifc 0.0.76 → 0.0.77
+
 ## v4.10.19 (2026-04-08)
 - Revert "perf(loader): fast bbox via cached geometry.boundingBox + 8-corner transform"
 
