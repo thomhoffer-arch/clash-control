@@ -444,10 +444,23 @@ function startApp() {
   // Loader messages contain things like "Reading properties (5000 / 10000)…",
   // "Processing elements 5000/10000…" — extract the LAST N/M pair as the
   // most-specific progress indicator. Returns 0..100 or null when unknown.
+  //
+  // Preference order:
+  //   1) An explicit "XX%" suffix (e.g. "Streaming geometry 45%") — used by the
+  //      IFC loader to report a GLOBAL percent across all phases, so the bar
+  //      moves monotonically regardless of which phase we're in.
+  //   2) Fallback: the last "N / M" pair found in the message (phase-local).
   function _parseLoadPct(msg) {
     if (!msg) return null;
-    var re = /(\d+)\s*\/\s*(\d+)/g;
+    var pctRe = /(\d+(?:\.\d+)?)\s*%/g;
     var m, last = null;
+    while ((m = pctRe.exec(msg)) !== null) last = m;
+    if (last) {
+      var p = parseFloat(last[1]);
+      if (isFinite(p)) return Math.min(100, Math.max(0, Math.round(p)));
+    }
+    var re = /(\d+)\s*\/\s*(\d+)/g;
+    last = null;
     while ((m = re.exec(msg)) !== null) last = m;
     if (!last) return null;
     var done = parseInt(last[1], 10), total = parseInt(last[2], 10);
@@ -1650,7 +1663,11 @@ function startApp() {
       var relIds = api.GetLineIDsWithType(modelID, IFC.IFCRELDEFINESBYPROPERTIES);
       var total = relIds.size();
       for (var i = 0; i < total; i++) {
-        if (onProgress && i % 500 === 0) onProgress('Reading properties (' + i + ' / ' + total + ')…');
+        // Map property-map build to global 25-40%
+        if (onProgress && i % 500 === 0) {
+          var _ppct = total > 0 ? 25 + Math.round(i / total * 15) : 25;
+          onProgress('Reading properties ' + _ppct + '%');
+        }
         try {
           var rel = api.GetLine(modelID, relIds.get(i));
           var defId = rel.RelatingPropertyDefinition ? (rel.RelatingPropertyDefinition.value||rel.RelatingPropertyDefinition) : null;
@@ -1860,10 +1877,11 @@ function startApp() {
 
     return getIfcAPI().then(function(api) {
       _lmark('WASM ready');
+      if(onProgress) onProgress('Opening model 20%');
       var modelID = api.OpenModel(new Uint8Array(buffer), {USE_FAST_BOOLS: true});
       _lmark('Model open');
 
-      if(onProgress) onProgress('Building property maps…');
+      if(onProgress) onProgress('Building property maps 25%');
 
       // Pre-build all lookup maps ONCE (O(relations) instead of O(elements*relations))
       var storeyResult = extractStoreys(api, modelID);
@@ -1877,7 +1895,7 @@ function startApp() {
       Object.keys(storeyMap).forEach(function(k){ allStoreys[storeyMap[k]] = true; });
       _lmark('Property maps');
 
-      if(onProgress) onProgress('Streaming geometry…');
+      if(onProgress) onProgress('Streaming geometry 45%');
 
       // Collect raw mesh data first (StreamAllMeshes is synchronous, can't chunk it)
       var rawElements = [];
@@ -1885,8 +1903,17 @@ function startApp() {
       var matCache = {}; // material dedup: "r,g,b,a" → MeshPhongMaterial
       var geoCache = {}; // geometryExpressID → BufferGeometry (shared across identical elements)
       var _geoReused = 0;
+      // Rough element-count estimate from file size (~500 B/element for typical IFC)
+      // drives the streaming phase progress bar 45→78%.
+      var _estTotal = Math.max(500, Math.round(buffer.byteLength / 500));
+      var _streamCount = 0;
       api.StreamAllMeshes(modelID, function(ifcMesh) {
         var expressID = ifcMesh.expressID;
+        _streamCount++;
+        if (onProgress && (_streamCount & 255) === 0) {
+          var _spct = 45 + Math.min(33, Math.round(_streamCount / _estTotal * 33));
+          onProgress('Streaming geometry ' + _spct + '%');
+        }
         var elMeshes = [], elBox = new THREE.Box3();
         for (var i = 0; i < ifcMesh.geometries.size(); i++) {
           var placed = ifcMesh.geometries.get(i);
@@ -1998,7 +2025,7 @@ function startApp() {
       api.CloseModel(modelID);
       _lmark('Geometry stream');
 
-      if(onProgress) onProgress('Processing ' + rawElements.length + ' elements…');
+      if(onProgress) onProgress('Processing elements 85%');
 
       // Build final elements array in chunks to keep the UI responsive
       var elements = [];
@@ -2012,7 +2039,9 @@ function startApp() {
             elements.push({expressId:raw.expressId, meshes:raw.meshes, box:raw.box, props:raw.props, _lodProxy:raw._lodProxy});
           }
           if (end < rawElements.length) {
-            if(onProgress) onProgress('Processing elements ' + end + '/' + rawElements.length + '…');
+            // Element processing maps to 85-98% of the global progress budget
+            var _epct = 85 + Math.round(end / rawElements.length * 13);
+            if(onProgress) onProgress('Processing elements ' + _epct + '%');
             setTimeout(function(){ processChunk(end); }, 0);
           } else {
             _lmark('Element processing');
@@ -2074,10 +2103,11 @@ function startApp() {
 
       ready.then(function(api) {
         mark('WASM ready');
+        progress('Opening model 20%');
         var modelID = api.OpenModel(new Uint8Array(buf), {USE_FAST_BOOLS: true});
         mark('Model open');
 
-        progress('Building property maps\u2026');
+        progress('Building property maps 25%');
         var storeyResult = extractStoreys(api, modelID);
         var storeyMap = storeyResult.map;
         var storeyData = storeyResult.data;
@@ -2089,14 +2119,26 @@ function startApp() {
         Object.keys(storeyMap).forEach(function(k) { allStoreys[storeyMap[k]] = true; });
         mark('Property maps');
 
-        progress('Streaming geometry\u2026');
+        progress('Streaming geometry 45%');
         var rawEls = [];
         var xfer = [];
         var _geoTable = {}; // geometryExpressID → {pos, nrm, idx} (dedup)
         var _geoReused = 0;
 
+        // Rough element-count estimate from file size (~500 B/element for typical IFC).
+        // Only used to drive the progress bar; clamped so a bad estimate never falls
+        // below 45% or overshoots 78%. Streaming is the longest phase of a load, so
+        // having the bar move here matters more than having the % be exactly right.
+        var _estTotal = Math.max(500, Math.round(buf.byteLength / 500));
+        var _streamCount = 0;
+
         api.StreamAllMeshes(modelID, function(ifcMesh) {
           var eid = ifcMesh.expressID;
+          _streamCount++;
+          if ((_streamCount & 255) === 0) {
+            var _spct = 45 + Math.min(33, Math.round(_streamCount / _estTotal * 33));
+            progress('Streaming geometry ' + _spct + '%');
+          }
           var geos = [];
           for (var i = 0; i < ifcMesh.geometries.size(); i++) {
             var placed = ifcMesh.geometries.get(i);
@@ -2191,7 +2233,7 @@ function startApp() {
         }
         if (msg.type === 'result') {
           if (_myGen !== _ccLoadGeneration) { worker.terminate(); resolve(null); return; } // cancelled
-          if (onProgress) onProgress('Building 3D scene\u2026');
+          if (onProgress) onProgress('Building 3D scene 85%');
           // Build Three.js objects from raw geometry arrays (with geometry dedup)
           var rawEls = msg.rawEls;
           var gt = msg.geoTable || {};
@@ -8293,7 +8335,10 @@ function startApp() {
           setLoadMsg(totalIfc > 1 ? f.name + ' (' + (doneIfc + 1) + '/' + totalIfc + ')…' : 'Loading ' + f.name + '…');
           var _onProg = function(msg){ setLoadMsg(f.name + ': ' + msg); window._ccModelLoadMsg=f.name+': '+msg; window.dispatchEvent(new CustomEvent('cc-model-loading',{detail:{loading:true,msg:f.name+': '+msg}})); };
           return _readFileWithProgress(f, function(loaded, total){
-            _onProg('Reading file (' + loaded + ' / ' + total + ')');
+            // File read gets the first 15% of the global progress budget.
+            // Shown as percent only — raw byte counts are noise for users.
+            var _rpct = total > 0 ? Math.round(loaded / total * 15) : 0;
+            _onProg('Reading file ' + _rpct + '%');
           }).then(function(buf) {
             var disc='structural', col=DISC[0].c;
             var _loadP = loadIFCWorker(buf, col, _onProg);
@@ -14961,11 +15006,25 @@ function startApp() {
         if ((e.ctrlKey || e.metaKey) && e.key === '/') {
           e.preventDefault();
           setOpen(function(o){ return !o; });
+          return;
+        }
+        // Bare `/` opens the chat when it's collapsed — same convention as Slack/GitHub.
+        // Skip when modifiers are held (lets the browser keep its own bindings) or when
+        // the user is already typing in any input/textarea/contentEditable.
+        if (e.key === '/' && !e.ctrlKey && !e.metaKey && !e.altKey) {
+          var t = e.target;
+          var tag = (t && t.tagName) || '';
+          if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+          if (t && t.isContentEditable) return;
+          if (open) return;
+          e.preventDefault();
+          setOpen(true);
+          if (inputRef.current) setTimeout(function(){ inputRef.current && inputRef.current.focus(); }, 50);
         }
       }
       window.addEventListener('keydown', onKey);
       return function() { window.removeEventListener('keydown', onKey); };
-    }, []);
+    }, [open]);
 
     // On first open: check server AI health
     useEffect(function() {
