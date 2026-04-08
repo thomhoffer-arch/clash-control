@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.10.23 (2026-04-08)
+- ui(inspector): diagnostic strip + empty-state labels + live props lookup
+
 ## v4.10.22 (2026-04-08)
 - perf(loader): lazy property extraction via two-phase worker
 
