@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.10.25 (2026-04-08)
+- feat(viewer): ghosted view now preserves surface shading
+
 ## v4.10.24 (2026-04-08)
 - fix(loader): smooth 98→99→100% transition before loading strip clears
 
