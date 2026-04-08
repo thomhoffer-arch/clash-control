@@ -14062,7 +14062,9 @@ function startApp() {
         var upd = { modelA: mA?mA.id:'all', modelB: mB?mB.id:'all', hard: action.hard!==false, duplicates: action.duplicates===true };
         if (action.excludeSelf) upd.excludeSelf = true;
         if (typeof action.maxGap === 'number') upd.maxGap = action.maxGap;
-        return {_clashSetup:true, rules:upd, nameA:mA?mA.name:'All models', nameB:mB?mB.name:'All models'};
+        // Server fills in explicit values — mark as specified so conversation doesn't re-ask
+        return {_clashSetup:true, rules:upd, nameA:mA?mA.name:'All models', nameB:mB?mB.name:'All models',
+          _typeExplicit:true, _selfExplicit:typeof action.excludeSelf==='boolean'};
       }
       case 'set_max_gap': if (typeof action.value !== 'number') return null; d({t:A.UPD_RULES, u:{maxGap:action.value}}); return 'Gap set to '+action.value+'mm.';
       case 'set_duplicates': d({t:A.UPD_RULES, u:{duplicates:!!action.enabled}}); return action.enabled ? 'Got it — duplicates included.' : 'Got it — duplicates excluded.';
@@ -14650,7 +14652,13 @@ function startApp() {
       var idA = mA ? mA.id : 'all';
       var idB = mB ? mB.id : 'all';
       var updRules = applyClashOpts({ modelA: idA, modelB: idB });
-      return {_clashSetup:true, rules:updRules, nameA:mA?mA.name:'All models', nameB:mB?mB.name:'All models'};
+      // Mark whether clash type was explicitly stated (vs defaulted) so conversation knows whether to ask
+      var wantsSoft = /\bnear[\s-]*miss|\bproximity\b|\bwithin\b|\bnearby\b|\bclose\s+to\b|\bgap\b|\bsoft\b|\bclearance\b/.test(text);
+      var typeExplicit = wantsSoft || parseMM(text) !== null || /\bhard\s+only\b|\bhard\s+clash/.test(text);
+      var gapExplicit = parseMM(text) !== null;
+      var selfExplicit = /cross[\s-]*model|no\s+self|exclude\s+self|include\s+self|self[\s-]*clash/i.test(text);
+      return {_clashSetup:true, rules:updRules, nameA:mA?mA.name:'All models', nameB:mB?mB.name:'All models',
+        _typeExplicit:typeExplicit, _gapExplicit:gapExplicit, _selfExplicit:selfExplicit};
     }
 
     // ── Self-clash patterns ────────────────────────────────────────
@@ -14665,13 +14673,13 @@ function startApp() {
       if (selfTargets.length === 1 && /^all$/i.test(selfTargets[0])) {
         // Self-clash every model individually
         var updSelf = applyClashOpts({ modelA:'all', modelB:'all', excludeSelf:false });
-        return {_clashSetup:true, rules:updSelf, nameA:'All models', nameB:'All models (self)', _selfMode:'all'};
+        return {_clashSetup:true, rules:updSelf, nameA:'All models', nameB:'All models (self)', _selfMode:'all', _selfExplicit:true};
       }
       if (selfTargets.length === 1) {
         var ref = resolveModel(selfTargets[0]);
         if (ref) {
           var updSelf1 = applyClashOpts({ modelA:ref.id, modelB:ref.id, excludeSelf:false });
-          return {_clashSetup:true, rules:updSelf1, nameA:ref.name, nameB:ref.name+' (self)', _selfMode:'single'};
+          return {_clashSetup:true, rules:updSelf1, nameA:ref.name, nameB:ref.name+' (self)', _selfMode:'single', _selfExplicit:true};
         }
       }
       // Multiple self-clash groups: queue them as a multi-pass
@@ -14684,7 +14692,7 @@ function startApp() {
         var baseRules = applyClashOpts({ excludeSelf:false });
         return {_clashSetup:true, _multiSelf:selfPasses, rules:baseRules,
           nameA:selfPasses.map(function(p){return p.name;}).join(', '),
-          nameB:'(self-clash each)', _selfMode:'multi'};
+          nameB:'(self-clash each)', _selfMode:'multi', _selfExplicit:true};
       }
     }
 
@@ -14698,7 +14706,7 @@ function startApp() {
       var baseR = applyClashOpts({ excludeSelf:false });
       return {_clashSetup:true, _multiSelf:discs, rules:baseR,
         nameA:discs.map(function(p){return p.name;}).join(', '),
-        nameB:'(self-clash each)', _selfMode:'multi'};
+        nameB:'(self-clash each)', _selfMode:'multi', _selfExplicit:true};
     }
 
     // ── "only between" / "only within" (restrict to same-discipline) ──
@@ -14711,7 +14719,7 @@ function startApp() {
       var baseSD = applyClashOpts({ excludeSelf:false });
       return {_clashSetup:true, _multiSelf:samePasses, rules:baseSD,
         nameA:samePasses.map(function(p){return p.name;}).join(', '),
-        nameB:'(same discipline)', _selfMode:'multi'};
+        nameB:'(same discipline)', _selfMode:'multi', _selfExplicit:true};
     }
 
     // "X vs/versus/against Y"
@@ -14744,7 +14752,10 @@ function startApp() {
         if(!s.models.length) return _offerLoadIFC();
         var ref = foundRefs[0].ref;
         var updSingle = applyClashOpts({ modelA:ref.id, modelB:'all' });
-        return {_clashSetup:true, rules:updSingle, nameA:ref.name, nameB:'All models'};
+        var wS2 = /\bnear[\s-]*miss|\bproximity|\bwithin\b|\bsoft\b|\bgap\b/.test(text);
+        return {_clashSetup:true, rules:updSingle, nameA:ref.name, nameB:'All models',
+          _typeExplicit:wS2||parseMM(text)!==null, _gapExplicit:parseMM(text)!==null,
+          _selfExplicit:/cross[\s-]*model|no\s+self|self[\s-]*clash/i.test(text)};
       }
     }
 
@@ -14755,19 +14766,19 @@ function startApp() {
       var wv = parseFloat(withinMatch[1]), wu = withinMatch[2];
       var wmm = wu==='cm' ? Math.round(wv*10) : wu==='m' ? Math.round(wv*1000) : Math.round(wv);
       var updW = applyClashOpts({ modelA:'all', modelB:'all', maxGap:wmm, hard:true });
-      return {_clashSetup:true, rules:updW, nameA:'All models', nameB:'All models'};
+      return {_clashSetup:true, rules:updW, nameA:'All models', nameB:'All models', _typeExplicit:true, _gapExplicit:true};
     }
     if (/(?:find|check|detect|run|scan)\s+(?:for\s+)?(?:near[\s-]*miss|proximity|soft\s+clash|gap\s+clash)/.test(text)) {
       if (!s.models.length) return _offerLoadIFC();
       var updNM = applyClashOpts({ modelA:'all', modelB:'all', maxGap:50, hard:true });
-      return {_clashSetup:true, rules:updNM, nameA:'All models', nameB:'All models'};
+      return {_clashSetup:true, rules:updNM, nameA:'All models', nameB:'All models', _typeExplicit:true, _gapExplicit:false};
     }
 
     // ── "run clash …" generic fallback (no model/discipline found) ──
     if (/(?:run|start|do|execute|detect|find|check|scan|re-?run|again)\s+(?:the\s+)?(?:clash|detection|conflicts?|collisions?|scan|check|clashcontrol)/i.test(text)) {
       if (!s.models.length) return _offerLoadIFC();
       var updRun = applyClashOpts({ modelA:'all', modelB:'all' });
-      return {_clashSetup:true, rules:updRun, nameA:'All models', nameB:'All models'};
+      return {_clashSetup:true, rules:updRun, nameA:'All models', nameB:'All models', _typeExplicit:false};
     }
 
     // ── Individual rule settings (no run, just tweak) ────────────
@@ -15670,95 +15681,147 @@ function startApp() {
     }
 
     // ── Conversational clash setup context ──────────────────────
-    var clashCtxRef = useRef(null); // {rules, asked, nameA, nameB}
+    var clashCtxRef = useRef(null);
     function _clashConverse(text, result) {
       var ctx = clashCtxRef.current;
       var tl = text.trim().toLowerCase();
-      // If there's a pending context, parse the user's response
+
       if (ctx && ctx.asked) {
-        // Run
-        if (/\b(?:yes|yeah|yep|sure|ok|go|run|start|do it|proceed|execute)\b/i.test(tl)) {
-          clashCtxRef.current = null;
-          return {_clashSetup:true, _runNow:true, rules:ctx.rules, nameA:ctx.nameA, nameB:ctx.nameB, _multiSelf:ctx._multiSelf};
-        }
-        // Cancel
-        if (/\b(?:cancel|stop|abort|nevermind)\b/i.test(tl)) {
+        // Cancel always works
+        if (/\b(?:cancel|stop|abort|nevermind|quit)\b/i.test(tl)) {
           clashCtxRef.current = null;
           return 'Clash setup cancelled.';
         }
-        // Parse inline adjustments — same options as the standards tab
-        var r = ctx.rules;
-        var adjusted = false;
-        // Clash type
-        if (/\bhard\s+only\b|^hard$/i.test(tl)) { r.hard = true; r.maxGap = 0; adjusted = true; }
-        else if (/\b(?:mixed|hard\s*\+\s*near|near[\s-]*miss)/i.test(tl)) {
-          r.hard = true;
-          var mmNM = tl.match(/(\d+(?:\.\d+)?)\s*(?:mm|cm)?/);
-          if (mmNM) r.maxGap = Math.round(parseFloat(mmNM[1]) * (/cm/i.test(tl) ? 10 : 1));
-          else r.maxGap = r.maxGap > 0 ? r.maxGap : 50;
-          adjusted = true;
+
+        if (ctx.asked === 'type') {
+          // Hard only
+          if (/\bhard\s*only\b|^hard$|\bno\s+(?:gap|near|miss)\b|just\s+hard|\bphysical\b|\bintersect/i.test(tl)) {
+            ctx.rules.hard = true; ctx.rules.maxGap = 0; ctx._typeExplicit = true; ctx.asked = null;
+          }
+          // Near miss / soft with optional distance
+          else if (/\bnear[\s-]*miss|\bproximity|\bsoft\b|\bclearance\b|\bmixed\b|\btoo\b|\balso\b|\byes\b|\bwith\s+(gap|distance)\b|\binclude\b|\bwithin\b/i.test(tl)) {
+            var mmT = tl.match(/(\d+(?:\.\d+)?)\s*(mm|cm|m(?!m))/);
+            if (mmT) { var uT = mmT[2]; ctx.rules.maxGap = uT==='cm'?Math.round(parseFloat(mmT[1])*10):uT==='m'?Math.round(parseFloat(mmT[1])*1000):Math.round(parseFloat(mmT[1])); ctx._gapExplicit = true; }
+            else { ctx.rules.maxGap = ctx.rules.maxGap > 0 ? ctx.rules.maxGap : 50; }
+            ctx.rules.hard = true; ctx._typeExplicit = true; ctx.asked = null;
+          }
+          // Soft only (clearance range, no intersections)
+          else if (/\bsoft\s+only\b|\bclearance\s+only\b/i.test(tl)) {
+            ctx.rules.hard = false; ctx.rules.maxGap = ctx.rules.maxGap || 100; ctx._typeExplicit = true; ctx.asked = null;
+          }
+          else {
+            return 'Just to clarify — **hard clashes only** (physical intersections), or should I also flag **near misses** within some distance?';
+          }
         }
-        else if (/\bsoft\b|\bclearance\b/i.test(tl)) {
-          r.hard = false;
-          var mmSoft = tl.match(/(\d+(?:\.\d+)?)\s*(?:mm|cm)?/);
-          if (mmSoft) r.maxGap = Math.round(parseFloat(mmSoft[1]) * (/cm/i.test(tl) ? 10 : 1));
-          else r.maxGap = r.maxGap > 0 ? r.maxGap : 100;
-          adjusted = true;
+
+        else if (ctx.asked === 'gap') {
+          var gapV = tl.match(/(\d+(?:\.\d+)?)\s*(mm|cm|m(?!m))?/);
+          if (gapV) {
+            var gU = gapV[2] || 'mm';
+            ctx.rules.maxGap = gU==='cm'?Math.round(parseFloat(gapV[1])*10):gU==='m'?Math.round(parseFloat(gapV[1])*1000):Math.round(parseFloat(gapV[1]));
+            ctx._gapExplicit = true; ctx.asked = null;
+          } else if (/\bsmall\b|\btight\b|\bclose\b/i.test(tl)) {
+            ctx.rules.maxGap = 25; ctx._gapExplicit = true; ctx.asked = null;
+          } else if (/\blarge\b|\bbig\b|\bwide\b/i.test(tl)) {
+            ctx.rules.maxGap = 150; ctx._gapExplicit = true; ctx.asked = null;
+          } else {
+            return 'How far apart should elements be before I flag them? *(e.g. 50mm, 100mm)*';
+          }
         }
-        // Gap
-        var gapMatch = tl.match(/(?:gap|distance|tolerance|near)[^\d]*(\d+(?:\.\d+)?)\s*(mm|cm|m(?!m))?/);
-        if (gapMatch) { var gu2 = gapMatch[2]||'mm'; r.maxGap = gu2==='cm'?Math.round(parseFloat(gapMatch[1])*10):gu2==='m'?Math.round(parseFloat(gapMatch[1])*1000):Math.round(parseFloat(gapMatch[1])); adjusted = true; }
-        if (/no\s*(gap|near|clearance)|gap\s*0|zero\s*gap|hard\s*only/i.test(tl)) { r.maxGap = 0; adjusted = true; }
-        // Semantic filter
-        if (/semantic\s+(?:on|enable|yes)|enable\s+semantic/i.test(tl)) { r.useSemanticFilter = true; adjusted = true; }
-        if (/semantic\s+(?:off|disable|no)|disable\s+semantic/i.test(tl)) { r.useSemanticFilter = false; adjusted = true; }
-        // Duplicates
-        if (/(?:add|include|enable|with|turn\s+on)\s*dup/i.test(tl)) { r.duplicates = true; adjusted = true; }
-        if (/(?:no|remove|disable|without|exclude|turn\s+off)\s*dup/i.test(tl)) { r.duplicates = false; adjusted = true; }
-        // Changed elements only
-        if (/changed?\s+(?:elements?|only)|change[\s-]*aware\s+on/i.test(tl)) { r.changeAware = true; adjusted = true; }
-        if (/change[\s-]*aware\s+off|all\s+elements?/i.test(tl)) { r.changeAware = false; adjusted = true; }
-        // Self-clashes
-        if (/include\s*self|self.?clash.*on|enable\s*self|self\s+on|\bself\s+both\b/i.test(tl)) { r.excludeSelf = false; r.selfClashGroup = 'both'; adjusted = true; }
-        if (/exclude\s*self|self.?clash.*off|no\s*self|cross.?model|self\s+off/i.test(tl)) { r.excludeSelf = true; adjusted = true; }
-        if (/self\s+a\s+only|first\s+group\s+only/i.test(tl)) { r.excludeSelf = false; r.selfClashGroup = 'a'; adjusted = true; }
-        if (/self\s+b\s+only|second\s+group\s+only/i.test(tl)) { r.excludeSelf = false; r.selfClashGroup = 'b'; adjusted = true; }
-        // Re-show summary (whether or not something changed)
-        return _askNext(ctx);
+
+        else if (ctx.asked === 'self') {
+          if (/\bno\b|\bnot\b|\bonly\s+between\b|cross[\s-]*model|\bjust\s+between\b|\boff\b|\bexclude\b|\bdifferent\b/i.test(tl)) {
+            ctx.rules.excludeSelf = true; ctx._selfExplicit = true; ctx.asked = null;
+          } else if (/\byes\b|\binclude\b|\btoo\b|\bwithin\b|\bon\b|\bboth\b|\bsame\b|\balso\b/i.test(tl)) {
+            ctx.rules.excludeSelf = false; ctx.rules.selfClashGroup = 'both'; ctx._selfExplicit = true; ctx.asked = null;
+          } else {
+            return 'Should I check clashes **within** each model too, or only **between** different models?';
+          }
+        }
+
+        else if (ctx.asked === 'confirm') {
+          // Run
+          if (/\b(?:yes|yeah|yep|sure|ok|go|run|start|do it|proceed|execute|looks?\s+good|perfect|great)\b/i.test(tl)) {
+            clashCtxRef.current = null;
+            return {_clashSetup:true, _runNow:true, rules:ctx.rules, nameA:ctx.nameA, nameB:ctx.nameB, _multiSelf:ctx._multiSelf};
+          }
+          // Inline adjustments at confirm stage
+          var r = ctx.rules, adjC = false;
+          if (/\bhard\s*only\b|^hard$/i.test(tl)) { r.hard=true; r.maxGap=0; adjC=true; }
+          if (/\bnear[\s-]*miss|\bmixed\b/i.test(tl)) { r.hard=true; var mm2=tl.match(/(\d+)/); if(mm2) r.maxGap=+mm2[1]; else r.maxGap=r.maxGap||50; adjC=true; }
+          if (/\bsoft\s+only\b/i.test(tl)) { r.hard=false; var mm3=tl.match(/(\d+)/); if(mm3) r.maxGap=+mm3[1]; else r.maxGap=r.maxGap||100; adjC=true; }
+          var gm2=tl.match(/gap\s+(\d+)/); if(gm2){r.maxGap=+gm2[1];adjC=true;}
+          if(/semantic\s+off/i.test(tl)){r.useSemanticFilter=false;adjC=true;}
+          if(/semantic\s+on/i.test(tl)){r.useSemanticFilter=true;adjC=true;}
+          if(/include\s*self|self\s+on/i.test(tl)){r.excludeSelf=false;adjC=true;}
+          if(/no\s*self|self\s+off|cross[\s-]*model/i.test(tl)){r.excludeSelf=true;adjC=true;}
+          if(/include\s*dup|dup.*on/i.test(tl)){r.duplicates=true;adjC=true;}
+          if(/no\s*dup|dup.*off/i.test(tl)){r.duplicates=false;adjC=true;}
+          if (adjC) return _askNext(ctx); // re-show updated confirm
+          // Unrecognised → re-show confirm
+          return _askNext(ctx);
+        }
       }
-      // New setup result → start conversation
+
+      // New setup result → initialise context
       if (result && result._clashSetup) {
-        var initRules = Object.assign({}, result.rules);
-        if (initRules.useSemanticFilter === undefined) initRules.useSemanticFilter = true;
-        if (!initRules.excludeTypes) initRules.excludeTypes = [];
-        if (initRules.excludeSelf === undefined) initRules.excludeSelf = true; // default cross-model
-        ctx = {rules:initRules, nameA:result.nameA, nameB:result.nameB, asked:'confirm', _multiSelf:result._multiSelf};
+        var iR = Object.assign({}, result.rules);
+        if (iR.useSemanticFilter === undefined) iR.useSemanticFilter = true;
+        if (!iR.excludeTypes) iR.excludeTypes = [];
+        ctx = {
+          rules: iR,
+          nameA: result.nameA, nameB: result.nameB,
+          asked: null,
+          _multiSelf: result._multiSelf,
+          _typeExplicit: result._typeExplicit || false,
+          _gapExplicit: result._gapExplicit || (iR.maxGap > 0 && result._typeExplicit),
+          _selfExplicit: result._selfExplicit || (iR.excludeSelf !== undefined)
+        };
         clashCtxRef.current = ctx;
       }
-      if (!ctx) return result; // Not a clash conversation
+      if (!ctx) return result;
       return _askNext(ctx);
     }
+
     function _askNext(ctx) {
+      var r = ctx.rules;
+
+      // 1. Ask about clash type if not specified in the original command
+      if (!ctx._typeExplicit && !ctx._askedType) {
+        ctx._askedType = true;
+        ctx.asked = 'type';
+        clashCtxRef.current = ctx;
+        var modelsStr = ctx.nameA === ctx.nameB ? '**' + ctx.nameA + '**' : '**' + ctx.nameA + '** vs **' + ctx.nameB + '**';
+        return modelsStr + ' — hard clashes only, or near misses too?';
+      }
+
+      // 2. Ask for gap distance if near misses chosen but distance not specified
+      if ((r.maxGap > 0 || !r.hard) && !ctx._gapExplicit && !ctx._askedGap) {
+        ctx._askedGap = true;
+        ctx.asked = 'gap';
+        clashCtxRef.current = ctx;
+        return 'How close should elements be to flag as a near miss? *(e.g. 50mm, 100mm)*';
+      }
+
+      // 3. Ask about self-clashes only if ambiguous (all vs all, or same model)
+      var bothAll = (r.modelA === 'all' && r.modelB === 'all');
+      var sameModel = (r.modelA && r.modelA === r.modelB);
+      if ((bothAll || sameModel) && !ctx._selfExplicit && !ctx._askedSelf) {
+        ctx._askedSelf = true;
+        ctx.asked = 'self';
+        clashCtxRef.current = ctx;
+        return 'Should I check clashes within the same model too, or only between different models?';
+      }
+      // If not ambiguous and self not set, default to cross-model
+      if (!ctx._selfExplicit && r.excludeSelf === undefined) r.excludeSelf = true;
+
+      // 4. Confirm — brief summary
       ctx.asked = 'confirm';
       clashCtxRef.current = ctx;
-      var r = ctx.rules;
-      // Clash type label
-      var typeStr;
-      if (!r.hard) typeStr = 'Soft only (gap ' + (r.minGap||0) + '–' + (r.maxGap||100) + 'mm)';
-      else if ((r.maxGap||0) > 0) typeStr = 'Hard + near misses (max ' + r.maxGap + 'mm)';
-      else typeStr = 'Hard only';
-      // Self-clashes label
-      var selfStr = r.excludeSelf ? 'Off' : (r.selfClashGroup === 'a' ? 'A only' : r.selfClashGroup === 'b' ? 'B only' : 'Both');
-      return '**' + ctx.nameA + '** vs **' + ctx.nameB + '**\n\n'
-        + '• Type: ' + typeStr + '\n'
-        + '• Semantic filter: ' + (r.useSemanticFilter !== false ? 'On' : 'Off') + ' *(skip doors-in-walls, assembly parts)*\n'
-        + '• Duplicates: ' + (r.duplicates ? 'On' : 'Off') + '\n'
-        + '• Changed elements only: ' + (r.changeAware ? 'On' : 'Off') + '\n'
-        + '• Self-clashes: ' + selfStr + '\n'
-        + (r.excludeTypes && r.excludeTypes.length ? '• Excluding: ' + r.excludeTypes.join(', ') + '\n' : '')
-        + '\nType **yes** to run, or adjust inline:\n'
-        + '`hard` · `mixed 50mm` · `soft 100mm` · `gap 75mm`\n'
-        + '`semantic on/off` · `duplicates on/off` · `self on/off`';
+      var typeStr = !r.hard ? 'Soft only (' + (r.maxGap||100) + 'mm range)' : r.maxGap > 0 ? 'Hard + near misses (max ' + r.maxGap + 'mm)' : 'Hard clashes only';
+      var selfStr = r.excludeSelf ? 'cross-model only' : r.selfClashGroup === 'a' ? 'within A only' : r.selfClashGroup === 'b' ? 'within B only' : 'including same-model';
+      var extra = (r.duplicates ? ', duplicates on' : '') + (r.changeAware ? ', changed only' : '') + (r.useSemanticFilter === false ? ', all intersections' : '');
+      return 'Ready: **' + ctx.nameA + '** vs **' + ctx.nameB + '**, ' + typeStr + ', ' + selfStr + extra + '.\n\nRun? *(yes)* Or tell me what to change.';
     }
 
     function send(overrideText) {
