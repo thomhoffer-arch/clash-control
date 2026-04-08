@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.11.2 (2026-04-08)
+- Add more sort and group options for clash detection results
+
 ## v4.11.1 (2026-04-08)
 - feat: cancel-twice opens setup tab; training feedback on issues
 
