@@ -12,7 +12,11 @@ var PRECACHE = [
   'https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js',
   'https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js',
   'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js'
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+  // web-ifc lazy-imported by getIfcAPI() at first IFC pick — precaching here
+  // means the very first IFC load on a fresh PWA install pays no network round-trip.
+  'https://cdn.jsdelivr.net/npm/web-ifc@0.0.76/web-ifc-api.js',
+  'https://cdn.jsdelivr.net/npm/web-ifc@0.0.76/web-ifc.wasm'
 ];
 
 self.addEventListener('install', function(e) {
