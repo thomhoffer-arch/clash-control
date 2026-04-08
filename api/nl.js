@@ -262,6 +262,15 @@ module.exports = async function handler(req, res) {
     if (!resp.ok) {
       var errText = await resp.text();
       console.error('Gemma API error:', resp.status, errText);
+      // Upstream quota exhausted (spending cap or per-minute limit) —
+      // propagate as 429 with a clean payload so the client can fall
+      // back quietly instead of logging a red "Bad Gateway".
+      if (resp.status === 429) {
+        return res.status(429).json({
+          error: 'AI quota exceeded',
+          reason: 'quota_exceeded',
+        });
+      }
       return res.status(502).json({
         error: 'AI request failed',
         upstreamStatus: resp.status,

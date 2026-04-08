@@ -13703,11 +13703,17 @@ function startApp() {
       body: JSON.stringify(body)
     }).then(function(r) {
       var dt = Date.now() - t0;
-      if (_ccDbg()) console.log('%c[CC NL ← '+r.status+' '+dt+'ms]','color:'+(r.ok?'#22c55e':'#f87171')+';font-weight:bold', r);
+      // 429 is expected (quota / rate limit) — color it amber, not red.
+      var statusColor = r.ok ? '#22c55e' : (r.status === 429 ? '#f59e0b' : '#f87171');
+      if (_ccDbg()) console.log('%c[CC NL ← '+r.status+' '+dt+'ms]','color:'+statusColor+';font-weight:bold', r);
       if (!r.ok) {
         return r.text().then(function(txt) {
-          if (_ccDbg()) console.error('[CC NL body]', txt);
-          throw new Error('Server NL ' + r.status + ': ' + txt.slice(0,200));
+          var isQuota = r.status === 429;
+          if (_ccDbg()) (isQuota ? console.warn : console.error)('[CC NL body]', txt);
+          var err = new Error('Server NL ' + r.status + ': ' + txt.slice(0,200));
+          err.status = r.status;
+          err.quotaExceeded = isQuota;
+          throw err;
         });
       }
       return r.json().then(function(j) {
@@ -13715,7 +13721,10 @@ function startApp() {
         return j;
       });
     }).catch(function(err) {
-      if (_ccDbg()) console.error('%c[CC NL ✗]','color:#f87171;font-weight:bold', err);
+      if (_ccDbg()) {
+        var quiet = err && err.quotaExceeded;
+        (quiet ? console.warn : console.error)('%c[CC NL ✗]','color:'+(quiet?'#f59e0b':'#f87171')+';font-weight:bold', err);
+      }
       throw err;
     });
   }
@@ -13968,10 +13977,15 @@ function startApp() {
     var context = { models: modelList, maxGap: r.maxGap, hard: !!r.hard, modelA: r.modelA, modelB: r.modelB };
     return callServerNL(raw, context, replyContext)
       .then(function(action) { return _captureNL(dispatchServerAction(action, s, d), 'server'); })
-      .catch(function() {
+      .catch(function(err) {
         // 2. Offline fallback: regex for basic English commands
         var regexResult = processNLCommand(raw, s, d);
         if (regexResult !== null) return _captureNL(regexResult, 'regex-fallback');
+        // Quota exhausted and regex couldn't handle it — tell the user
+        // what's going on instead of silently dropping the command.
+        if (err && err.quotaExceeded) {
+          return _captureNL("AI is over quota right now — I can still handle simple commands like 'help', 'run detection', 'show open clashes', or 'export bcf'.", 'offline-quota');
+        }
         return _captureNL(null, 'offline');
       });
   }
