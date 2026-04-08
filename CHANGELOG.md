@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.10.13 (2026-04-08)
+- fix(loader): proactively purge bad web-ifc.wasm from SW + HTTP caches
+
 ## v4.10.12 (2026-04-08)
 - fix(loader): bypass SW for web-ifc + race Init() against 15s timeout
 
