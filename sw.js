@@ -1,7 +1,7 @@
 // ClashControl Service Worker — offline caching
 // Updates automatically when index.html changes (cache name includes version)
 
-var CACHE = 'clashcontrol-v4.10.11';
+var CACHE = 'clashcontrol-v4.10.11-webifcbypass';
 
 var PRECACHE = [
   './',
@@ -54,6 +54,13 @@ self.addEventListener('fetch', function(e) {
 
   // Never cache API calls — these must always go to the server
   if (url.indexOf('/api/') !== -1) return;
+
+  // Never intercept web-ifc — the SW's cache-first fetch handler has repeatedly
+  // pinned broken/short/opaque responses for web-ifc.wasm, causing WebAssembly
+  // .instantiate() to hang forever in Init() and stalling every IFC load at 18%.
+  // Let the browser handle these directly so CORP/COEP headers are honoured
+  // fresh on every load and any corruption self-heals on a simple refresh.
+  if (url.indexOf('web-ifc') !== -1) return;
 
   var isNav = e.request.mode === 'navigate';
   var isHTML = url.indexOf('index.html') !== -1 || url.endsWith('/');

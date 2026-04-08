@@ -1352,7 +1352,15 @@ function startApp() {
     return import('https://cdn.jsdelivr.net/npm/web-ifc@0.0.76/web-ifc-api.js').then(function(mod) {
       var api = new mod.IfcAPI();
       api.SetWasmPath('https://cdn.jsdelivr.net/npm/web-ifc@0.0.76/');
-      return api.Init().then(function() { _ifcAPI = api; return api; });
+      // Race Init() against a 15s timeout. Init has been observed to hang
+      // silently when a stale/broken web-ifc.wasm is served from the SW cache;
+      // without this race the caller (main-thread loadIFC fallback path) stalls
+      // forever instead of surfacing a visible error.
+      var initP = api.Init().then(function() { _ifcAPI = api; return api; });
+      var timeoutP = new Promise(function(_, rej) {
+        setTimeout(function() { rej(new Error('WASM Init timed out (15s)')); }, 15000);
+      });
+      return Promise.race([initP, timeoutP]);
     });
   }
 
@@ -2097,7 +2105,17 @@ function startApp() {
           progress('Initializing WASM 18%');
           _api = new mod.IfcAPI();
           _api.SetWasmPath('https://cdn.jsdelivr.net/npm/web-ifc@0.0.76/');
-          return _api.Init().then(function() { return _api; });
+          // Race Init() against a 15s timeout. WebAssembly.instantiate has been
+          // observed to hang silently when a stale/broken web-ifc.wasm is served
+          // from the SW cache (see sw.js web-ifc bypass) — without this race the
+          // .catch below never fires and the loader stalls forever at 18%. On
+          // timeout the worker posts an error and the main thread falls back to
+          // its own loadIFC, which uses the cached _ifcAPI on subsequent loads.
+          var initP = _api.Init().then(function() { return _api; });
+          var timeoutP = new Promise(function(_, rej) {
+            setTimeout(function() { rej(new Error('WASM Init timed out (15s)')); }, 15000);
+          });
+          return Promise.race([initP, timeoutP]);
         });
       }
 
