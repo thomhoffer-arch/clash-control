@@ -14355,6 +14355,24 @@ function startApp() {
     // processNLCommandWithLLM catches these first, this is a defense so a
     // stray "yes" never triggers an AI round-trip even without an offer.
     if (/^(?:yes|yeah|yep|sure|ok(?:ay)?|y|no|nah|nope|n)\b/.test(t)) return true;
+    // View controls
+    if (/^(?:dark|light|night|bright)\s+(?:mode|theme)?$/.test(t)) return true;
+    if (/^(?:section|cut)\s+(?:x|y|z)$/.test(t)) return true;
+    if (/^(?:clear|remove|no)\s+section$/.test(t)) return true;
+    if (/^(?:show|hide)\s+(?:grid|axes?|markers?)$/.test(t)) return true;
+    if (/^(?:color|colour)\s+by\s+(?:type|storey|floor|discipline|material)$/.test(t)) return true;
+    if (/^(?:reset|clear)\s+colou?rs?$/.test(t)) return true;
+    if (/^(?:show|restore|unghost|unhide)\s+all$/.test(t)) return true;
+    // Navigation
+    if (/^(?:go\s+to\s+)?(?:models?|clashes?|issues?|navigator|addons?|ai)\s*(?:tab)?$/.test(t)) return true;
+    // Sort & filter
+    if (/^sort\s+by\s+(?:priority|status|type|storey|date|distance)$/.test(t)) return true;
+    if (/^(?:only\s+)?(?:critical|high|normal|low)\s*(?:priority)?$/.test(t)) return true;
+    // Measure
+    if (/^measure\s+(?:length|distance|angle|area)$/.test(t)) return true;
+    if (/^(?:stop\s+measuring|stop\s+measure|clear\s+measurements?)$/.test(t)) return true;
+    // Save viewpoint
+    if (/^(?:save|capture)\s+(?:view(?:point)?|this\s+view)$/.test(t)) return true;
     return false;
   }
   window._ccNLStats = function() {

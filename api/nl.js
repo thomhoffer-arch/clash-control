@@ -320,6 +320,34 @@ const TOOLS = [
   },
 ];
 
+// Short prompt for pure command routing (no knowledge needed).
+// Keeps token count low → faster cold response for simple actions.
+function buildRoutingPrompt(context) {
+  return [
+    'You are a command parser for ClashControl, a BIM clash detection app.',
+    'Use the provided tools to handle the user\'s request.',
+    'Convert all lengths to mm (5cm=50, 2in=51, 1m=1000).',
+    'Use model name substrings from the loaded models list, or "all".',
+    '',
+    'OUTPUT STYLE — plain short sentences only. No markdown, no bullets, no headers.',
+    '',
+    'BLOCKED COMMANDS: if a prerequisite is unmet, offer a short friendly question:',
+    '  No models → "No models loaded — want me to open the file picker?"',
+    '  No clashes → "No clashes yet — want me to run a detection?"',
+    '',
+    'Loaded models: ' + (context.models || 'none'),
+    'Clashes: ' + (context.clashCount || 0) + ' (' + (context.openClashCount || 0) + ' open)',
+    'Issues: ' + (context.issueCount || 0),
+    'Active tab: ' + (context.activeTab || 'clashes'),
+    'Detection rules: maxGap=' + (context.maxGap || 10) + 'mm, hard=' + (context.hard !== false) + ', modelA=' + (context.modelA || 'all') + ', modelB=' + (context.modelB || 'all'),
+  ].join('\n');
+}
+
+// Detect whether the command needs real knowledge vs. just tool routing.
+function isKnowledgeQuery(command) {
+  return /\b(what\s+is|what\s+are|what\s+does|how\s+do|how\s+does|how\s+can|can\s+i|explain|tell\s+me|describe|difference\s+between|why|when\s+should|is\s+this|is\s+it|what\s+(?:does|is|can)|help\s+me\s+understand|what\s+(?:does|\'s)\s+the|what\s+(?:the\s+)?(?:semantic|bcf|ifc|ids)|how\s+(?:to|do\s+i)|can\s+(?:i|we|you)|is\s+(?:there|it|this)|what\'s)\b/i.test(command);
+}
+
 function buildSystemPrompt(context) {
   var clashSummary = context.clashCount
     ? context.clashCount + ' clashes total, ' + (context.openClashCount || 0) + ' open'
@@ -564,7 +592,9 @@ module.exports = async function handler(req, res) {
   var SMART_MODEL = 'gemma-4-31b-it';
   var pickedModel = SMART_RX.test(body.command) ? SMART_MODEL : FAST_MODEL;
 
-  var systemPrompt = buildSystemPrompt(body.context || {});
+  var systemPrompt = isKnowledgeQuery(body.command)
+    ? buildSystemPrompt(body.context || {})
+    : buildRoutingPrompt(body.context || {});
 
   // Build Gemma 4 request with function calling
   var payload = {
