@@ -1290,6 +1290,7 @@ function startApp() {
       var mesh = new THREE.Mesh(geo, mat);
       mesh.applyMatrix4(new THREE.Matrix4().fromArray(md.mtx));
       mesh.userData.expressId = md.eid;
+      _ccBakeMesh(mesh);
       if(!meshByEid[md.eid]) meshByEid[md.eid] = [];
       meshByEid[md.eid].push(mesh);
       return mesh;
@@ -1345,6 +1346,44 @@ function startApp() {
   // Shared LOD box proxy resources (must be at startApp scope so both loader paths can access them)
   var _lodBoxGeo = typeof THREE !== 'undefined' ? new THREE.BoxBufferGeometry(1, 1, 1) : null;
   var _lodProxyMat = typeof THREE !== 'undefined' ? new THREE.MeshBasicMaterial({color:0x667788, transparent:true, opacity:0.25, depthWrite:false}) : null;
+
+  // ── Bake static mesh transforms for rendering perf ────────────
+  // Called once per mesh at load time. Three.js defaults every Mesh
+  // to matrixAutoUpdate = true, which means renderer.render() walks
+  // the whole scene graph every frame and calls updateMatrix() on
+  // each node, recomposing this.matrix from pos/quat/scale. For
+  // 33 000+ static IFC meshes that's 3–7 ms of pure waste per
+  // frame — the transforms never change after load.
+  //
+  // Setting matrixAutoUpdate = false skips the recompose entirely
+  // (matrixWorld is still propagated through the parent chain on
+  // render, so re-parenting still works). Setting frustumCulled =
+  // false skips Three.js's built-in per-mesh frustum test — the
+  // manual updateCulling() in the render loop already handles
+  // frustum/LOD and writes obj.visible directly, so the built-in
+  // culler is pure duplicate work.
+  //
+  // SAFETY
+  //   - Clash detection calls mesh.updateWorldMatrix(true, false)
+  //     explicitly before reading matrixWorld in _getWorldTris and
+  //     _getWorldVerts, so stale matrixWorld after re-parenting is
+  //     handled and the narrow phase is unaffected.
+  //   - Revit linked models go through the same helper via
+  //     window._ccBakeMesh in addons/revit-bridge.js.
+  //   - LOD proxies set position/scale directly (no applyMatrix4)
+  //     so this helper calls updateMatrix() unconditionally to
+  //     ensure the baked matrix reflects the current pos/scale.
+  //   - Safe to call BEFORE the mesh is parented — updateMatrixWorld
+  //     will just copy this.matrix into this.matrixWorld when
+  //     parent is null, and the next render pass picks up the
+  //     correct world transform after grp.add(mesh).
+  function _ccBakeMesh(mesh) {
+    mesh.updateMatrix();            // one-time compose from pos/quat/scale
+    mesh.updateMatrixWorld(true);   // bake matrixWorld from current parent chain
+    mesh.matrixAutoUpdate = false;  // skip per-frame updateMatrix()
+    mesh.frustumCulled = false;     // manual updateCulling() handles frustum
+  }
+  window._ccBakeMesh = _ccBakeMesh;
 
   // ── WASM-init hang recovery ─────────────────────────────────────
   // The IFC loader has stalled at 18% ("Initializing WASM") on multiple
@@ -2085,6 +2124,7 @@ function startApp() {
             mesh.applyMatrix4(new THREE.Matrix4().fromArray(placed.flatTransformation));
             mesh.userData.expressId = expressID;
             elBox.expandByObject(mesh);
+            _ccBakeMesh(mesh);
             elMeshes.push(mesh); meshes.push(mesh);
           } catch(e) { console.warn('Skipped element geometry #'+expressID+': '+(e.message||e)); }
           finally { if (gd) try { gd.delete(); } catch(e2) {} }
@@ -2104,9 +2144,9 @@ function startApp() {
             _proxy = new THREE.Mesh(_lodBoxGeo, _lodProxyMat);
             _proxy.position.copy(_bc); _proxy.scale.copy(_bsz);
             _proxy.visible = false;
-            _proxy.frustumCulled = false;
             _proxy.userData._isLodProxy = true;
             _proxy.userData.expressId = expressID;
+            _ccBakeMesh(_proxy); // also sets frustumCulled=false + matrixAutoUpdate=false
             elMeshes.forEach(function(m) { m.userData._lodProxy = _proxy; });
           }
           rawElements.push({expressId:expressID, meshes:elMeshes, box:elBox.clone(), props:elProps, _lodProxy:_proxy});
@@ -2622,6 +2662,7 @@ function startApp() {
               var mesh = new THREE.Mesh(geo, mat);
               mesh.applyMatrix4(new THREE.Matrix4().fromArray(gData.tf));
               mesh.userData.expressId = raw.expressId;
+              _ccBakeMesh(mesh);
               _tMesh += performance.now() - _tM;
               var _tB = performance.now();
               elBox.expandByObject(mesh);
@@ -2638,9 +2679,9 @@ function startApp() {
                 _proxy = new THREE.Mesh(_lodBoxGeo, _lodProxyMat);
                 _proxy.position.copy(_bc); _proxy.scale.copy(_bsz);
                 _proxy.visible = false;
-                _proxy.frustumCulled = false;
                 _proxy.userData._isLodProxy = true;
                 _proxy.userData.expressId = raw.expressId;
+                _ccBakeMesh(_proxy); // also sets frustumCulled=false + matrixAutoUpdate=false
                 elMeshes.forEach(function(m) { m.userData._lodProxy = _proxy; });
               }
               _tLod += performance.now() - _tL;
@@ -7801,6 +7842,7 @@ function startApp() {
           var m = new THREE.Mesh(child.geometry.clone(), mat);
           m.geometry.computeVertexNormals(); // recompute from face winding — GLB normals may be flipped
           m.applyMatrix4(child.matrixWorld);
+          _ccBakeMesh(m);
           if (gid) {
             m.userData.globalId = gid;
             if (!meshByGid[gid]) meshByGid[gid] = [];

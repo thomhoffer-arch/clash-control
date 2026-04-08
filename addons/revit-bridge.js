@@ -185,6 +185,20 @@
       var mesh = new THREE.Mesh(geom, mat);
       mesh.name = el.globalId || '';
       mesh.userData.expressId = el.expressId || nextId;
+      // Bake the mesh for rendering perf (matrixAutoUpdate=false +
+      // frustumCulled=false + matrixWorld precomputed). Uses the
+      // global helper exposed by index.html so the IFC and Revit
+      // load paths stay consistent. Falls back to inlining the same
+      // three lines if the helper isn't available yet (e.g. addon
+      // loaded before startApp finished).
+      if (window._ccBakeMesh) {
+        window._ccBakeMesh(mesh);
+      } else {
+        mesh.updateMatrix();
+        mesh.updateMatrixWorld(true);
+        mesh.matrixAutoUpdate = false;
+        mesh.frustumCulled = false;
+      }
       meshes.push(mesh);
       box.copy(geom.boundingBox);
     }
