@@ -135,6 +135,132 @@ const TOOLS = [
       required: ['action', 'filter'],
     },
   },
+  // --- View & rendering ---
+  {
+    name: 'set_view',
+    description: 'Set camera to a preset angle. Use for "top view", "front view", "back view", "left view", "right view", "isometric", "iso", "reset view", "home", "fit all", "zoom to fit".',
+    parameters: {
+      type: 'object',
+      properties: {
+        view: { type: 'string', enum: ['top', 'front', 'back', 'left', 'right', 'isometric', 'reset'] },
+      },
+      required: ['view'],
+    },
+  },
+  {
+    name: 'set_render_style',
+    description: 'Change the 3D rendering style. Use for "wireframe", "wire frame", "shaded", "rendered", "realistic".',
+    parameters: {
+      type: 'object',
+      properties: {
+        style: { type: 'string', enum: ['wireframe', 'shaded', 'rendered', 'standard'] },
+      },
+      required: ['style'],
+    },
+  },
+  {
+    name: 'set_section',
+    description: 'Add a section cut plane or clear all sections. Use for "section x", "cut along y", "section z", "clear section", "remove section cut", "no section".',
+    parameters: {
+      type: 'object',
+      properties: {
+        axis: { type: 'string', enum: ['x', 'y', 'z', 'none'], description: 'Axis to cut along, or "none" to clear all sections' },
+      },
+      required: ['axis'],
+    },
+  },
+  {
+    name: 'color_by',
+    description: 'Color model elements by a property. Use for "color by type", "color by storey", "color by discipline", "color by material", "reset colors", "clear colors".',
+    parameters: {
+      type: 'object',
+      properties: {
+        by: { type: 'string', enum: ['type', 'storey', 'discipline', 'material', 'none'] },
+      },
+      required: ['by'],
+    },
+  },
+  {
+    name: 'set_theme',
+    description: 'Switch UI theme. Use for "dark mode", "night mode", "light mode", "bright mode".',
+    parameters: {
+      type: 'object',
+      properties: {
+        theme: { type: 'string', enum: ['dark', 'light'] },
+      },
+      required: ['theme'],
+    },
+  },
+  {
+    name: 'set_visibility_option',
+    description: 'Show or hide UI overlays: grid, axes, clash markers. Use for "show grid", "hide grid", "show axes", "hide markers", etc.',
+    parameters: {
+      type: 'object',
+      properties: {
+        option: { type: 'string', enum: ['grid', 'axes', 'markers'] },
+        visible: { type: 'boolean', description: 'true to show, false to hide' },
+      },
+      required: ['option', 'visible'],
+    },
+  },
+  {
+    name: 'restore_visibility',
+    description: 'Restore all hidden, ghosted, or isolated elements back to full visibility. Use for "show all", "unhide all", "restore all", "unghost", "undo hide".',
+    parameters: { type: 'object', properties: {} },
+  },
+  // --- Navigation ---
+  {
+    name: 'navigate_tab',
+    description: 'Switch to a tab in the UI. Use for "go to models", "open clashes tab", "show issues", "navigator", "addons", "AI tab".',
+    parameters: {
+      type: 'object',
+      properties: {
+        tab: { type: 'string', enum: ['models', 'clashes', 'issues', 'navigator', 'ai'] },
+      },
+      required: ['tab'],
+    },
+  },
+  // --- Filtering & sorting ---
+  {
+    name: 'filter_priority',
+    description: 'Filter clashes or issues by priority level. Use for "show critical", "only high priority", "filter normal", "all priorities".',
+    parameters: {
+      type: 'object',
+      properties: {
+        priority: { type: 'string', enum: ['critical', 'high', 'normal', 'low', 'all'] },
+      },
+      required: ['priority'],
+    },
+  },
+  {
+    name: 'sort_by',
+    description: 'Sort the clash or issue list. Use for "sort by priority", "sort by date", "order by distance", "sort by storey".',
+    parameters: {
+      type: 'object',
+      properties: {
+        sortBy: { type: 'string', enum: ['priority', 'status', 'type', 'storey', 'date', 'distance'] },
+      },
+      required: ['sortBy'],
+    },
+  },
+  // --- File operations ---
+  {
+    name: 'import_bcf',
+    description: 'Import a BCF file. Use for "import BCF", "load BCF", "open BCF file", "bring in BCF".',
+    parameters: { type: 'object', properties: {} },
+  },
+  // --- Measurement ---
+  {
+    name: 'measure',
+    description: 'Start or stop measurement mode. Use for "measure length", "measure distance", "measure angle", "measure area", "stop measuring", "clear measurements".',
+    parameters: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['length', 'angle', 'area', 'stop', 'clear'], description: '"stop" ends measurement mode, "clear" removes all measurements' },
+      },
+      required: ['mode'],
+    },
+  },
   // --- Project management ---
   {
     name: 'create_project',
@@ -173,15 +299,43 @@ const TOOLS = [
 
 function buildSystemPrompt(context) {
   return [
-    'You are a command parser for ClashControl, a BIM clash detection app.',
-    'Use the provided tools to handle the user\'s request.',
+    'You are the AI assistant for ClashControl — a free, browser-based BIM clash detection app for AEC professionals.',
+    '',
+    'WHAT CLASHCONTROL DOES:',
+    'ClashControl loads IFC building models, detects geometric clashes (hard intersections and soft clearance violations)',
+    'between building elements, lets users manage and annotate those clashes as issues, and exports to BCF format.',
+    'It is used by architects, engineers, and BIM coordinators to find and resolve coordination problems between disciplines',
+    '(e.g. structural beams clashing with MEP ducts, pipes colliding with walls).',
+    '',
+    'KEY CAPABILITIES (you can explain any of these to the user):',
+    '• Load IFC files (one or more building models at the same time)',
+    '• Run clash detection: hard clashes (intersections) or soft clashes (clearance/near-miss within a gap tolerance)',
+    '• Filter results by status (open/resolved), priority (critical/high/normal/low), storey, discipline',
+    '• Group clashes by storey, discipline, status, or type',
+    '• Sort clashes by priority, date, distance, storey',
+    '• Batch update: resolve all, set priority, assign clashes in bulk',
+    '• Create and manage issues from clashes, with assignee, due date, description',
+    '• Export to BCF 2.1 / 3.0 for use in Revit, Navisworks, BIM 360, and other tools',
+    '• Import BCF files from other applications',
+    '• Shared projects: share a project key so teammates can sync issue decisions without a login',
+    '• 3D viewer: top/front/back/left/right/isometric views, wireframe/shaded/rendered styles',
+    '• Section cuts along X/Y/Z axis, section box',
+    '• Color models by type, storey, discipline, or material',
+    '• Measure lengths, angles, and areas in the 3D view',
+    '• Save viewpoints that capture camera position with each issue',
+    '• Dark and light theme',
+    '• Works offline — no server required for clash detection (all geometry runs in-browser)',
+    '• Free and open-source (MIT license)',
+    '',
+    'Use the provided tools to execute the user\'s request when it matches a command.',
     'Convert all lengths to mm (5cm=50, 2in=51, 1m=1000).',
     'Use model name substrings from the loaded models list, or "all".',
     '',
     'OUTPUT STYLE — when you reply in text (not a tool call):',
     '- Plain short sentences. No markdown. No ###, no **bold**, no *bullets*, no headers.',
     '- If you need a list, put each item on its own line starting with "• ".',
-    '- Keep replies under 3 sentences unless the user asks for detail.',
+    '- Keep replies under 4 sentences unless the user explicitly asks for detail.',
+    '- When explaining a feature, be concrete and practical, not abstract.',
     '',
     'BLOCKED COMMANDS — if the user asks for something that cannot be done yet:',
     '- Do NOT just say "cannot do X". Phrase the reply as a short, friendly',
@@ -199,6 +353,7 @@ function buildSystemPrompt(context) {
     '- Only ask ONE question per reply. Keep it under 20 words.',
     '',
     'Loaded models: ' + (context.models || 'none'),
+    'Clash count: ' + (context.clashCount != null ? context.clashCount : 'unknown'),
     'Current rules: maxGap=' + (context.maxGap || 10) + 'mm, hard=' + (context.hard !== false) + ', modelA=' + (context.modelA || 'all') + ', modelB=' + (context.modelB || 'all'),
   ].join('\n');
 }

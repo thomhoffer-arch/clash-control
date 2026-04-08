@@ -14223,6 +14223,74 @@ function startApp() {
         if (spMatch) { _switchProject(spMatch.id, s, d); return 'Switched to **'+spMatch.name+'**.'; }
         return 'No project named "'+(action.name||'')+'".';
       }
+      case 'set_view': {
+        var viewMap = {top:'top view',front:'front view',back:'back view',left:'left view',right:'right view',isometric:'isometric view',reset:'reset view'};
+        var vcmd = viewMap[action.view] || action.view;
+        processNLCommand(vcmd, s, d);
+        return (action.view==='reset'?'View reset.':action.view.charAt(0).toUpperCase()+action.view.slice(1)+' view.');
+      }
+      case 'set_render_style': {
+        var rsMap = {wireframe:'wireframe',shaded:'shaded',rendered:'rendered',standard:'standard'};
+        var rs = rsMap[action.style] || 'shaded';
+        d({t:A.UPD_PREFS,u:{renderStyle:rs}});
+        if (window._ccSetRenderStyle) window._ccSetRenderStyle(rs);
+        return rs.charAt(0).toUpperCase()+rs.slice(1)+' mode.';
+      }
+      case 'set_section': {
+        if (action.axis === 'none') { d({t:A.SECTION,axis:null}); d({t:A.SECTION_BOX,v:null}); return 'Sections cleared.'; }
+        d({t:A.SECTION,axis:action.axis});
+        return 'Section '+action.axis.toUpperCase()+'.';
+      }
+      case 'color_by': {
+        var cbMap = {type:'byType',storey:'byStorey',discipline:'byDiscipline',material:'byMaterial',none:null};
+        d({t:A.COLOR_BY_CLASS,v:cbMap[action.by]||null});
+        return action.by==='none'?'Colors reset.':'Colored by '+action.by+'.';
+      }
+      case 'set_theme': {
+        d({t:A.UPD_PREFS,u:{theme:action.theme}});
+        return action.theme.charAt(0).toUpperCase()+action.theme.slice(1)+' mode.';
+      }
+      case 'set_visibility_option': {
+        var voMap = {grid:'showGrid',axes:'showAxes',markers:'showMarkers'};
+        var voKey = voMap[action.option];
+        if (!voKey) return null;
+        var upd = {}; upd[voKey] = !!action.visible;
+        d({t:A.UPD_PREFS,u:upd});
+        return (action.option.charAt(0).toUpperCase()+action.option.slice(1))+' '+(action.visible?'on':'off')+'.';
+      }
+      case 'restore_visibility': {
+        if (window._ccTempUnhide) window._ccTempUnhide();
+        if (window._ccUnisolate) window._ccUnisolate();
+        if (_unghostAll) _unghostAll();
+        return 'All elements restored.';
+      }
+      case 'navigate_tab': {
+        var tabMap = {models:'models',clashes:'clashes',issues:'issues',navigator:'navigator',ai:'ai'};
+        var tv = tabMap[action.tab]||action.tab;
+        d({t:A.TAB,v:tv});
+        return tv.charAt(0).toUpperCase()+tv.slice(1)+' tab.';
+      }
+      case 'filter_priority': {
+        if (action.priority==='all') { d({t:A.UPD_FILTERS,u:{priority:null}}); return 'Showing all priorities.'; }
+        d({t:A.UPD_FILTERS,u:{priority:action.priority}}); d({t:A.TAB,v:'clashes'});
+        return 'Showing '+action.priority+' priority only.';
+      }
+      case 'sort_by': {
+        var sortMap = {priority:'priority',status:'status',type:'type',storey:'storey',date:'date',distance:'distance'};
+        var sv2 = sortMap[action.sortBy]||'priority';
+        d({t:A.CLASH_SORT_BY,v:sv2});
+        return 'Sorted by '+sv2+'.';
+      }
+      case 'import_bcf': {
+        importBCF(d);
+        return 'BCF file picker opened.';
+      }
+      case 'measure': {
+        if (action.mode==='stop') { d({t:A.MEASURE_MODE,v:null}); return 'Measurement off.'; }
+        if (action.mode==='clear') { d({t:A.CLEAR_MEASUREMENTS}); return 'Measurements cleared.'; }
+        d({t:A.MEASURE_MODE,v:action.mode});
+        return 'Measuring '+action.mode+'. Click points in the 3D view.';
+      }
       case 'unknown': {
         // Safety net: Gemma sometimes returns blocked-state text via intent:unknown
         // instead of calling the appropriate tool. Detect those replies and route
@@ -14404,7 +14472,7 @@ function startApp() {
     // 1. Server-side AI (primary — handles everything including multilingual/complex)
     var modelList = s.models.length ? s.models.map(function(m){ return m.name; }).join(', ') : 'none';
     var r = s.rules || {};
-    var context = { models: modelList, maxGap: r.maxGap, hard: !!r.hard, modelA: r.modelA, modelB: r.modelB };
+    var context = { models: modelList, maxGap: r.maxGap, hard: !!r.hard, modelA: r.modelA, modelB: r.modelB, clashCount: s.clashes ? s.clashes.length : 0 };
     return callServerNL(raw, context, replyContext)
       .then(function(action) { return _captureNL(dispatchServerAction(action, s, d), 'server'); })
       .catch(function(err) {
