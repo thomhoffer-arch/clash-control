@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.10.22 (2026-04-08)
+- perf(loader): lazy property extraction via two-phase worker
+
 ## v4.10.21 (2026-04-08)
 - fix(nl): handle upstream quota 429 cleanly
 
