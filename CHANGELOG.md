@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.10.16 (2026-04-08)
+- fix(tree): restore per-level indentation in tree view
+
 ## v4.10.15 (2026-04-08)
 - fix(loader): drop COEP so web-ifc skips the missing mt variant
 
