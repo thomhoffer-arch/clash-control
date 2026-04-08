@@ -1346,6 +1346,61 @@ function startApp() {
   var _lodBoxGeo = typeof THREE !== 'undefined' ? new THREE.BoxBufferGeometry(1, 1, 1) : null;
   var _lodProxyMat = typeof THREE !== 'undefined' ? new THREE.MeshBasicMaterial({color:0x667788, transparent:true, opacity:0.25, depthWrite:false}) : null;
 
+  // ── WASM-init hang recovery ─────────────────────────────────────
+  // The IFC loader has stalled at 18% ("Initializing WASM") on multiple
+  // occasions because a bad web-ifc.wasm was pinned in either the service-
+  // worker cache (via the old SW precache, now reverted but still present in
+  // users' installed SWs) or the browser HTTP cache (from a transient
+  // jsdelivr hiccup). A short-read, opaque, or header-stripped response
+  // makes WebAssembly.instantiate() hang forever with no error — the hang
+  // is INSIDE web-ifc's Init() and is not catchable from JS without the
+  // Promise.race timeout below.
+  //
+  // Defence-in-depth fix (three layers):
+  //   1. sw.js bypasses web-ifc URLs entirely, so we never pin a bad
+  //      response in the SW cache going forward.
+  //   2. This block actively purges any EXISTING bad entries from every
+  //      SW cache on every page load, and forces the browser HTTP cache
+  //      to re-validate via `{cache: 'reload'}` fetches. Runs in the
+  //      background — doesn't block app startup.
+  //   3. Init() itself is raced against a 15 s timeout below; if a hang
+  //      still manages to slip through, the user sees a visible error
+  //      instead of an infinite spinner.
+  //
+  // The purge is idempotent, fires on every startup, and self-heals users
+  // who installed a broken SW before the bypass landed.
+  var _WEB_IFC_URLS = [
+    'https://cdn.jsdelivr.net/npm/web-ifc@0.0.76/web-ifc-api.js',
+    'https://cdn.jsdelivr.net/npm/web-ifc@0.0.76/web-ifc.wasm'
+  ];
+  (function _purgeWebIfcCache() {
+    try {
+      // Layer A: delete from every named SW cache. We can't tell which entry
+      // is bad without a full body inspection, so we wipe all web-ifc entries
+      // indiscriminately — the SW fetch-handler bypass means they can't be
+      // re-pinned, and the browser will re-fetch on next Init().
+      if (typeof caches !== 'undefined' && caches.keys) {
+        caches.keys().then(function(names) {
+          names.forEach(function(n) {
+            caches.open(n).then(function(cache) {
+              _WEB_IFC_URLS.forEach(function(u) {
+                cache.delete(u).catch(function(){});
+              });
+            }).catch(function(){});
+          });
+        }).catch(function(){});
+      }
+      // Layer B: force the browser HTTP cache to revalidate web-ifc assets
+      // against the origin. {cache:'reload'} bypasses the HTTP cache on the
+      // outbound request and stores the fresh response afterwards, so the
+      // next fetch (from web-ifc's Init()) hits a clean entry.
+      _WEB_IFC_URLS.forEach(function(u) {
+        try { fetch(u, {cache: 'reload', mode: 'cors'}).catch(function(){}); }
+        catch(e) {}
+      });
+    } catch(e) { /* purge is best-effort */ }
+  })();
+
   var _ifcAPI = null;
   function getIfcAPI() {
     if (_ifcAPI) return Promise.resolve(_ifcAPI);
