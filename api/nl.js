@@ -7,12 +7,12 @@ var { cors } = require('./_lib');
 const TOOLS = [
   {
     name: 'run_detection',
-    description: 'Run clash detection between building model groups. Use when the user wants to check, find, detect, or run clashes between models or disciplines.',
+    description: 'Run clash detection between building model groups. Use when the user wants to check, find, detect, or run clashes between models or disciplines. Multi-model groups are supported on each side via "+" — e.g. "architectural + structural" vs "mep + electrical".',
     parameters: {
       type: 'object',
       properties: {
-        modelA: { type: 'string', description: 'First model name substring, discipline name, or "all"' },
-        modelB: { type: 'string', description: 'Second model name substring, discipline name, or "all"' },
+        modelA: { type: 'string', description: 'First side: a model name substring, a discipline name, "all", or a group joined with "+". Examples: "structural", "architectural + structural", "level 3", "all".' },
+        modelB: { type: 'string', description: 'Second side: a model name substring, a discipline name, "all", or a group joined with "+". Examples: "mep", "mep + electrical", "plumbing + hvac", "all".' },
         maxGap: { type: 'number', description: 'Maximum gap tolerance in mm. Convert from other units: 5cm=50, 2in=51, 1m=1000' },
         hard: { type: 'boolean', description: 'true for hard/intersection clashes, false for soft/clearance clashes' },
         duplicates: { type: 'boolean', description: 'Whether to include duplicate clash detection' },
@@ -328,6 +328,7 @@ function buildRoutingPrompt(context) {
     'Use the provided tools to handle the user\'s request.',
     'Convert all lengths to mm (5cm=50, 2in=51, 1m=1000).',
     'Use model name substrings from the loaded models list, or "all".',
+    'For run_detection, multi-model groups are allowed on each side: pass the whole "+"-joined list as the string. Example: modelA="architectural + structural", modelB="mep + electrical". Never drop half the user\'s list.',
     '',
     'OUTPUT STYLE — plain short sentences only. No markdown, no bullets, no headers.',
     '',
@@ -515,6 +516,13 @@ function buildSystemPrompt(context) {
     'User: "can I load multiple IFC files at once?"',
     'Good reply: "Yes — open the file picker and select multiple .ifc files at once, or drag and drop several files.',
     'Each becomes a separate model you can target individually in detection (e.g. \'structural vs MEP\')."',
+    '',
+    'User: "run clash on architectural + structural vs MEP + electrical"',
+    'Good tool call: run_detection with modelA="architectural + structural", modelB="mep + electrical".',
+    '(Multi-model groups are supported — pass the whole "+"-joined list as the string; do NOT drop sides.)',
+    '',
+    'User: "check arch and struct against mep, plumbing and hvac"',
+    'Good tool call: run_detection with modelA="arch + struct", modelB="mep + plumbing + hvac".',
     '',
     'User: "how do I see what changed between model versions?"',
     'Good reply: "Load the updated IFC file — ClashControl detects it as a new version of the same model and shows a diff',

@@ -9968,17 +9968,98 @@ function startApp() {
   }
 
   // ── Clash Rules helpers ────────────────────────────────────────────
-  function _modelSelect(value, field, models, d) {
+  // Resolve a rule id (model id, 'disc:xxx', 'tag:xxx', or 'all') into a
+  // short human label for chips and summary text.
+  function _modelSelectLabel(id, models) {
+    if (id === 'all' || id == null) return 'all models';
+    if (typeof id === 'string' && id.indexOf('disc:') === 0) {
+      var dk = id.slice(5);
+      var dd = DISC.find(function(x){return x.id===dk;});
+      return dd ? dd.label : dk;
+    }
+    if (typeof id === 'string' && id.indexOf('tag:') === 0) return id.slice(4);
+    var m = models.find(function(mm){return mm.id===id;});
+    return m ? m.name : String(id);
+  }
+  // Normalise an rule-value into a plain array of ids ('all' → []).
+  function _modelIdsToArray(value) {
+    if (Array.isArray(value)) return value.slice();
+    if (value && value !== 'all') return [value];
+    return [];
+  }
+  // Compact an array of selected ids back into the storage form:
+  //   []       → 'all'
+  //   ['x']    → 'x'    (backward-compat single string)
+  //   ['x','y']→ ['x','y']
+  function _modelIdsCompact(arr) {
+    var seen = {}, clean = [];
+    (arr||[]).forEach(function(id){ if (id && id !== 'all' && !seen[id]) { seen[id]=true; clean.push(id); } });
+    if (clean.length === 0) return 'all';
+    if (clean.length === 1) return clean[0];
+    return clean;
+  }
+  // Dumb multi-select chip picker. Controlled — caller owns the value.
+  //   value    : 'all' | string | string[]
+  //   onChange : fn(newValue) where newValue is the compacted form
+  //   models   : s.models array
+  function _modelMultiPicker(value, onChange, models) {
     var tags=[]; models.forEach(function(m){if(m.tag&&tags.indexOf(m.tag)===-1)tags.push(m.tag);});
-    var selVal=Array.isArray(value)?JSON.stringify(value):value;
-    var u = {};
-    return html`<select value=${selVal} onChange=${function(e){var v=e.target.value;try{v=JSON.parse(v);}catch(x){}u[field]=v;d({t:A.UPD_RULES,u:u});}}
-      style=${{...S_INPUT,fontSize:'0.72rem',padding:'.2rem .3rem',flex:1}}>
-      <option value="all">all models</option>
-      ${DISC.map(function(p){return html`<option key=${p.id} value=${'disc:'+p.id}>${p.label} models</option>`})}
-      ${tags.map(function(t){return html`<option key=${'tag:'+t} value=${'tag:'+t}>tag: ${t}</option>`})}
-      ${models.map(function(m){return html`<option key=${m.id} value=${m.id}>${m.name}${m.tag?' ['+m.tag+']':''}</option>`})}
-    </select>`;
+    var selected = _modelIdsToArray(value);
+    var selSet = {}; selected.forEach(function(id){ selSet[id] = true; });
+
+    function commit(next) { onChange(_modelIdsCompact(next)); }
+    function addId(id) { if (!id || id === '__add__' || selSet[id]) return; commit(selected.concat([id])); }
+    function removeId(id) { commit(selected.filter(function(x){return x!==id;})); }
+    function clearAll() { commit([]); }
+
+    // Build add-dropdown options — hide already-selected entries
+    var addOptions = [];
+    DISC.forEach(function(p){ var id='disc:'+p.id; if(!selSet[id]) addOptions.push({id:id,label:p.label+' models'}); });
+    tags.forEach(function(t){ var id='tag:'+t; if(!selSet[id]) addOptions.push({id:id,label:'tag: '+t}); });
+    models.forEach(function(m){ if(!selSet[m.id]) addOptions.push({id:m.id,label:m.name+(m.tag?' ['+m.tag+']':'')}); });
+
+    var chipStyle = {display:'inline-flex',alignItems:'center',gap:'.2rem',padding:'.1rem .35rem',borderRadius:10,
+      fontSize:'0.66rem',background:'var(--tag-bg)',color:'var(--text-primary)',border:'1px solid var(--border-subtle)',lineHeight:1.2};
+    var plusChipStyle = {display:'inline-flex',alignItems:'center',padding:'.1rem .25rem',borderRadius:10,
+      fontSize:'0.66rem',background:'transparent',color:'var(--text-faint)',border:'1px dashed var(--border)',lineHeight:1.2};
+
+    return html`<div style=${{display:'flex',flexWrap:'wrap',alignItems:'center',gap:'.2rem',flex:1,
+      padding:'.15rem .25rem',borderRadius:6,background:'var(--input-bg)',border:'1px solid var(--border)',minHeight:'1.5rem'}}>
+      ${selected.length === 0
+        ? html`<span style=${{fontSize:'0.7rem',color:'var(--text-muted)',padding:'.1rem .2rem'}}>all models</span>`
+        : selected.map(function(id, i){
+            return html`<span key=${id} style=${chipStyle}>
+              ${i > 0 && html`<span style=${{color:'var(--text-faint)',marginRight:'.1rem'}}>+</span>`}
+              ${_modelSelectLabel(id, models)}
+              <button onClick=${function(ev){ev.preventDefault();removeId(id);}}
+                title="Remove"
+                style=${{background:'none',border:'none',color:'var(--text-muted)',cursor:'pointer',
+                  fontSize:'0.75rem',lineHeight:1,padding:'0 0 0 .1rem'}}>×</button>
+            </span>`;
+          })}
+      ${addOptions.length > 0 && html`<select value="__add__"
+        onChange=${function(e){ var v=e.target.value; e.target.value='__add__'; addId(v); }}
+        style=${{...plusChipStyle,cursor:'pointer',appearance:'none',WebkitAppearance:'none',MozAppearance:'none',
+          paddingRight:'.35rem',fontFamily:'inherit'}}>
+        <option value="__add__">+ add${selected.length?' another':''}</option>
+        ${addOptions.map(function(o){return html`<option key=${o.id} value=${o.id}>${o.label}</option>`})}
+      </select>`}
+      ${selected.length > 0 && html`<button onClick=${function(ev){ev.preventDefault();clearAll();}}
+        title="Clear (all models)"
+        style=${{background:'none',border:'none',color:'var(--text-faint)',cursor:'pointer',
+          fontSize:'0.62rem',padding:'.1rem .25rem',fontFamily:'inherit'}}>clear</button>`}
+    </div>`;
+  }
+  // Dispatch-backed variant for the Clash Standards panel. Stores back to
+  // rules.modelA / rules.modelB on change.
+  //   'all'                — no filter (backward-compat string)
+  //   'disc:mep' / modelId — single selection (backward-compat string)
+  //   ['disc:mep', id123]  — multi-selection (array, handled by pick())
+  function _modelSelect(value, field, models, d) {
+    return _modelMultiPicker(value, function(next){
+      var u = {}; u[field] = next;
+      d({t:A.UPD_RULES, u:u});
+    }, models);
   }
 
   function _renderTypePairTolerances(rules, models, tpState, setTPState, d) {
@@ -14185,10 +14266,37 @@ function startApp() {
   function dispatchServerAction(action, s, d) {
     if (!action || !action.intent) return null;
 
+    // Resolve a single hint token (one model / discipline / tag / "all").
+    function resolveModelOne(hint) {
+      if (!hint || /^all$/i.test(String(hint).trim())) return null;
+      var h = String(hint).toLowerCase().trim();
+      // Discipline match by id or label
+      var disc = DISC.find(function(d){ return d.id === h || d.label.toLowerCase() === h; });
+      if (disc && s.models.some(function(m){return m.discipline===disc.id;})) {
+        var matching = s.models.filter(function(m){return m.discipline===disc.id;});
+        return {id:'disc:'+disc.id, name:disc.label+' model'+(matching.length>1?'s':'')};
+      }
+      // Tag match
+      var tagMatch = s.models.find(function(m){return m.tag && m.tag.toLowerCase() === h;});
+      if (tagMatch) return {id:'tag:'+tagMatch.tag.toLowerCase(), name:tagMatch.tag};
+      // Model name substring
+      var m = s.models.find(function(mm){ return mm.name.toLowerCase().indexOf(h) !== -1; });
+      return m ? {id:m.id, name:m.name} : null;
+    }
+    // Resolve a hint string that may contain "+"-joined groups. Returns a
+    // {id, name} where id is a string for single matches or an array of
+    // selector ids for multi-model groups (handled by _detectClashesCore pick()).
     function resolveModel(hint) {
-      if (!hint || hint === 'all') return null;
-      var h = String(hint).toLowerCase();
-      return s.models.find(function(m) { return m.name.toLowerCase().indexOf(h) !== -1; }) || null;
+      if (!hint || /^all$/i.test(String(hint).trim())) return null;
+      var parts = String(hint).split(/\s*\+\s*(?:and\s+)?|\s+and\s+|\s*,\s*/i).filter(function(x){return x.trim();});
+      if (parts.length > 1) {
+        var ids = [], names = [];
+        parts.forEach(function(p){ var r = resolveModelOne(p.trim()); if (r) { ids.push(r.id); names.push(r.name); } });
+        if (ids.length > 1) return {id:ids, name:names.join(' + ')};
+        if (ids.length === 1) return {id:ids[0], name:names[0]};
+        return null;
+      }
+      return resolveModelOne(hint);
     }
 
     switch (action.intent) {
@@ -14679,8 +14787,15 @@ function startApp() {
     if (/what.*rules?|current.*(?:settings?|setup|config)|clash.*settings?|what(?:'s| is) set up/.test(text)) {
       var r = s.rules;
       var types = [r.hard&&'hard', r.maxGap&&('gap '+r.maxGap+'mm')].filter(Boolean).join(' + ') || 'none';
-      function _ruleLabel(id){ if(id==='all')return 'all'; if(typeof id==='string'&&id.indexOf('disc:')===0){var dd=DISC.find(function(x){return x.id===id.slice(5)});return dd?dd.label:id.slice(5);} var mm=s.models.find(function(x){return x.id===id});return mm?mm.name:id; }
-      var against = r.modelA==='all'&&r.modelB==='all' ? 'all models against all' : _ruleLabel(r.modelA) + ' vs ' + _ruleLabel(r.modelB);
+      function _ruleLabel(id){
+        if (Array.isArray(id)) return id.map(_ruleLabel).join(' + ');
+        if(id==='all'||id==null)return 'all';
+        if(typeof id==='string'&&id.indexOf('disc:')===0){var dd=DISC.find(function(x){return x.id===id.slice(5)});return dd?dd.label:id.slice(5);}
+        if(typeof id==='string'&&id.indexOf('tag:')===0)return id.slice(4);
+        var mm=s.models.find(function(x){return x.id===id});return mm?mm.name:id;
+      }
+      var bothAll = (r.modelA==='all'||r.modelA==null) && (r.modelB==='all'||r.modelB==null);
+      var against = bothAll ? 'all models against all' : _ruleLabel(r.modelA) + ' vs ' + _ruleLabel(r.modelB);
       return 'Current setup: ' + types + ' clashes, ' + against + ', max gap ' + (r.maxGap||0) + 'mm' + (r.duplicates?', including duplicates':'') + (r.useSemanticFilter!==false?', semantic filter on':', semantic filter off') + '.';
     }
     if (/(?:what|which).*storey|worst.*storey|most clashes.*storey|storey.*most/.test(text)) {
@@ -15559,11 +15674,16 @@ function startApp() {
         });
         return;
       }
-      var nameA=opts.find(function(o){return o.id===rules.modelA;})||{label:'All'};
-      var nameB=opts.find(function(o){return o.id===rules.modelB;})||{label:'All'};
+      function _labelFor(id) {
+        if (Array.isArray(id)) return id.map(_labelFor).join(' + ');
+        var o = opts.find(function(oo){return oo.id===id;});
+        return o ? o.label : (id === 'all' || id == null ? 'All' : _modelSelectLabel(id, s.models));
+      }
+      var nameA = _labelFor(rules.modelA);
+      var nameB = _labelFor(rules.modelB);
       setMsgs(function(prev){
         var next=prev.slice();
-        next[idx]={role:'assistant',text:'Running: '+nameA.label+' vs '+nameB.label
+        next[idx]={role:'assistant',text:'Running: '+nameA+' vs '+nameB
           +(rules.hard?' | hard':'')+(rules.maxGap?' | max gap '+rules.maxGap+'mm':'')
           +(rules.duplicates?' | duplicates':'')+(rules.excludeSelf?' | cross-model only':'')
           +(rules.excludeTypes&&rules.excludeTypes.length?' | excl: '+rules.excludeTypes.join(', '):'')+'…',ran:true};
@@ -15597,19 +15717,15 @@ function startApp() {
         Self-clash mode: ${setup._multiSelf.map(function(p){return p.name;}).join(', ')} — each group checked against itself
       </div>`}
 
-      <!-- Sets -->
+      <!-- Sets (multi-select chips — pick one or more per side with "+") -->
       <div style=${{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'.45rem .6rem'}}>
         <div>
           <div style=${lblSt}>Set A</div>
-          <select value=${rules.modelA} onChange=${function(e){upd('modelA',e.target.value)}} style=${selSt}>
-            ${opts.map(function(o){return html`<option key=${o.id} value=${o.id}>${o.label}</option>`;})}
-          </select>
+          ${_modelMultiPicker(rules.modelA, function(v){upd('modelA', v);}, s.models)}
         </div>
         <div>
           <div style=${lblSt}>Set B</div>
-          <select value=${rules.modelB} onChange=${function(e){upd('modelB',e.target.value)}} style=${selSt}>
-            ${opts.map(function(o){return html`<option key=${o.id} value=${o.id}>${o.label}</option>`;})}
-          </select>
+          ${_modelMultiPicker(rules.modelB, function(v){upd('modelB', v);}, s.models)}
         </div>
       </div>
 
@@ -15989,10 +16105,18 @@ function startApp() {
 
         else if (ctx.asked === 'confirm') {
           // Run
-          if (/\b(?:yes|yeah|yep|sure|ok|go|run|start|do it|proceed|execute|looks?\s+good|perfect|great)\b/i.test(tl)) {
+          if (/^\s*(?:yes|yeah|yep|sure|ok(?:ay)?|y|go|run|start|do it|proceed|execute|looks?\s+good|perfect|great)\b/i.test(tl)) {
             clashCtxRef.current = null;
             cancelCountRef.current = 0;
             return {_clashSetup:true, _runNow:true, rules:ctx.rules, nameA:ctx.nameA, nameB:ctx.nameB, _multiSelf:ctx._multiSelf};
+          }
+          // Decline — clear context so the next command starts fresh.
+          // Without this, "no" falls through every adjustment regex and
+          // _askNext re-displays the same confirm on a loop.
+          if (/^\s*(?:no|nope|nah|not\s+now|cancel|stop|abort|never\s*mind|quit)\b/i.test(tl)) {
+            clashCtxRef.current = null;
+            cancelCountRef.current = 0;
+            return 'Okay — let me know when you want to run it. You can also tweak any setting by name (e.g. "gap 75", "near misses", "include self").';
           }
           // Inline adjustments at confirm stage
           var r = ctx.rules, adjC = false;
@@ -16007,8 +16131,10 @@ function startApp() {
           if(/include\s*dup|dup.*on/i.test(tl)){r.duplicates=true;adjC=true;}
           if(/no\s*dup|dup.*off/i.test(tl)){r.duplicates=false;adjC=true;}
           if (adjC) return _askNext(ctx); // re-show updated confirm
-          // Unrecognised → re-show confirm
-          return _askNext(ctx);
+          // Unrecognised at confirm: drop the ctx and let the outer pipeline
+          // handle the new command fresh — don't re-show the same confirm.
+          clashCtxRef.current = null;
+          return null;
         }
       }
 
