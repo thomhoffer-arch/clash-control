@@ -5041,6 +5041,10 @@ function startApp() {
       // holding a reference to any particular clone.
       var _ghostedMeshes = [];
       var _ghostMatCache = new Map(); // origMat.uuid → ghost clone
+      // Target tint the ghost colours blend toward. Picked slightly
+      // cooler than pure grey so warm materials (red brick, orange
+      // beams) don't punch through as much as neutrals.
+      var _GHOST_TINT = new THREE.Color(0x5a6472);
       function _makeGhostClone(origMat) {
         if (!origMat) return origMat;
         if (Array.isArray(origMat)) return origMat.map(_makeGhostClone);
@@ -5049,17 +5053,29 @@ function startApp() {
         if (cached) return cached;
         var g = origMat.clone();
         g.transparent = true;
-        g.opacity = 0.18;
+        g.opacity = 0.10;
         g.depthWrite = false;
         // Quiet down any emissive glow the source material might have had —
         // a ghost should never out-shine the focused clash element.
         if (g.emissive && g.emissive.setScalar) g.emissive.setScalar(0);
-        // Keep surface normals readable under the scene lighting. For basic
-        // materials (no lighting) we fall back to a darker tint so they
-        // still read as "pushed back".
-        if (g.isMeshBasicMaterial && g.color && g.color.multiplyScalar) {
-          g.color.multiplyScalar(0.85);
+        // Desaturate toward a cool neutral tint so saturated reds, blues,
+        // and yellows stop competing with the discipline-coloured
+        // highlight outline. The previous "keep the material colour at
+        // low opacity" approach still left red columns visibly red
+        // against any focused element. 80% blend toward _GHOST_TINT
+        // preserves just enough hue to differentiate walls from pipes
+        // while killing the saturation that used to drown the highlight.
+        if (g.color && g.color.lerp) {
+          g.color.lerp(_GHOST_TINT, 0.8);
         }
+        // Strip specular highlights — they're the brightest pixels on a
+        // Phong surface and would still pop above a low-opacity ghost.
+        if (g.specular && g.specular.setScalar) g.specular.setScalar(0);
+        if (g.shininess != null) g.shininess = 0;
+        // Flatten metalness / roughness on PBR materials for the same
+        // reason: sharp reflections shouldn't read through the ghost.
+        if (g.metalness != null) g.metalness = 0;
+        if (g.roughness != null) g.roughness = 1;
         g._isCCGhost = true;
         _ghostMatCache.set(origMat.uuid, g);
         return g;
