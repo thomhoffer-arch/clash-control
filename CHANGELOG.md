@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.11.16 (2026-04-09)
+- Bump pinned engine release to v0.2.1
+
 ## v4.11.15 (2026-04-09)
 - Remove Data Quality Engines from addons menu; restore Clash Engine addon
 
