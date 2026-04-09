@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.11.13 (2026-04-09)
+- fix(viewer): stronger ghost — lower opacity + desaturate toward grey
+
 ## v4.11.12 (2026-04-09)
 - fix(issues): lock feedback summary, drop Verdict/Type/Edit
 
