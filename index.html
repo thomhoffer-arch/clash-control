@@ -7436,8 +7436,19 @@ function startApp() {
               <div style=${{fontSize:'0.92rem',fontWeight:700,color:'var(--text-primary)',lineHeight:1.2}}>${ep&&ep.name||'Unnamed element'}</div>
             </div>
             <div style=${{display:'flex',gap:'.2rem',flexShrink:0,marginLeft:'.3rem'}}>
-              <button onClick=${function(){if(_sboxAroundElements)_sboxAroundElements([selectedEl.expressId]);}}
-                style=${{...S_BTN,padding:'.15rem .25rem',background:'#3b0764',color:'#c084fc',fontSize:'0.69rem',borderRadius:4}} title="Section box around element" aria-label="Section box around element">Box</button>
+              <button onClick=${function(){
+                // Toggle: if a section box is currently active,
+                // clear it. Otherwise box-in around the selected
+                // element. Without this, a second click was a no-op
+                // and the only way to dismiss the box was via the
+                // viewer's separate "Clear section" chip.
+                if (s.sectionBox && s.sectionBox.enabled) {
+                  d({t:A.SECTION_BOX, v:null});
+                } else if (_sboxAroundElements) {
+                  _sboxAroundElements([selectedEl.expressId]);
+                }
+              }}
+                style=${{...S_BTN,padding:'.15rem .25rem',background:(s.sectionBox&&s.sectionBox.enabled)?'#7c3aed':'#3b0764',color:'#c084fc',fontSize:'0.69rem',borderRadius:4}} title=${(s.sectionBox&&s.sectionBox.enabled)?'Clear section box':'Section box around element'} aria-label=${(s.sectionBox&&s.sectionBox.enabled)?'Clear section box':'Section box around element'}>Box</button>
               <button onClick=${function(){setSelectedEl(null);if(_unghostAll)_unghostAll();if(hlRef.current&&state3d.current.scene){if(hlRef.current.isGroup)hlRef.current.traverse(function(c){if(c.isMesh||c.isLine||c.isLineSegments){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();}});state3d.current.scene.remove(hlRef.current);hlRef.current=null;}if(outlineRef.current&&state3d.current.scene){state3d.current.scene.remove(outlineRef.current);outlineRef.current=null;}}}
                 style=${{...S_BTN,padding:'0 4px',background:'none',color:'var(--text-faint)',fontSize:'0.8rem'}} aria-label="Deselect element">✕</button>
             </div>
@@ -10327,13 +10338,14 @@ function startApp() {
           </div>`;
         })}
       </div>
-      ${selectedElProps && html`<div style=${{flexShrink:0,borderTop:'1px solid var(--border)',maxHeight:'40%',overflowY:'auto',background:'var(--bg-tertiary)'}}>
-        <div style=${{display:'flex',alignItems:'center',justifyContent:'space-between',padding:'var(--space-2) var(--space-3)',borderBottom:'1px solid var(--border-subtle)'}}>
-          <span style=${{fontSize:'var(--text-xs)',fontWeight:'var(--weight-semibold)',color:'var(--color-info-fg)',textTransform:'uppercase',letterSpacing:'.06em'}}>Properties</span>
-          <button onClick=${function(){setSelectedElProps(null);}} style=${{background:'none',border:'none',cursor:'pointer',color:'var(--text-muted)',fontSize:'var(--text-base)',lineHeight:1,padding:'2px 4px'}} aria-label="Close properties">×</button>
-        </div>
-        <${PropBlock} p=${selectedElProps} label=${(selectedElProps.ifcType||'Element')+': '+(selectedElProps.name||'#'+selectedElProps.expressId)} />
-      </div>`}
+      ${/* Sidebar property panel removed — the viewer overlay (the
+          "Clean element property panel" IIFE further down) is now the
+          single source of truth for element details. Having two
+          panels side-by-side showed the same element twice, with the
+          sidebar panel displaying the raw Pset_ElementShading-style
+          names while the overlay showed the cleaned-up version. Keep
+          setSelectedElProps wired up (navigator element click still
+          hydrates it) so the overlay can mirror the selection. */''}
     </div>`;
   }
 
