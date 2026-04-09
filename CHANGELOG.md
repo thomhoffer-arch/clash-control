@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.11.18 (2026-04-09)
+- Next-level chat + navigator speedups + persistence fixes
+
 ## v4.11.17 (2026-04-09)
 - Auto-connect engine on first Enable click
 
