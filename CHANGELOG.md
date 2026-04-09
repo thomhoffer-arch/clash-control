@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.11.14 (2026-04-09)
+- feat(issues): obvious Export to BCF row in the Issues panel
+
 ## v4.11.13 (2026-04-09)
 - fix(viewer): stronger ghost — lower opacity + desaturate toward grey
 
