@@ -454,19 +454,12 @@
   }
 
   // ── Expose on window for DataQualityPanel in index.html ───────────
+  // Not registered as an addon — the check engines are always available
+  // and the UI lives in the Data Quality tab (see DataQualityPanel in index.html).
 
   window._ccRunDataQualityChecks = runDataQualityChecks;
   window._ccRunBIMModelChecks = runBIMModelChecks;
   window._ccRunILSChecks = runILSChecks;
   window._ccNLSFB_TABLE1 = NLSFB_TABLE1;
-
-  // Register as addon (no panel — the tab UI lives in index.html)
-  window._ccRegisterAddon({
-    id: 'data-quality',
-    name: 'Data Quality Engines',
-    description: 'General, BIM model, and ILS/NL-SfB check engines for the Data Quality tab.',
-    autoActivate: true,
-    icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>'
-  });
 
 })();

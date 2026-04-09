@@ -179,6 +179,9 @@
       --color-info:#2563eb;--color-info-fg:#1d4ed8;--color-info-bg:#dbeafe;--color-info-border:rgba(37,99,235,.35);
     }
     *{box-sizing:border-box;margin:0;padding:0}
+    /* Prevent horizontal overflow inside the left and right panels */
+    .cc-left-panel,.cc-side-panel{overflow-x:hidden!important}
+    .cc-left-panel>*,.cc-side-panel>*{min-width:0;overflow-x:hidden}
     body{background:var(--bg-primary);color:var(--text-primary);font-family:var(--font-body);overflow:hidden;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
     .cc-display{font-family:var(--font-display);letter-spacing:-.01em}
     .cc-mono{font-family:var(--font-mono)}
@@ -11865,8 +11868,8 @@ function startApp() {
       </div>`;
     }
 
-    return html`<div style=${{display:'flex',flexDirection:'column',flex:1,overflow:'hidden'}}>
-      <div style=${{padding:'.5rem .6rem',borderBottom:'1px solid var(--border-subtle)',display:'flex',flexDirection:'column',gap:'.4rem',flexShrink:0}}>
+    return html`<div style=${{display:'flex',flexDirection:'column',flex:1,overflow:'hidden',minWidth:0}}>
+      <div style=${{padding:'.5rem .6rem',borderBottom:'1px solid var(--border-subtle)',display:'flex',flexDirection:'column',gap:'.4rem',flexShrink:0,minWidth:0}}>
         <div style=${{display:'flex',alignItems:'center',gap:'.4rem'}}>
           <span style=${{fontSize:'0.83rem',fontWeight:600,color:'var(--text-primary)',flex:1}}>Data Quality</span>
           ${qc && html`<span style=${{fontSize:'0.63rem',padding:'2px 6px',borderRadius:99,
@@ -11877,12 +11880,12 @@ function startApp() {
         </div>
         <div style=${{display:'flex',gap:'.3rem',alignItems:'center'}}>
           <select value=${selectedModel} onChange=${function(e){setSelectedModel(e.target.value);}}
-            style=${{flex:1,fontSize:'0.72rem',padding:'.25rem .4rem',background:'var(--bg-primary)',color:'var(--text-primary)',border:'1px solid var(--border)',borderRadius:5,fontFamily:'inherit'}}>
+            style=${{flex:'1 1 0',minWidth:0,fontSize:'0.72rem',padding:'.25rem .4rem',background:'var(--bg-primary)',color:'var(--text-primary)',border:'1px solid var(--border)',borderRadius:5,fontFamily:'inherit'}}>
             <option value="all">All models</option>
             ${(s.models||[]).map(function(m){return html`<option key=${m.id} value=${m.id}>${m.name}</option>`})}
           </select>
           <button onClick=${runChecks} disabled=${isRunning || !hasModels}
-            style=${{padding:'.25rem .6rem',borderRadius:5,fontSize:'0.72rem',fontWeight:600,cursor:hasModels?'pointer':'not-allowed',border:'none',
+            style=${{padding:'.25rem .6rem',borderRadius:5,fontSize:'0.72rem',fontWeight:600,cursor:hasModels?'pointer':'not-allowed',border:'none',flexShrink:0,whiteSpace:'nowrap',
               background:isRunning?'var(--bg-tertiary)':'var(--accent)',color:isRunning?'var(--text-faint)':'#fff',fontFamily:'inherit',
               opacity:hasModels?1:0.5}}>
             ${isRunning ? 'Checking...' : qc ? 'Re-check' : 'Run Checks'}
@@ -12122,7 +12125,7 @@ function startApp() {
 
     var SEC = {fontSize: '0.75rem', fontWeight: 600, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '.05em', display: 'block', marginBottom: '.35rem'};
 
-    return html`<div style=${{padding: '.6rem', display: 'flex', flexDirection: 'column', gap: '.6rem'}}>
+    return html`<div style=${{padding: '.6rem', display: 'flex', flexDirection: 'column', gap: '.6rem', overflowX: 'hidden'}}>
       <div>
         <span style=${SEC}>IDS Validation</span>
         <span style=${{fontSize: '0.63rem', color: 'var(--text-faint)', display: 'block', marginBottom: '.4rem'}}>Validate IFC models against Information Delivery Specifications</span>
@@ -17787,9 +17790,7 @@ function startApp() {
     var ids = Object.keys(addons);
     var SEC={fontSize:'0.72rem',fontWeight:700,color:'var(--accent-subtle)',textTransform:'uppercase',letterSpacing:'.06em',padding:'.6rem .85rem .3rem'};
     var CARD={background:'var(--card-bg)',border:'1px solid var(--card-border)',borderRadius:10,padding:'.65rem .75rem',display:'flex',gap:'.6rem',alignItems:'flex-start'};
-    // Local engine install flow is handled entirely by the addon's panel()
-
-    return html`<div style=${{display:'flex',flexDirection:'column',gap:0,overflowY:'auto',flex:1}}>
+    return html`<div style=${{display:'flex',flexDirection:'column',gap:0,overflowY:'auto',overflowX:'hidden',flex:1}}>
       <div style=${SEC}>Installed Addons</div>
       <div style=${{padding:'0 .85rem .5rem',display:'flex',flexDirection:'column',gap:'.4rem'}}>
         ${ids.length === 0 && html`<div style=${{fontSize:'0.78rem',color:'var(--text-muted)',padding:'.5rem 0',lineHeight:1.7}}>
@@ -17868,7 +17869,7 @@ function startApp() {
                         <option value="all">All linked models (${linkedRevitModels.length})</option>
                         ${linkedRevitModels.map(function(m){return html`<option key=${m.id} value=${m.name}>${m.name}</option>`})}
                       </select>`}
-                      <div style=${{display:'flex',gap:'.3rem'}}>
+                      <div style=${{display:'flex',gap:'.3rem',flexWrap:'wrap'}}>
                         <button onClick=${function(){
                             if(!window._revitDirectExport) return;
                             var target = window._ccRevitUpdateTarget || 'all';
@@ -17876,12 +17877,12 @@ function startApp() {
                             else window._revitDirectExport(['all'], {name: target});
                           }}
                           title=${linkedRevitModels.length > 1 ? 'Re-pull the selected Revit model from the connector' : linkedRevitModels.length === 1 ? 'Re-pull the linked Revit model' : 'Pull the current Revit document for the first time'}
-                          style=${{padding:'.25rem .5rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',flex:1,
+                          style=${{padding:'.25rem .5rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',flex:'1 1 auto',minWidth:0,
                             background:'#1e3a5f',color:'#93c5fd',fontFamily:'inherit'}}>${linkedRevitModels.length === 0 ? 'Pull Model' : 'Update Model'}</button>
                         <button onClick=${function(){if(window._revitDirectPushClashes) window._revitDirectPushClashes(s,d)}}
-                          style=${{padding:'.25rem .5rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',flex:1,background:'#052e16',color:'#4ade80',fontFamily:'inherit'}}>Push Clashes</button>
+                          style=${{padding:'.25rem .5rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',flex:'1 1 auto',minWidth:0,background:'#052e16',color:'#4ade80',fontFamily:'inherit'}}>Push Clashes</button>
                         <button onClick=${function(){if(window._revitDirectDisconnect) window._revitDirectDisconnect(d)}}
-                          style=${{padding:'.25rem .5rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',background:'#7f1d1d',color:'#fca5a5',fontFamily:'inherit'}}>Disconnect</button>
+                          style=${{padding:'.25rem .5rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',flex:'0 0 auto',background:'#7f1d1d',color:'#fca5a5',fontFamily:'inherit'}}>Disconnect</button>
                       </div>
                     </div>`;
                   }()}
