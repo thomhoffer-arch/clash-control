@@ -639,6 +639,13 @@ function startApp() {
     // Floor plan cut
     floorPlan:null, // {storeyName, elevation, cutHeight} or null
     _highlightedStorey:null,
+    // Annotated Sheets (persistent plans generated from 3D at a storey cut)
+    // [{id, name, storeyName, elevation, cutHeight,
+    //   scale:{pxPerMeter}, paper:{size,orient}, titleBlock:{project,author,date,revision,notes},
+    //   northDeg, createdAt, updatedAt}]
+    sheets:[],
+    activeSheetId:null,
+    sheetPins:[], // [{id, sheetId, kind:'clash'|'issue', targetId, x, z, color, label}]
     // Projects
     activeProject:getActiveProjectId(),
     projectList:ensureDefaultProject(),
@@ -692,6 +699,9 @@ function startApp() {
     UPD_UNDERLAY:'UPD_UNDERLAY', SET_UNDERLAY:'SET_UNDERLAY', UNDERLAY_MODE:'UNDERLAY_MODE',
     ADD_MARKUP:'ADD_MARKUP', DEL_MARKUP:'DEL_MARKUP', CLEAR_MARKUPS:'CLEAR_MARKUPS',
     MARKUP_TOOL:'MARKUP_TOOL',
+    // Annotated sheets
+    SHEET_ADD:'SHEET_ADD', SHEET_DEL:'SHEET_DEL', SHEET_UPD:'SHEET_UPD', SHEET_SET_ACTIVE:'SHEET_SET_ACTIVE',
+    PIN_ADD:'PIN_ADD', PIN_DEL:'PIN_DEL', PIN_UPD:'PIN_UPD', PINS_SET:'PINS_SET',
     SELECT_TOGGLE:'SELECT_TOGGLE', SELECT_ALL:'SELECT_ALL',
     SELECT_NONE:'SELECT_NONE', SELECT_MODE:'SELECT_MODE',
     // Addon action types dispatched via string literals (not A.xxx) — handled by addon reducerCases
@@ -991,10 +1001,26 @@ function startApp() {
       case A.UPD_UNDERLAY:    return Object.assign({},s,{underlays:s.underlays.map(function(u){return u.id===a.id?Object.assign({},u,a.u):u})});
       case A.SET_UNDERLAY:    return Object.assign({},s,{activeUnderlay:a.id});
       case A.UNDERLAY_MODE:   return Object.assign({},s,{underlayMode:a.v});
-      case A.ADD_MARKUP:      return Object.assign({},s,{markups:s.markups.concat([a.v])});
+      case A.ADD_MARKUP:      return Object.assign({},s,{markups:s.markups.concat([Object.assign({sheetId:s.activeSheetId||null}, a.v)])});
       case A.DEL_MARKUP:      return Object.assign({},s,{markups:s.markups.filter(function(m){return m.id!==a.id})});
-      case A.CLEAR_MARKUPS:   return Object.assign({},s,{markups:[]});
+      case A.CLEAR_MARKUPS:   return Object.assign({},s,{markups:s.activeSheetId
+                                ? s.markups.filter(function(m){return m.sheetId!==s.activeSheetId})
+                                : s.markups.filter(function(m){return !!m.sheetId})});
       case A.MARKUP_TOOL:     return Object.assign({},s,{markupTool:a.v});
+      // Annotated sheets — persistent floor plan collection
+      case A.SHEET_ADD:       return Object.assign({},s,{sheets:s.sheets.concat([a.v]),activeSheetId:a.v.id});
+      case A.SHEET_DEL:       return Object.assign({},s,{
+                                sheets:s.sheets.filter(function(sh){return sh.id!==a.id}),
+                                activeSheetId:s.activeSheetId===a.id?null:s.activeSheetId,
+                                markups:s.markups.filter(function(m){return m.sheetId!==a.id}),
+                                sheetPins:s.sheetPins.filter(function(p){return p.sheetId!==a.id})
+                              });
+      case A.SHEET_UPD:       return Object.assign({},s,{sheets:s.sheets.map(function(sh){return sh.id===a.id?Object.assign({},sh,a.u,{updatedAt:Date.now()}):sh})});
+      case A.SHEET_SET_ACTIVE:return Object.assign({},s,{activeSheetId:a.id});
+      case A.PIN_ADD:         return Object.assign({},s,{sheetPins:s.sheetPins.concat([a.v])});
+      case A.PIN_DEL:         return Object.assign({},s,{sheetPins:s.sheetPins.filter(function(p){return p.id!==a.id})});
+      case A.PIN_UPD:         return Object.assign({},s,{sheetPins:s.sheetPins.map(function(p){return p.id===a.id?Object.assign({},p,a.u):p})});
+      case A.PINS_SET:        return Object.assign({},s,{sheetPins:(s.sheetPins||[]).filter(function(p){return p.sheetId!==a.sheetId}).concat(a.v||[])});
       // Bulk selection
       case A.SELECT_TOGGLE:  var sel2=Object.assign({},s.selected); if(sel2[a.id])delete sel2[a.id];else sel2[a.id]=true; return Object.assign({},s,{selected:sel2});
       case A.SELECT_ALL:     var sa={}; (a.ids||[]).forEach(function(id){sa[id]=true;}); return Object.assign({},s,{selected:sa});
@@ -14532,6 +14558,154 @@ function startApp() {
     });
   }
 
+  // ── Sheet helpers (shared by View2D toolbar and export) ────────
+  // Collect unique storeys across all loaded models, with average elevation.
+  function _ccCollectStoreys(models) {
+    var byName = {};
+    (models || []).forEach(function(m) {
+      (m.storeyData || []).forEach(function(st) {
+        if (!st || !st.name) return;
+        if (!byName[st.name]) byName[st.name] = { name: st.name, elevations: [] };
+        byName[st.name].elevations.push(Number(st.elevation) || 0);
+      });
+    });
+    return Object.keys(byName).map(function(name) {
+      var elevs = byName[name].elevations;
+      var avg = elevs.reduce(function(a, b) { return a + b; }, 0) / (elevs.length || 1);
+      return { name: name, elevation: avg };
+    }).sort(function(a, b) { return a.elevation - b.elevation; });
+  }
+
+  // Create a default Sheet object for a given storey
+  function _ccMakeSheet(storeyName, elevation) {
+    var id = (typeof uid === 'function' ? uid() : 'SH' + Date.now().toString(36).toUpperCase());
+    return {
+      id: id,
+      name: storeyName + ' Plan',
+      storeyName: storeyName,
+      elevation: Number(elevation) || 0,
+      cutHeight: 1.2,
+      scale: { pxPerMeter: 100 }, // ~1:100 at natural zoom
+      paper: { size: 'A3', orient: 'landscape' },
+      titleBlock: { project: '', author: '', date: new Date().toLocaleDateString(), revision: '', notes: '' },
+      northDeg: 0,
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+  }
+
+  // Toolbar controls: sheet picker, new sheet, plot clashes, title block editor
+  function SheetToolbarControls(props) {
+    var s = props.s, d = props.d;
+    var storeys = _ccCollectStoreys(s.models);
+    var activeSheet = s.activeSheetId && (s.sheets || []).find(function(sh) { return sh.id === s.activeSheetId; });
+    var showTBSt = useState(false), showTB = showTBSt[0], setShowTB = showTBSt[1];
+
+    function newSheet() {
+      if (!storeys.length) { alert('Load a model with storey data first.'); return; }
+      var names = storeys.map(function(st, i) { return (i + 1) + '. ' + st.name + ' (' + st.elevation.toFixed(2) + ' m)'; }).join('\n');
+      var pick = prompt('Pick a storey:\n' + names + '\n\nEnter number:');
+      var idx = parseInt(pick, 10) - 1;
+      if (isNaN(idx) || idx < 0 || idx >= storeys.length) return;
+      var st = storeys[idx];
+      var sh = _ccMakeSheet(st.name, st.elevation);
+      d({ t: A.SHEET_ADD, v: sh });
+    }
+
+    function plotClashes() {
+      if (!activeSheet) return;
+      var lo = activeSheet.elevation;
+      var hi = activeSheet.elevation + (activeSheet.cutHeight || 1.2);
+      var pins = [];
+      (s.clashes || []).forEach(function(c) {
+        if (!c.point || c.point.length < 3) return;
+        var y = c.point[1];
+        if (y < lo - 0.1 || y > hi + 0.1) return;
+        pins.push({
+          id: (typeof uid === 'function' ? uid() : 'P' + Date.now() + Math.random()),
+          sheetId: activeSheet.id,
+          kind: 'clash',
+          targetId: c.id,
+          x: c.point[0],
+          z: c.point[2],
+          color: c.status === 'resolved' ? '#64748b' : '#ef4444',
+          label: c.title || c.id
+        });
+      });
+      (s.issues || []).forEach(function(i) {
+        if (!i.point || i.point.length < 3) return;
+        var y = i.point[1];
+        if (y < lo - 0.1 || y > hi + 0.1) return;
+        pins.push({
+          id: (typeof uid === 'function' ? uid() : 'P' + Date.now() + Math.random()),
+          sheetId: activeSheet.id,
+          kind: 'issue',
+          targetId: i.id,
+          x: i.point[0],
+          z: i.point[2],
+          color: '#10b981',
+          label: i.title || i.id
+        });
+      });
+      d({ t: A.PINS_SET, sheetId: activeSheet.id, v: pins });
+      if (!pins.length) alert('No clashes or issues found in this storey slab.');
+    }
+
+    function delSheet() {
+      if (!activeSheet) return;
+      if (!confirm('Delete sheet "' + activeSheet.name + '"? This removes its markups and pins.')) return;
+      d({ t: A.SHEET_DEL, id: activeSheet.id });
+    }
+
+    var btn = { fontSize: '.6rem', padding: '.2rem .5rem', border: '1px solid var(--border)', borderRadius: 4, cursor: 'pointer' };
+    return html`<div style=${{ display: 'flex', gap: '.25rem', alignItems: 'center' }}>
+      ${s.sheets && s.sheets.length > 0 && html`<select value=${s.activeSheetId || ''} onChange=${function(e) { d({ t: A.SHEET_SET_ACTIVE, id: e.target.value || null }); }}
+        style=${{ ...btn, background: 'var(--overlay-bg)', color: 'var(--text-primary)', maxWidth: 140 }}>
+        <option value="">— No sheet —</option>
+        ${s.sheets.map(function(sh) { return html`<option key=${sh.id} value=${sh.id}>${sh.name}</option>`; })}
+      </select>`}
+      <button onClick=${newSheet} style=${{ ...btn, background: '#065f46', color: '#6ee7b7' }} title="Create a new annotated floor plan from a storey">+ Sheet</button>
+      ${activeSheet && html`<button onClick=${plotClashes} style=${{ ...btn, background: '#7f1d1d', color: '#fca5a5' }} title="Drop pins for every clash/issue whose location falls within this storey">Plot Clashes</button>`}
+      ${activeSheet && html`<button onClick=${function() { setShowTB(!showTB); }} style=${{ ...btn, background: 'var(--overlay-bg)', color: 'var(--text-muted)' }} title="Edit title block">Title…</button>`}
+      ${activeSheet && html`<button onClick=${delSheet} style=${{ ...btn, background: 'var(--overlay-bg)', color: '#ef4444' }} title="Delete this sheet">✕</button>`}
+      ${showTB && activeSheet && html`<div style=${{ position: 'absolute', top: '2.2rem', right: 0, background: 'var(--bg-primary)', border: '1px solid var(--border)', borderRadius: 6, padding: '.6rem', zIndex: 20, width: 260, display: 'flex', flexDirection: 'column', gap: '.35rem' }}>
+        <div style=${{ fontSize: '.7rem', fontWeight: 600, color: 'var(--text-primary)', marginBottom: '.2rem' }}>Title Block</div>
+        ${['project','author','date','revision','notes'].map(function(k) {
+          return html`<label key=${k} style=${{ fontSize: '.55rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '.1rem' }}>
+            ${k.charAt(0).toUpperCase() + k.slice(1)}
+            <input type="text" value=${(activeSheet.titleBlock && activeSheet.titleBlock[k]) || ''}
+              onChange=${function(e) { var tb = Object.assign({}, activeSheet.titleBlock || {}); tb[k] = e.target.value; d({ t: A.SHEET_UPD, id: activeSheet.id, u: { titleBlock: tb } }); }}
+              style=${{ ...S_INPUT, fontSize: '.6rem', padding: '.15rem .3rem' }} />
+          </label>`;
+        })}
+        <label style=${{ fontSize: '.55rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '.1rem' }}>
+          Scale (px/m — 1:${Math.round(1000 / ((activeSheet.scale && activeSheet.scale.pxPerMeter) || 100) * 10)})
+          <select value=${(activeSheet.scale && activeSheet.scale.pxPerMeter) || 100}
+            onChange=${function(e) { d({ t: A.SHEET_UPD, id: activeSheet.id, u: { scale: { pxPerMeter: Number(e.target.value) } } }); }}
+            style=${{ ...S_INPUT, fontSize: '.6rem', padding: '.15rem .3rem' }}>
+            <option value=${200}>1:50 (200 px/m)</option>
+            <option value=${100}>1:100 (100 px/m)</option>
+            <option value=${50}>1:200 (50 px/m)</option>
+            <option value=${20}>1:500 (20 px/m)</option>
+          </select>
+        </label>
+        <label style=${{ fontSize: '.55rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '.1rem' }}>
+          Cut height (m)
+          <input type="number" step="0.1" min="0.1" max="5" value=${activeSheet.cutHeight || 1.2}
+            onChange=${function(e) { d({ t: A.SHEET_UPD, id: activeSheet.id, u: { cutHeight: Number(e.target.value) } }); }}
+            style=${{ ...S_INPUT, fontSize: '.6rem', padding: '.15rem .3rem' }} />
+        </label>
+        <label style=${{ fontSize: '.55rem', color: 'var(--text-muted)', display: 'flex', flexDirection: 'column', gap: '.1rem' }}>
+          North (deg)
+          <input type="number" step="1" min="-360" max="360" value=${activeSheet.northDeg || 0}
+            onChange=${function(e) { d({ t: A.SHEET_UPD, id: activeSheet.id, u: { northDeg: Number(e.target.value) } }); }}
+            style=${{ ...S_INPUT, fontSize: '.6rem', padding: '.15rem .3rem' }} />
+        </label>
+        <button onClick=${function() { setShowTB(false); }} style=${{ ...btn, marginTop: '.3rem', background: '#2563eb', color: '#fff' }}>Close</button>
+      </div>`}
+    </div>`;
+  }
+
   // ── 2D View Component ──────────────────────────────────────────
   function View2D(props) {
     var s = props.s, d = props.d;
@@ -14543,43 +14717,79 @@ function startApp() {
     sRef.current = s;
     var activeUl = s.underlays.find(function(u) { return u.id === s.activeUnderlay; });
 
+    // Layer → stroke style table (used by both the canvas and DXF export)
+    var LAYER_STYLES = {
+      wall:      { color: '#e2e8f0', width: 3.0, dash: null },
+      structure: { color: '#94a3b8', width: 2.4, dash: [6, 4] },
+      opening:   { color: '#60a5fa', width: 1.4, dash: null },
+      mep:       { color: '#f97316', width: 1.6, dash: [2, 3] },
+      furniture: { color: '#64748b', width: 1.0, dash: null }
+    };
+
+    // Resolve the currently-active sheet and its display scale.
+    function getActiveSheet() {
+      var sc = sRef.current;
+      if (!sc.activeSheetId) return null;
+      return (sc.sheets || []).find(function(sh) { return sh.id === sc.activeSheetId; }) || null;
+    }
+    function getSheetPxm(sheet) {
+      if (!sheet) return 1;
+      return (sheet.scale && sheet.scale.pxPerMeter) || 100;
+    }
+
     function redraw() {
       var cvs = canvasRef.current; if (!cvs) return;
       var s = sRef.current; // always use latest state
       var ctx = cvs.getContext('2d');
       var w = cvs.width, h = cvs.height;
       var pan = panRef.current;
+      var sheet = getActiveSheet();
+      var pxm = getSheetPxm(sheet);
+      var viewScale = pan.zoom * pxm; // pixels per world-meter (or per-pixel if no sheet)
       ctx.clearRect(0, 0, w, h);
       ctx.fillStyle = '#0f172a';
       ctx.fillRect(0, 0, w, h);
       ctx.save();
       ctx.translate(w / 2 + pan.x, h / 2 + pan.y);
-      ctx.scale(pan.zoom, pan.zoom);
+      ctx.scale(viewScale, viewScale);
 
-      // Draw grid
-      ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 0.5 / pan.zoom;
-      var gridStep = 50;
-      var range = Math.max(w, h) / pan.zoom;
-      for (var gx = -range; gx < range; gx += gridStep) {
-        ctx.beginPath(); ctx.moveTo(gx, -range); ctx.lineTo(gx, range); ctx.stroke();
+      // Draw grid — 1m when a sheet is active, 50 units otherwise (legacy)
+      ctx.strokeStyle = '#1e293b'; ctx.lineWidth = 0.5 / viewScale;
+      var gridStep = sheet ? 1 : 50;
+      var range = Math.max(w, h) / viewScale;
+      // Snap range to gridStep multiples to avoid flicker
+      var gMin = -Math.ceil(range / gridStep) * gridStep;
+      var gMax =  Math.ceil(range / gridStep) * gridStep;
+      for (var gx = gMin; gx <= gMax; gx += gridStep) {
+        ctx.beginPath(); ctx.moveTo(gx, gMin); ctx.lineTo(gx, gMax); ctx.stroke();
       }
-      for (var gy = -range; gy < range; gy += gridStep) {
-        ctx.beginPath(); ctx.moveTo(-range, gy); ctx.lineTo(range, gy); ctx.stroke();
+      for (var gy = gMin; gy <= gMax; gy += gridStep) {
+        ctx.beginPath(); ctx.moveTo(gMin, gy); ctx.lineTo(gMax, gy); ctx.stroke();
+      }
+      // Major grid every 10 m when sheet is active
+      if (sheet) {
+        ctx.strokeStyle = '#334155'; ctx.lineWidth = 0.8 / viewScale;
+        for (var gx2 = gMin; gx2 <= gMax; gx2 += 10) {
+          ctx.beginPath(); ctx.moveTo(gx2, gMin); ctx.lineTo(gx2, gMax); ctx.stroke();
+        }
+        for (var gy2 = gMin; gy2 <= gMax; gy2 += 10) {
+          ctx.beginPath(); ctx.moveTo(gMin, gy2); ctx.lineTo(gMax, gy2); ctx.stroke();
+        }
       }
       // Origin cross
-      ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 2 / pan.zoom;
-      ctx.beginPath(); ctx.moveTo(-15 / pan.zoom, 0); ctx.lineTo(15 / pan.zoom, 0); ctx.stroke();
+      ctx.strokeStyle = '#ef4444'; ctx.lineWidth = 2 / viewScale;
+      ctx.beginPath(); ctx.moveTo(-15 / viewScale, 0); ctx.lineTo(15 / viewScale, 0); ctx.stroke();
       ctx.strokeStyle = '#22c55e';
-      ctx.beginPath(); ctx.moveTo(0, -15 / pan.zoom); ctx.lineTo(0, 15 / pan.zoom); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, -15 / viewScale); ctx.lineTo(0, 15 / viewScale); ctx.stroke();
 
-      // Draw each visible underlay
+      // Draw each visible underlay (legacy coord space: raw canvas pixels)
       s.underlays.forEach(function(ul) {
         if (!ul.visible || !ul.canvasData) return;
         ctx.save();
         ctx.globalAlpha = ul.opacity != null ? ul.opacity : 0.7;
         ctx.translate(ul.offsetX || 0, ul.offsetY || 0);
         ctx.rotate((ul.rotation || 0) * Math.PI / 180);
-        var sc = ul.scale || 1;
+        var scl = ul.scale || 1;
         var img = _underlayImgCache[ul.id];
         if (!img || _underlayImgDataCache[ul.id] !== ul.canvasData) {
           img = new Image();
@@ -14589,28 +14799,38 @@ function startApp() {
           img.onload = function() { redraw(); };
         }
         if (img.complete && img.naturalWidth > 0) {
-          var dw = (ul.extentW || img.naturalWidth) * sc;
-          var dh = (ul.extentH || img.naturalHeight) * sc;
+          var dw = (ul.extentW || img.naturalWidth) * scl;
+          var dh = (ul.extentH || img.naturalHeight) * scl;
           ctx.drawImage(img, -dw / 2, -dh / 2, dw, dh);
         }
         ctx.restore();
       });
 
-      // Draw 3D model floor plan outline (if in compare mode)
-      if (s.underlayMode === 'compare' && s.floorPlan && _cc2DOutlines) {
-        ctx.strokeStyle = '#3b82f6'; ctx.lineWidth = 2 / pan.zoom; ctx.globalAlpha = 0.8;
+      // Draw 3D model floor plan outlines (in compare mode OR when a sheet is active)
+      var showOutlines = (sheet && _cc2DOutlines) || (s.underlayMode === 'compare' && s.floorPlan && _cc2DOutlines);
+      if (showOutlines) {
+        ctx.lineCap = 'butt';
         _cc2DOutlines.forEach(function(seg) {
+          var layer = seg[4] || 'wall';
+          var st = LAYER_STYLES[layer] || LAYER_STYLES.wall;
+          ctx.strokeStyle = st.color;
+          ctx.lineWidth = st.width / viewScale;
+          if (st.dash) ctx.setLineDash(st.dash.map(function(v){return v/viewScale;})); else ctx.setLineDash([]);
           ctx.beginPath();
-          ctx.moveTo(seg[0], -seg[1]); // flip Z to Y
+          ctx.moveTo(seg[0], -seg[1]); // flip Z→Y
           ctx.lineTo(seg[2], -seg[3]);
           ctx.stroke();
         });
-        ctx.globalAlpha = 1;
+        ctx.setLineDash([]);
       }
 
-      // Draw markups
-      ctx.lineWidth = 2 / pan.zoom; ctx.lineCap = 'round';
+      // Draw markups — filter to active sheet when one is selected
+      ctx.lineWidth = 2 / viewScale; ctx.lineCap = 'round';
+      var activeSheetId = s.activeSheetId || null;
       s.markups.forEach(function(mk) {
+        // If in sheet mode, hide legacy/other-sheet markups; in legacy mode, show only sheet-less markups
+        if (activeSheetId) { if (mk.sheetId !== activeSheetId) return; }
+        else { if (mk.sheetId) return; }
         ctx.strokeStyle = mk.color || '#f59e0b'; ctx.fillStyle = mk.color || '#f59e0b';
         if (mk.type === 'line' && mk.points && mk.points.length >= 4) {
           ctx.beginPath();
@@ -14624,10 +14844,9 @@ function startApp() {
           ctx.moveTo(mk.points[0], mk.points[1]);
           ctx.lineTo(mk.points[2], mk.points[3]);
           ctx.stroke();
-          // Arrowhead
           var dx = mk.points[2] - mk.points[0], dy = mk.points[3] - mk.points[1];
           var ang = Math.atan2(dy, dx);
-          var hl = 10 / pan.zoom;
+          var hl = 10 / viewScale;
           ctx.beginPath();
           ctx.moveTo(mk.points[2], mk.points[3]);
           ctx.lineTo(mk.points[2] - hl * Math.cos(ang - 0.4), mk.points[3] - hl * Math.sin(ang - 0.4));
@@ -14635,22 +14854,172 @@ function startApp() {
           ctx.lineTo(mk.points[2] - hl * Math.cos(ang + 0.4), mk.points[3] - hl * Math.sin(ang + 0.4));
           ctx.stroke();
         } else if (mk.type === 'text' && mk.points && mk.text) {
-          ctx.font = Math.max(10, 14 / pan.zoom) + 'px sans-serif';
+          var fontPx = sheet ? (0.25) : Math.max(10, 14 / viewScale); // 0.25m tall when in sheet mode
+          ctx.font = fontPx + 'px sans-serif';
           ctx.fillText(mk.text, mk.points[0], mk.points[1]);
+        } else if (mk.type === 'dimension' && mk.points && mk.points.length >= 4) {
+          // Aligned dimension: two endpoints, offset extension lines, label at midpoint
+          var x1 = mk.points[0], y1 = mk.points[1], x2 = mk.points[2], y2 = mk.points[3];
+          var ddx = x2 - x1, ddy = y2 - y1;
+          var dlen = Math.sqrt(ddx * ddx + ddy * ddy);
+          if (dlen < 1e-6) return;
+          var nx = -ddy / dlen, ny = ddx / dlen; // perpendicular normal
+          var off = 0.4; // 40 cm offset when in sheet mode; legacy=0.4 canvas px (negligible)
+          var ax1 = x1 + nx * off, ay1 = y1 + ny * off;
+          var ax2 = x2 + nx * off, ay2 = y2 + ny * off;
+          ctx.strokeStyle = '#fbbf24'; ctx.fillStyle = '#fbbf24';
+          ctx.lineWidth = 1.2 / viewScale;
+          // Dimension line
+          ctx.beginPath(); ctx.moveTo(ax1, ay1); ctx.lineTo(ax2, ay2); ctx.stroke();
+          // Extension lines
+          ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(ax1 + nx * 0.1, ay1 + ny * 0.1); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(ax2 + nx * 0.1, ay2 + ny * 0.1); ctx.stroke();
+          // Arrowheads
+          var ah = 0.15;
+          var aAng = Math.atan2(ay2 - ay1, ax2 - ax1);
+          ctx.beginPath();
+          ctx.moveTo(ax1, ay1);
+          ctx.lineTo(ax1 + ah * Math.cos(aAng - 0.4), ay1 + ah * Math.sin(aAng - 0.4));
+          ctx.moveTo(ax1, ay1);
+          ctx.lineTo(ax1 + ah * Math.cos(aAng + 0.4), ay1 + ah * Math.sin(aAng + 0.4));
+          ctx.moveTo(ax2, ay2);
+          ctx.lineTo(ax2 - ah * Math.cos(aAng - 0.4), ay2 - ah * Math.sin(aAng - 0.4));
+          ctx.moveTo(ax2, ay2);
+          ctx.lineTo(ax2 - ah * Math.cos(aAng + 0.4), ay2 - ah * Math.sin(aAng + 0.4));
+          ctx.stroke();
+          // Label
+          var label = (sheet ? dlen.toFixed(2) + ' m' : dlen.toFixed(0) + ' px');
+          var midX = (ax1 + ax2) / 2, midY = (ay1 + ay2) / 2;
+          ctx.font = (sheet ? 0.2 : 12 / viewScale) + 'px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillStyle = '#0f172a';
+          var txtW = ctx.measureText(label).width;
+          var txtH = (sheet ? 0.22 : 14 / viewScale);
+          ctx.fillRect(midX - txtW / 2 - 0.05, midY - txtH / 2 - 0.02, txtW + 0.1, txtH + 0.04);
+          ctx.fillStyle = '#fbbf24';
+          ctx.fillText(label, midX, midY + txtH / 3);
+          ctx.textAlign = 'start';
         }
       });
 
-      // Current markup in progress
+      // Draw pins (clash/issue markers) for active sheet
+      if (sheet) {
+        var pinsOnSheet = (s.sheetPins || []).filter(function(p) { return p.sheetId === activeSheetId; });
+        pinsOnSheet.forEach(function(p, idx) {
+          var px = p.x, py = -p.z; // flip Z→Y
+          var r = 0.35; // 35 cm radius
+          ctx.beginPath();
+          ctx.arc(px, py, r, 0, Math.PI * 2);
+          ctx.fillStyle = p.color || (p.kind === 'issue' ? '#10b981' : '#ef4444');
+          ctx.fill();
+          ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 0.08;
+          ctx.stroke();
+          ctx.fillStyle = '#fff';
+          ctx.font = '0.35px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText(String(idx + 1), px, py + 0.12);
+          ctx.textAlign = 'start';
+        });
+      }
+
+      // Current markup in progress (with optional snap preview)
       if (s.markupTool && markupPtsRef.current.length >= 2) {
-        ctx.strokeStyle = '#f59e0b'; ctx.setLineDash([5 / pan.zoom, 5 / pan.zoom]);
+        ctx.strokeStyle = '#f59e0b'; ctx.setLineDash([5 / viewScale, 5 / viewScale]);
         var mp = markupPtsRef.current;
-        if (s.markupTool === 'line' || s.markupTool === 'arrow') {
+        if (s.markupTool === 'line' || s.markupTool === 'arrow' || s.markupTool === 'dimension') {
           ctx.beginPath(); ctx.moveTo(mp[0], mp[1]); ctx.lineTo(mp[2] || mp[0], mp[3] || mp[1]); ctx.stroke();
         } else if (s.markupTool === 'rect') {
           ctx.strokeRect(mp[0], mp[1], (mp[2] || mp[0]) - mp[0], (mp[3] || mp[1]) - mp[1]);
         }
         ctx.setLineDash([]);
       }
+      ctx.restore();
+
+      // Screen-space overlays (title block, scale bar, north arrow) — only in sheet mode
+      if (sheet) {
+        _ccDrawTitleBlock(ctx, w, h, sheet);
+        _ccDrawScaleBar(ctx, w, h, sheet, pan.zoom);
+        _ccDrawNorthArrow(ctx, w, h, sheet);
+      }
+    }
+
+    // Screen-space overlays: drawn after ctx.restore() so they stay at constant size.
+    function _ccDrawTitleBlock(ctx, w, h, sheet) {
+      var tb = sheet.titleBlock || {};
+      var bw = 260, bh = 110;
+      var x = w - bw - 12, y = h - bh - 12;
+      ctx.save();
+      ctx.fillStyle = 'rgba(15,23,42,0.92)';
+      ctx.strokeStyle = '#64748b';
+      ctx.lineWidth = 1.5;
+      ctx.fillRect(x, y, bw, bh);
+      ctx.strokeRect(x, y, bw, bh);
+      ctx.beginPath(); ctx.moveTo(x, y + 22); ctx.lineTo(x + bw, y + 22); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + bw * 0.6, y + 22); ctx.lineTo(x + bw * 0.6, y + bh); ctx.stroke();
+      ctx.fillStyle = '#e2e8f0';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.fillText(tb.project || sheet.name || 'ClashControl Plan', x + 8, y + 15);
+      ctx.font = '10px sans-serif';
+      ctx.fillStyle = '#94a3b8';
+      ctx.fillText('Storey: ' + (sheet.storeyName || '—'), x + 8, y + 38);
+      ctx.fillText('Elev: ' + (sheet.elevation != null ? sheet.elevation.toFixed(2) + ' m' : '—'), x + 8, y + 52);
+      ctx.fillText('Cut: ' + ((sheet.cutHeight || 1.2).toFixed(2)) + ' m', x + 8, y + 66);
+      ctx.fillText('Scale 1:' + Math.round(1000 / ((sheet.scale && sheet.scale.pxPerMeter) || 100) * 10), x + 8, y + 80);
+      ctx.fillText(tb.author ? 'By ' + tb.author : '', x + 8, y + 94);
+      ctx.fillText(tb.date || new Date(sheet.createdAt || Date.now()).toLocaleDateString(), x + bw * 0.6 + 8, y + 38);
+      ctx.fillText(tb.revision ? 'Rev ' + tb.revision : 'Rev —', x + bw * 0.6 + 8, y + 52);
+      if (tb.notes) {
+        var notesLines = String(tb.notes).slice(0, 60).match(/.{1,28}/g) || [];
+        notesLines.forEach(function(ln, i) { ctx.fillText(ln, x + bw * 0.6 + 8, y + 66 + i * 12); });
+      }
+      ctx.restore();
+    }
+
+    function _ccDrawScaleBar(ctx, w, h, sheet, zoom) {
+      var pxm = (sheet.scale && sheet.scale.pxPerMeter) || 100;
+      // Pick a "nice" length in meters to fit ~150px
+      var targetPx = 150;
+      var mPerBar = targetPx / (pxm * zoom);
+      var niceSteps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50, 100];
+      var chosen = niceSteps[0];
+      for (var i = 0; i < niceSteps.length; i++) if (niceSteps[i] <= mPerBar) chosen = niceSteps[i];
+      var barPx = chosen * pxm * zoom;
+      var x = 16, y = h - 28;
+      ctx.save();
+      ctx.fillStyle = 'rgba(15,23,42,0.85)';
+      ctx.fillRect(x - 6, y - 20, barPx + 12, 32);
+      ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(x, y); ctx.lineTo(x + barPx, y); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x, y - 6); ctx.lineTo(x, y + 6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + barPx, y - 6); ctx.lineTo(x + barPx, y + 6); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(x + barPx / 2, y - 4); ctx.lineTo(x + barPx / 2, y + 4); ctx.stroke();
+      ctx.fillStyle = '#e2e8f0'; ctx.font = '11px sans-serif';
+      ctx.fillText(chosen + ' m', x, y - 8);
+      ctx.restore();
+    }
+
+    function _ccDrawNorthArrow(ctx, w, h, sheet) {
+      var cx = w - 40, cy = 44;
+      var r = 22;
+      var angRad = ((sheet.northDeg || 0) - 90) * Math.PI / 180;
+      ctx.save();
+      ctx.fillStyle = 'rgba(15,23,42,0.85)';
+      ctx.beginPath(); ctx.arc(cx, cy, r + 4, 0, Math.PI * 2); ctx.fill();
+      ctx.strokeStyle = '#64748b'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.translate(cx, cy);
+      ctx.rotate(angRad);
+      ctx.beginPath();
+      ctx.moveTo(0, -r);
+      ctx.lineTo(r * 0.4, r * 0.6);
+      ctx.lineTo(0, r * 0.3);
+      ctx.lineTo(-r * 0.4, r * 0.6);
+      ctx.closePath();
+      ctx.fillStyle = '#ef4444'; ctx.fill();
+      ctx.strokeStyle = '#e2e8f0'; ctx.lineWidth = 1; ctx.stroke();
+      ctx.rotate(-angRad);
+      ctx.fillStyle = '#e2e8f0'; ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText('N', 0, -r - 6);
+      ctx.textAlign = 'start';
       ctx.restore();
     }
 
@@ -14659,7 +15028,7 @@ function startApp() {
       var ids = s.underlays.reduce(function(acc, u) { acc[u.id] = true; return acc; }, {});
       Object.keys(_underlayImgCache).forEach(function(k) { if (!ids[k]) { delete _underlayImgCache[k]; delete _underlayImgDataCache[k]; } });
       redraw();
-    }, [s.underlays, s.activeUnderlay, s.markups, s.markupTool, s.underlayMode, s.floorPlan]);
+    }, [s.underlays, s.activeUnderlay, s.markups, s.markupTool, s.underlayMode, s.floorPlan, s.activeSheetId, s.sheets, s.sheetPins]);
 
     useEffect(function() {
       var cvs = canvasRef.current; if (!cvs) return;
@@ -14677,22 +15046,42 @@ function startApp() {
       };
     }, []);
 
-    function toWorld(e) {
+    function toWorld(e, applySnap) {
       var cvs = canvasRef.current; if (!cvs) return [0, 0];
       var rect = cvs.getBoundingClientRect();
       var pan = panRef.current;
+      var sheet = getActiveSheet();
+      var pxm = getSheetPxm(sheet);
+      var viewScale = pan.zoom * pxm;
       var px = e.clientX - rect.left - cvs.width / 2 - pan.x;
       var py = e.clientY - rect.top - cvs.height / 2 - pan.y;
-      return [px / pan.zoom, py / pan.zoom];
+      var wx = px / viewScale, wy = py / viewScale;
+      // Snap to outline endpoints when a sheet is active and an index exists
+      if (applySnap && sheet && window._cc2DSnapIndex) {
+        // outline endpoints are stored as (x, z) but we draw with y = -z,
+        // so convert our world (wx, wy) → (wx, -wy) to match the index space
+        var threshold = 12 / viewScale; // screen 12px
+        var hit = window._cc2DSnapIndex.query(wx, -wy, threshold);
+        if (hit) return [hit[0], -hit[1], true];
+      }
+      return [wx, wy, false];
     }
 
     function onDown(e) {
       var sc = sRef.current;
       if (sc.markupTool && sc.markupTool !== 'erase') {
-        var pt = toWorld(e);
+        var pt = toWorld(e, sc.markupTool === 'dimension');
+        // Pin tool: single click places a manual pin on the active sheet
+        if (sc.markupTool === 'pin') {
+          var sheet = getActiveSheet();
+          if (!sheet) { alert('Create a sheet first.'); return; }
+          var label = prompt('Pin label (optional):') || '';
+          d({ t: A.PIN_ADD, v: { id: uid(), sheetId: sheet.id, kind: 'manual', targetId: null, x: pt[0], z: -pt[1], color: '#f59e0b', label: label } });
+          return;
+        }
         if (sc.markupTool === 'text') {
           var txt = prompt('Enter text:');
-          if (txt) d({ t: 'ADD_MARKUP', v: { id: uid(), type: 'text', points: pt, color: '#f59e0b', text: txt } });
+          if (txt) d({ t: 'ADD_MARKUP', v: { id: uid(), type: 'text', points: [pt[0], pt[1]], color: '#f59e0b', text: txt } });
           return;
         }
         markupPtsRef.current = [pt[0], pt[1], pt[0], pt[1]];
@@ -14704,7 +15093,7 @@ function startApp() {
     function onMove(e) {
       var sc = sRef.current;
       if (sc.markupTool && markupPtsRef.current.length >= 2) {
-        var pt = toWorld(e);
+        var pt = toWorld(e, sc.markupTool === 'dimension');
         markupPtsRef.current[2] = pt[0]; markupPtsRef.current[3] = pt[1];
         redraw();
         return;
@@ -14715,7 +15104,7 @@ function startApp() {
       panRef.current.lx = e.clientX; panRef.current.ly = e.clientY;
       redraw();
     }
-    function onUp() {
+    function onUp(e) {
       var sc = sRef.current;
       if (sc.markupTool && markupPtsRef.current.length >= 4) {
         var mp = markupPtsRef.current;
@@ -14724,6 +15113,29 @@ function startApp() {
       }
       panRef.current.dragging = false;
     }
+
+    // Click handler for pins — picks nearest pin within threshold and dispatches ACTIVE
+    function onClick(e) {
+      var sc = sRef.current;
+      if (sc.markupTool) return; // tools take priority
+      var sheet = getActiveSheet();
+      if (!sheet) return;
+      var pt = toWorld(e, false);
+      var wx = pt[0], wy = pt[1];
+      var pxm = getSheetPxm(sheet);
+      var thr = 12 / (panRef.current.zoom * pxm);
+      var thr2 = thr * thr;
+      var pins = (sc.sheetPins || []).filter(function(p) { return p.sheetId === sheet.id; });
+      var hit = null, hitD = thr2 + 0.35 * 0.35;
+      pins.forEach(function(p) {
+        var px2 = p.x, py2 = -p.z;
+        var d2 = (px2 - wx) * (px2 - wx) + (py2 - wy) * (py2 - wy);
+        if (d2 < hitD) { hitD = d2; hit = p; }
+      });
+      if (hit && hit.targetId) {
+        d({ t: A.ACTIVE, id: hit.targetId });
+      }
+    }
     function onWheel(e) {
       e.preventDefault();
       var factor = e.deltaY > 0 ? 0.9 : 1.1;
@@ -14731,23 +15143,28 @@ function startApp() {
       redraw();
     }
 
-    var toolBtns = ['line', 'rect', 'arrow', 'text', 'erase'];
-    var toolIcons = { line: '╱', rect: '▭', arrow: '→', text: 'T', erase: '✕' };
+    var toolBtns = ['line', 'rect', 'arrow', 'text', 'dimension', 'pin', 'erase'];
+    var toolIcons = { line: '╱', rect: '▭', arrow: '→', text: 'T', dimension: '↔', pin: '◉', erase: '✕' };
+    var toolTitles = { line: 'Line', rect: 'Rectangle', arrow: 'Arrow', text: 'Text', dimension: 'Dimension (snap to corners)', pin: 'Manual pin', erase: 'Erase' };
     return html`<div style=${{ position: 'relative', flex: 1, overflow: 'hidden' }}>
-      <canvas ref=${canvasRef} onMouseDown=${onDown} onMouseMove=${onMove} onMouseUp=${onUp} onWheel=${onWheel}
+      <canvas ref=${canvasRef} onMouseDown=${onDown} onMouseMove=${onMove} onMouseUp=${onUp} onClick=${onClick} onWheel=${onWheel}
         style=${{ width: '100%', height: '100%', cursor: s.markupTool ? 'crosshair' : 'grab' }} />
-      <div style=${{ position: 'absolute', top: '.5rem', left: '.5rem', display: 'flex', gap: '.2rem', pointerEvents: 'auto' }}>
+      <div style=${{ position: 'absolute', top: '.5rem', left: '.5rem', display: 'flex', gap: '.2rem', pointerEvents: 'auto', flexWrap: 'wrap', maxWidth: '60%' }}>
         ${toolBtns.map(function(t) {
-          return html`<button key=${t} onClick=${function() { d({ t: 'MARKUP_TOOL', v: s.markupTool === t ? null : t }); }}
+          var isSheetOnly = (t === 'dimension' || t === 'pin');
+          var disabled = isSheetOnly && !s.activeSheetId;
+          return html`<button key=${t} disabled=${disabled} onClick=${function() { d({ t: 'MARKUP_TOOL', v: s.markupTool === t ? null : t }); }}
             style=${{ ...S_BTN, fontSize: '.65rem', padding: '.25rem .4rem',
               background: s.markupTool === t ? '#2563eb' : 'var(--overlay-bg)',
-              color: s.markupTool === t ? '#fff' : 'var(--text-muted)',
-              border: '1px solid var(--border)' }} title=${t}>${toolIcons[t]}</button>`;
+              color: disabled ? 'var(--text-faint)' : (s.markupTool === t ? '#fff' : 'var(--text-muted)'),
+              border: '1px solid var(--border)',
+              opacity: disabled ? 0.5 : 1,
+              cursor: disabled ? 'not-allowed' : 'pointer' }} title=${toolTitles[t] || t}>${toolIcons[t]}</button>`;
         })}
-        ${s.markups.length > 0 && html`<button onClick=${function() { d({ t: 'CLEAR_MARKUPS' }); }}
+        ${s.markups.filter(function(m){return s.activeSheetId?m.sheetId===s.activeSheetId:!m.sheetId;}).length > 0 && html`<button onClick=${function() { d({ t: 'CLEAR_MARKUPS' }); }}
           style=${{ ...S_BTN, fontSize: '.55rem', padding: '.25rem .4rem', background: 'var(--overlay-bg)', color: '#ef4444', border: '1px solid var(--border)' }}>Clear all</button>`}
       </div>
-      <div style=${{ position: 'absolute', top: '.5rem', right: '.5rem', display: 'flex', gap: '.3rem', pointerEvents: 'auto' }}>
+      <div style=${{ position: 'absolute', top: '.5rem', right: '.5rem', display: 'flex', gap: '.3rem', pointerEvents: 'auto', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
         <button onClick=${function() { d({ t: 'UNDERLAY_MODE', v: null }); }}
           style=${{ ...S_BTN, fontSize: '.6rem', padding: '.2rem .5rem', background: '#2563eb', color: '#fff', border: '1px solid #3b82f6' }}>Back to 3D</button>
         ${s.floorPlan && html`<button onClick=${function() { d({ t: 'UNDERLAY_MODE', v: s.underlayMode === 'compare' ? 'view2d' : 'compare' }); }}
@@ -14755,6 +15172,7 @@ function startApp() {
             background: s.underlayMode === 'compare' ? '#7c3aed' : 'var(--overlay-bg)',
             color: s.underlayMode === 'compare' ? '#fff' : 'var(--text-muted)',
             border: '1px solid var(--border)' }}>${s.underlayMode === 'compare' ? 'Compare ON' : 'Compare'}</button>`}
+        <${SheetToolbarControls} s=${s} d=${d} />
       </div>
       ${activeUl && html`<div style=${{ position: 'absolute', bottom: '.5rem', left: '.5rem', background: 'var(--overlay-bg)', border: '1px solid var(--border)', borderRadius: 8, padding: '.4rem .6rem', pointerEvents: 'auto', display: 'flex', flexDirection: 'column', gap: '.3rem', maxWidth: 220 }}>
         <div style=${{ fontSize: '.65rem', fontWeight: 600, color: 'var(--text-primary)' }}>${activeUl.name}</div>
@@ -14792,7 +15210,25 @@ function startApp() {
   }
 
   // ── 2D Generation & Export ──────────────────────────────────────
-  // Generate floor plan outlines from 3D geometry at a given elevation
+  // Map IFC type → layer code for floor plan rendering & DXF layer
+  // Keep this list small and obvious; unknown types fall back to 'wall'.
+  function _ccFloorPlanLayerCode(ifcType) {
+    if (!ifcType) return 'wall';
+    if (/^Ifc(Wall|WallStandardCase|CurtainWall)/i.test(ifcType)) return 'wall';
+    if (/^Ifc(Slab|Roof|Footing|Stair|Ramp)/i.test(ifcType)) return 'structure';
+    if (/^Ifc(Column|Beam|Member|Pile)/i.test(ifcType)) return 'structure';
+    if (/^Ifc(Door|Window)/i.test(ifcType)) return 'opening';
+    if (/^Ifc(Pipe|Duct|Cable|Flow|Distribution|Sanitary)/i.test(ifcType)) return 'mep';
+    if (/^IfcFurni/i.test(ifcType)) return 'furniture';
+    return 'wall';
+  }
+
+  // Generate floor plan outlines from 3D geometry at a given elevation.
+  // Returns an array of [x1, z1, x2, z2, layerCode] segments in model meters.
+  // Uses AABB projection (coarse but fast). Filters non-physical IFC types
+  // (IfcSpace / IfcVirtualElement / IfcAnnotation / IfcGrid) — their geometry
+  // is already stripped by stripNonPhysicalGeometry at load time, but we
+  // double-check here for robustness against non-standard loaders.
   function generate2DOutlines(models, elevation, cutHeight) {
     var outlines = [];
     var cutAt = elevation + (cutHeight || 1.2);
@@ -14801,29 +15237,223 @@ function startApp() {
       (m.elements || []).forEach(function(el) {
         if (!el.box) return;
         var b = el.box;
+        // Skip empty bounding boxes (non-physical elements get box=empty Box3)
+        if (b.isEmpty && b.isEmpty()) return;
+        // Explicit filter: skip known non-physical types
+        var ifcType = el.props && el.props.ifcType;
+        if (ifcType && _NON_PHYSICAL_TYPES && _NON_PHYSICAL_TYPES[ifcType]) return;
         // Skip elements entirely above or below cut
         if (b.min.y > cutAt || b.max.y < elevation) return;
+        var layer = _ccFloorPlanLayerCode(ifcType);
         // Project bounding box edges at cut level (XZ plane)
         var x1 = b.min.x, z1 = b.min.z, x2 = b.max.x, z2 = b.max.z;
-        outlines.push([x1, z1, x2, z1]); // bottom
-        outlines.push([x2, z1, x2, z2]); // right
-        outlines.push([x2, z2, x1, z2]); // top
-        outlines.push([x1, z2, x1, z1]); // left
+        outlines.push([x1, z1, x2, z1, layer]); // bottom
+        outlines.push([x2, z1, x2, z2, layer]); // right
+        outlines.push([x2, z2, x1, z2, layer]); // top
+        outlines.push([x1, z2, x1, z1, layer]); // left
       });
     });
     return outlines;
   }
 
-  // Export outlines to DXF format string
-  function exportDXF(outlines, models, elevation) {
-    var dxf = '0\nSECTION\n2\nHEADER\n0\nENDSEC\n';
-    dxf += '0\nSECTION\n2\nTABLES\n0\nENDSEC\n';
-    dxf += '0\nSECTION\n2\nENTITIES\n';
-    outlines.forEach(function(seg) {
-      dxf += '0\nLINE\n8\nFloorPlan\n';
-      dxf += '10\n' + seg[0].toFixed(4) + '\n20\n' + seg[1].toFixed(4) + '\n30\n0.0\n';
-      dxf += '11\n' + seg[2].toFixed(4) + '\n21\n' + seg[3].toFixed(4) + '\n31\n0.0\n';
+  // Build a hash-grid snap index over outline endpoints for dimension snapping.
+  // Returns { cellSize, grid: Map<'cx,cy', [[x,y], ...]>, query(x,y,threshold) }.
+  function _ccBuildSnapIndex(outlines) {
+    var cellSize = 0.5; // meters
+    var grid = new Map();
+    function addPoint(x, y) {
+      var cx = Math.floor(x / cellSize), cy = Math.floor(y / cellSize);
+      var key = cx + ',' + cy;
+      var arr = grid.get(key);
+      if (!arr) { arr = []; grid.set(key, arr); }
+      arr.push([x, y]);
+    }
+    (outlines || []).forEach(function(seg) {
+      addPoint(seg[0], seg[1]);
+      addPoint(seg[2], seg[3]);
     });
+    return {
+      cellSize: cellSize,
+      grid: grid,
+      query: function(x, y, threshold) {
+        var cx = Math.floor(x / cellSize), cy = Math.floor(y / cellSize);
+        var best = null, bestD = threshold * threshold;
+        for (var dy = -1; dy <= 1; dy++) {
+          for (var dx = -1; dx <= 1; dx++) {
+            var arr = grid.get((cx + dx) + ',' + (cy + dy));
+            if (!arr) continue;
+            for (var i = 0; i < arr.length; i++) {
+              var p = arr[i];
+              var d2 = (p[0] - x) * (p[0] - x) + (p[1] - y) * (p[1] - y);
+              if (d2 < bestD) { bestD = d2; best = p; }
+            }
+          }
+        }
+        return best;
+      }
+    };
+  }
+
+  // DXF layer names (must match LAYER_STYLES in View2D for consistency)
+  var _DXF_LAYERS = [
+    { name: 'FloorPlan',           color: 7  }, // white/black — walls
+    { name: 'FloorPlan-Structure', color: 8  }, // grey — structure
+    { name: 'FloorPlan-Opening',   color: 5  }, // blue — doors/windows
+    { name: 'FloorPlan-MEP',       color: 40 }, // orange — MEP
+    { name: 'FloorPlan-Furniture', color: 9  }, // light grey — furniture
+    { name: 'Markup',              color: 2  }, // yellow — annotations
+    { name: 'Dimensions',          color: 3  }, // green — dimensions
+    { name: 'Pins',                color: 1  }, // red — clash pins
+    { name: 'TitleBlock',          color: 7  }  // white/black — title frame
+  ];
+  function _layerNameForCode(code) {
+    switch (code) {
+      case 'wall':      return 'FloorPlan';
+      case 'structure': return 'FloorPlan-Structure';
+      case 'opening':   return 'FloorPlan-Opening';
+      case 'mep':       return 'FloorPlan-MEP';
+      case 'furniture': return 'FloorPlan-Furniture';
+      default:          return 'FloorPlan';
+    }
+  }
+
+  // Export outlines (and optionally sheet annotations) to DXF format string.
+  // sheet/markups/pins/bounds are optional — when omitted this still produces
+  // a valid DXF with only the outlines (backwards-compatible with the
+  // legacy call site).
+  function exportDXF(outlines, models, elevation, opts) {
+    opts = opts || {};
+    var sheet = opts.sheet || null;
+    var markups = opts.markups || [];
+    var pins = opts.pins || [];
+
+    // ── Header (units = meters, with drawing extents for nicer zoom-to-fit) ──
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    (outlines || []).forEach(function(seg) {
+      if (seg[0] < minX) minX = seg[0]; if (seg[2] < minX) minX = seg[2];
+      if (-seg[1] < minY) minY = -seg[1]; if (-seg[3] < minY) minY = -seg[3];
+      if (seg[0] > maxX) maxX = seg[0]; if (seg[2] > maxX) maxX = seg[2];
+      if (-seg[1] > maxY) maxY = -seg[1]; if (-seg[3] > maxY) maxY = -seg[3];
+    });
+    if (!isFinite(minX)) { minX = -10; minY = -10; maxX = 10; maxY = 10; }
+
+    var dxf = '';
+    dxf += '0\nSECTION\n2\nHEADER\n';
+    dxf += '9\n$INSUNITS\n70\n6\n'; // 6 = meters
+    dxf += '9\n$EXTMIN\n10\n' + minX.toFixed(4) + '\n20\n' + minY.toFixed(4) + '\n30\n0.0\n';
+    dxf += '9\n$EXTMAX\n10\n' + maxX.toFixed(4) + '\n20\n' + maxY.toFixed(4) + '\n30\n0.0\n';
+    dxf += '0\nENDSEC\n';
+
+    // ── Tables: LAYER ──
+    dxf += '0\nSECTION\n2\nTABLES\n';
+    dxf += '0\nTABLE\n2\nLAYER\n70\n' + _DXF_LAYERS.length + '\n';
+    _DXF_LAYERS.forEach(function(L) {
+      dxf += '0\nLAYER\n2\n' + L.name + '\n70\n0\n62\n' + L.color + '\n6\nCONTINUOUS\n';
+    });
+    dxf += '0\nENDTAB\n0\nENDSEC\n';
+
+    // ── Entities ──
+    dxf += '0\nSECTION\n2\nENTITIES\n';
+
+    // Outlines → LINE per layer. Coordinates: model X, and Y = -Z (flip)
+    // so the DXF matches the on-screen orientation the user sees in View2D.
+    (outlines || []).forEach(function(seg) {
+      var layer = _layerNameForCode(seg[4]);
+      dxf += '0\nLINE\n8\n' + layer + '\n';
+      dxf += '10\n' + seg[0].toFixed(4) + '\n20\n' + (-seg[1]).toFixed(4) + '\n30\n0.0\n';
+      dxf += '11\n' + seg[2].toFixed(4) + '\n21\n' + (-seg[3]).toFixed(4) + '\n31\n0.0\n';
+    });
+
+    // Markups → LINE / LWPOLYLINE / TEXT / DIMENSION fallback
+    function writeLine(layer, x1, y1, x2, y2) {
+      dxf += '0\nLINE\n8\n' + layer + '\n';
+      dxf += '10\n' + x1.toFixed(4) + '\n20\n' + y1.toFixed(4) + '\n30\n0.0\n';
+      dxf += '11\n' + x2.toFixed(4) + '\n21\n' + y2.toFixed(4) + '\n31\n0.0\n';
+    }
+    function writeText(layer, x, y, text, heightM) {
+      var h = heightM || 0.2;
+      dxf += '0\nTEXT\n8\n' + layer + '\n';
+      dxf += '10\n' + x.toFixed(4) + '\n20\n' + y.toFixed(4) + '\n30\n0.0\n';
+      dxf += '40\n' + h.toFixed(3) + '\n';
+      dxf += '1\n' + String(text || '').replace(/[\r\n]/g, ' ').slice(0, 200) + '\n';
+    }
+    function writeCircle(layer, cx, cy, r) {
+      dxf += '0\nCIRCLE\n8\n' + layer + '\n';
+      dxf += '10\n' + cx.toFixed(4) + '\n20\n' + cy.toFixed(4) + '\n30\n0.0\n';
+      dxf += '40\n' + r.toFixed(4) + '\n';
+    }
+    function writeLWPolyline(layer, verts, closed) {
+      dxf += '0\nLWPOLYLINE\n8\n' + layer + '\n';
+      dxf += '90\n' + verts.length + '\n70\n' + (closed ? 1 : 0) + '\n';
+      verts.forEach(function(v) {
+        dxf += '10\n' + v[0].toFixed(4) + '\n20\n' + v[1].toFixed(4) + '\n';
+      });
+    }
+
+    markups.forEach(function(mk) {
+      if (!mk.points || mk.points.length < 2) return;
+      var p = mk.points;
+      if (mk.type === 'line') {
+        writeLine('Markup', p[0], p[1], p[2], p[3]);
+      } else if (mk.type === 'rect') {
+        writeLWPolyline('Markup', [[p[0], p[1]], [p[2], p[1]], [p[2], p[3]], [p[0], p[3]]], true);
+      } else if (mk.type === 'arrow') {
+        writeLine('Markup', p[0], p[1], p[2], p[3]);
+        // arrowhead — two short lines at tip
+        var dx = p[2] - p[0], dy = p[3] - p[1];
+        var ang = Math.atan2(dy, dx);
+        var hl = 0.15;
+        writeLine('Markup', p[2], p[3], p[2] - hl * Math.cos(ang - 0.4), p[3] - hl * Math.sin(ang - 0.4));
+        writeLine('Markup', p[2], p[3], p[2] - hl * Math.cos(ang + 0.4), p[3] - hl * Math.sin(ang + 0.4));
+      } else if (mk.type === 'text') {
+        writeText('Markup', p[0], p[1], mk.text || '', 0.25);
+      } else if (mk.type === 'dimension' && p.length >= 4) {
+        // Emit LINE + TEXT as a portable dimension stand-in. Real DIMENSION
+        // entities need a DIMSTYLE table that most minimal CAD tools tolerate
+        // but some choke on, so we pick the boring-but-robust path.
+        var x1 = p[0], y1 = p[1], x2 = p[2], y2 = p[3];
+        var mdx = x2 - x1, mdy = y2 - y1;
+        var mlen = Math.sqrt(mdx * mdx + mdy * mdy);
+        if (mlen > 1e-6) {
+          var nx = -mdy / mlen, ny = mdx / mlen;
+          var off = 0.4;
+          var ax1 = x1 + nx * off, ay1 = y1 + ny * off;
+          var ax2 = x2 + nx * off, ay2 = y2 + ny * off;
+          writeLine('Dimensions', ax1, ay1, ax2, ay2);
+          writeLine('Dimensions', x1, y1, ax1, ay1);
+          writeLine('Dimensions', x2, y2, ax2, ay2);
+          writeText('Dimensions', (ax1 + ax2) / 2, (ay1 + ay2) / 2 + 0.05, mlen.toFixed(2) + ' m', 0.2);
+        }
+      }
+    });
+
+    // Pins → CIRCLE + TEXT (pin id stored as label; clash/issue id in comment)
+    pins.forEach(function(p, idx) {
+      var px = p.x, py = -p.z;
+      writeCircle('Pins', px, py, 0.35);
+      writeText('Pins', px - 0.1, py - 0.12, String(idx + 1), 0.3);
+      if (p.label) writeText('Pins', px + 0.45, py, String(p.label).slice(0, 40), 0.18);
+    });
+
+    // Title block → rectangular frame + text in paper space coords.
+    // We place it at the lower-right of the outline extents, sized
+    // proportionally to the drawing bounds so it shows up at any scale.
+    if (sheet) {
+      var tbW = Math.max(6, (maxX - minX) * 0.25);
+      var tbH = Math.max(4, (maxY - minY) * 0.2);
+      var tbX = maxX - tbW;
+      var tbY = minY;
+      writeLWPolyline('TitleBlock', [[tbX, tbY], [tbX + tbW, tbY], [tbX + tbW, tbY + tbH], [tbX, tbY + tbH]], true);
+      var lineH = tbH / 6;
+      var tb = sheet.titleBlock || {};
+      writeText('TitleBlock', tbX + 0.2, tbY + tbH - lineH,     (tb.project || sheet.name || 'ClashControl Plan'), lineH * 0.4);
+      writeText('TitleBlock', tbX + 0.2, tbY + tbH - 2 * lineH, 'Storey: ' + (sheet.storeyName || '—'),             lineH * 0.35);
+      writeText('TitleBlock', tbX + 0.2, tbY + tbH - 3 * lineH, 'Elev: ' + (sheet.elevation != null ? sheet.elevation.toFixed(2) : '—') + ' m   Cut: ' + ((sheet.cutHeight || 1.2).toFixed(2)) + ' m', lineH * 0.3);
+      writeText('TitleBlock', tbX + 0.2, tbY + tbH - 4 * lineH, 'Scale: 1:' + Math.round(1000 / ((sheet.scale && sheet.scale.pxPerMeter) || 100) * 10), lineH * 0.3);
+      writeText('TitleBlock', tbX + 0.2, tbY + tbH - 5 * lineH, (tb.author ? 'By ' + tb.author + '   ' : '') + (tb.date || ''), lineH * 0.3);
+      if (tb.revision) writeText('TitleBlock', tbX + tbW * 0.55, tbY + tbH - 5 * lineH, 'Rev ' + tb.revision, lineH * 0.3);
+    }
+
     dxf += '0\nENDSEC\n0\nEOF\n';
     return dxf;
   }
@@ -14837,14 +15467,202 @@ function startApp() {
     link.click();
   }
 
-  // Export 2D view to PDF — opens print dialog in a new window
-  function export2DPDF(canvasEl) {
-    if (!canvasEl) return;
-    var imgData = canvasEl.toDataURL('image/png');
-    var isLand = canvasEl.width > canvasEl.height;
+  // Paper sizes in millimeters (landscape: width > height)
+  var _PAPER_MM = {
+    A4: { w: 297, h: 210 },
+    A3: { w: 420, h: 297 },
+    A2: { w: 594, h: 420 },
+    A1: { w: 841, h: 594 },
+    A0: { w: 1189, h: 841 }
+  };
+
+  // Render a sheet to an offscreen canvas at true paper-scale, honouring
+  // sheet.scale.pxPerMeter and sheet.paper.size/orient. Returns a data URL.
+  // If no sheet is active, falls back to capturing the live 2D canvas as-is.
+  function _ccRenderSheetToCanvas(state, targetDpi) {
+    var canvasEl = window._cc2DCanvas;
+    var sheet = state && state.activeSheetId && (state.sheets || []).find(function(sh) { return sh.id === state.activeSheetId; });
+    if (!sheet) {
+      return canvasEl ? canvasEl.toDataURL('image/png') : null;
+    }
+    var paper = _PAPER_MM[(sheet.paper && sheet.paper.size) || 'A3'] || _PAPER_MM.A3;
+    var orient = (sheet.paper && sheet.paper.orient) || 'landscape';
+    var paperW = orient === 'landscape' ? paper.w : paper.h;
+    var paperH = orient === 'landscape' ? paper.h : paper.w;
+    var dpi = targetDpi || 150;
+    var off = document.createElement('canvas');
+    off.width = Math.round(paperW / 25.4 * dpi);
+    off.height = Math.round(paperH / 25.4 * dpi);
+    var ctx = off.getContext('2d');
+    // White background for print
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(0, 0, off.width, off.height);
+
+    // World → canvas: centred, pxPerMeter_effective = pxm_sheet * dpi / 96
+    // (the sheet's pxPerMeter is calibrated at 96 DPI display, so we rescale for print DPI)
+    var pxm = ((sheet.scale && sheet.scale.pxPerMeter) || 100) * (dpi / 96);
+    // Compute outline extents to centre the drawing
+    var outlines = generate2DOutlines(state.models || [], sheet.elevation, sheet.cutHeight || 1.2);
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    outlines.forEach(function(seg) {
+      var ys = [-seg[1], -seg[3]], xs = [seg[0], seg[2]];
+      xs.forEach(function(x) { if (x < minX) minX = x; if (x > maxX) maxX = x; });
+      ys.forEach(function(y) { if (y < minY) minY = y; if (y > maxY) maxY = y; });
+    });
+    if (!isFinite(minX)) { minX = -10; minY = -10; maxX = 10; maxY = 10; }
+    var centerX = (minX + maxX) / 2, centerY = (minY + maxY) / 2;
+    ctx.save();
+    ctx.translate(off.width / 2, off.height / 2);
+    ctx.scale(pxm, pxm);
+    ctx.translate(-centerX, -centerY);
+    // Draw outlines with layer styles (darker colors for white bg)
+    var PRINT_STYLES = {
+      wall:      { color: '#0f172a', width: 2.4, dash: null },
+      structure: { color: '#475569', width: 2.0, dash: [0.3, 0.2] },
+      opening:   { color: '#1d4ed8', width: 1.2, dash: null },
+      mep:       { color: '#c2410c', width: 1.4, dash: [0.1, 0.15] },
+      furniture: { color: '#94a3b8', width: 0.8, dash: null }
+    };
+    ctx.lineCap = 'butt';
+    outlines.forEach(function(seg) {
+      var st = PRINT_STYLES[seg[4]] || PRINT_STYLES.wall;
+      ctx.strokeStyle = st.color;
+      ctx.lineWidth = st.width / pxm * 1.5;
+      if (st.dash) ctx.setLineDash(st.dash); else ctx.setLineDash([]);
+      ctx.beginPath();
+      ctx.moveTo(seg[0], -seg[1]);
+      ctx.lineTo(seg[2], -seg[3]);
+      ctx.stroke();
+    });
+    ctx.setLineDash([]);
+    // Draw sheet markups
+    var sheetMarkups = (state.markups || []).filter(function(m) { return m.sheetId === sheet.id; });
+    ctx.strokeStyle = '#b45309'; ctx.fillStyle = '#b45309'; ctx.lineCap = 'round';
+    sheetMarkups.forEach(function(mk) {
+      var p = mk.points || [];
+      if (mk.type === 'line' && p.length >= 4) {
+        ctx.lineWidth = 2 / pxm;
+        ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(p[2], p[3]); ctx.stroke();
+      } else if (mk.type === 'rect' && p.length >= 4) {
+        ctx.lineWidth = 2 / pxm;
+        ctx.strokeRect(p[0], p[1], p[2] - p[0], p[3] - p[1]);
+      } else if (mk.type === 'arrow' && p.length >= 4) {
+        ctx.lineWidth = 2 / pxm;
+        ctx.beginPath(); ctx.moveTo(p[0], p[1]); ctx.lineTo(p[2], p[3]); ctx.stroke();
+        var dx = p[2] - p[0], dy = p[3] - p[1];
+        var ang = Math.atan2(dy, dx);
+        ctx.beginPath();
+        ctx.moveTo(p[2], p[3]); ctx.lineTo(p[2] - 0.15 * Math.cos(ang - 0.4), p[3] - 0.15 * Math.sin(ang - 0.4));
+        ctx.moveTo(p[2], p[3]); ctx.lineTo(p[2] - 0.15 * Math.cos(ang + 0.4), p[3] - 0.15 * Math.sin(ang + 0.4));
+        ctx.stroke();
+      } else if (mk.type === 'text' && p.length >= 2) {
+        ctx.font = '0.25px sans-serif';
+        ctx.fillText(mk.text || '', p[0], p[1]);
+      } else if (mk.type === 'dimension' && p.length >= 4) {
+        var x1 = p[0], y1 = p[1], x2 = p[2], y2 = p[3];
+        var ddx = x2 - x1, ddy = y2 - y1;
+        var dlen = Math.sqrt(ddx * ddx + ddy * ddy);
+        if (dlen < 1e-6) return;
+        var nx = -ddy / dlen, ny = ddx / dlen;
+        var off2 = 0.4;
+        var ax1 = x1 + nx * off2, ay1 = y1 + ny * off2;
+        var ax2 = x2 + nx * off2, ay2 = y2 + ny * off2;
+        ctx.strokeStyle = '#92400e'; ctx.fillStyle = '#92400e';
+        ctx.lineWidth = 1.2 / pxm;
+        ctx.beginPath(); ctx.moveTo(ax1, ay1); ctx.lineTo(ax2, ay2); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x1, y1); ctx.lineTo(ax1, ay1); ctx.stroke();
+        ctx.beginPath(); ctx.moveTo(x2, y2); ctx.lineTo(ax2, ay2); ctx.stroke();
+        ctx.font = '0.22px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(dlen.toFixed(2) + ' m', (ax1 + ax2) / 2, (ay1 + ay2) / 2 - 0.1);
+        ctx.textAlign = 'start';
+      }
+    });
+    // Draw pins
+    var pins = (state.sheetPins || []).filter(function(p) { return p.sheetId === sheet.id; });
+    pins.forEach(function(p, idx) {
+      var px = p.x, py = -p.z;
+      ctx.beginPath(); ctx.arc(px, py, 0.35, 0, Math.PI * 2);
+      ctx.fillStyle = p.color || (p.kind === 'issue' ? '#059669' : '#b91c1c'); ctx.fill();
+      ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 0.08; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = 'bold 0.35px sans-serif'; ctx.textAlign = 'center';
+      ctx.fillText(String(idx + 1), px, py + 0.12); ctx.textAlign = 'start';
+    });
+    ctx.restore();
+
+    // Screen-space overlays: title block + scale bar + north arrow
+    // Title block (bottom-right)
+    var bw = Math.round(off.width * 0.28), bh = Math.round(off.height * 0.16);
+    var bx = off.width - bw - 24, by = off.height - bh - 24;
+    ctx.fillStyle = '#f8fafc';
+    ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 2;
+    ctx.fillRect(bx, by, bw, bh); ctx.strokeRect(bx, by, bw, bh);
+    ctx.beginPath(); ctx.moveTo(bx, by + 28); ctx.lineTo(bx + bw, by + 28); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(bx + bw * 0.6, by + 28); ctx.lineTo(bx + bw * 0.6, by + bh); ctx.stroke();
+    ctx.fillStyle = '#0f172a';
+    ctx.font = 'bold 16px sans-serif';
+    var tb = sheet.titleBlock || {};
+    ctx.fillText(tb.project || sheet.name || 'ClashControl Plan', bx + 10, by + 20);
+    ctx.font = '12px sans-serif';
+    ctx.fillText('Storey: ' + (sheet.storeyName || '—'), bx + 10, by + 48);
+    ctx.fillText('Elev: ' + (sheet.elevation != null ? sheet.elevation.toFixed(2) : '—') + ' m', bx + 10, by + 66);
+    ctx.fillText('Cut: ' + ((sheet.cutHeight || 1.2).toFixed(2)) + ' m', bx + 10, by + 84);
+    ctx.fillText('Scale 1:' + Math.round(1000 / ((sheet.scale && sheet.scale.pxPerMeter) || 100) * 10), bx + 10, by + 102);
+    ctx.fillText((tb.author ? 'By ' + tb.author : ''), bx + 10, by + 120);
+    ctx.fillText(tb.date || new Date().toLocaleDateString(), bx + bw * 0.6 + 10, by + 48);
+    ctx.fillText(tb.revision ? 'Rev ' + tb.revision : 'Rev —', bx + bw * 0.6 + 10, by + 66);
+    if (tb.notes) ctx.fillText(String(tb.notes).slice(0, 30), bx + bw * 0.6 + 10, by + 84);
+
+    // Scale bar (bottom-left)
+    var sbX = 32, sbY = off.height - 32;
+    var niceSteps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 20, 50];
+    var targetPx = off.width * 0.15;
+    var mPerBar = targetPx / pxm;
+    var chosen = niceSteps[0];
+    for (var i = 0; i < niceSteps.length; i++) if (niceSteps[i] <= mPerBar) chosen = niceSteps[i];
+    var barPx = chosen * pxm;
+    ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.moveTo(sbX, sbY); ctx.lineTo(sbX + barPx, sbY); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sbX, sbY - 8); ctx.lineTo(sbX, sbY + 8); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(sbX + barPx, sbY - 8); ctx.lineTo(sbX + barPx, sbY + 8); ctx.stroke();
+    ctx.fillStyle = '#0f172a'; ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(chosen + ' m', sbX, sbY - 14);
+
+    // North arrow (top-right)
+    var nX = off.width - 60, nY = 60, nR = 28;
+    ctx.save();
+    ctx.translate(nX, nY);
+    ctx.rotate(((sheet.northDeg || 0) - 90) * Math.PI / 180);
+    ctx.beginPath();
+    ctx.moveTo(0, -nR);
+    ctx.lineTo(nR * 0.4, nR * 0.6);
+    ctx.lineTo(0, nR * 0.3);
+    ctx.lineTo(-nR * 0.4, nR * 0.6);
+    ctx.closePath();
+    ctx.fillStyle = '#b91c1c'; ctx.fill();
+    ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.5; ctx.stroke();
+    ctx.restore();
+    ctx.fillStyle = '#0f172a'; ctx.font = 'bold 14px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('N', nX, nY - nR - 6); ctx.textAlign = 'start';
+
+    return off.toDataURL('image/png');
+  }
+
+  // Export 2D view to PDF — opens print dialog in a new window.
+  // When a sheet is active this renders a true paper-scale snapshot via
+  // _ccRenderSheetToCanvas; otherwise it falls back to the live canvas.
+  function export2DPDF(canvasEl, state) {
+    var imgData = state && state.activeSheetId
+      ? _ccRenderSheetToCanvas(state, 150)
+      : (canvasEl ? canvasEl.toDataURL('image/png') : null);
+    if (!imgData) return;
+    var sheet = state && state.activeSheetId && (state.sheets || []).find(function(sh) { return sh.id === state.activeSheetId; });
+    var orient = sheet ? ((sheet.paper && sheet.paper.orient) || 'landscape') : (canvasEl && canvasEl.width > canvasEl.height ? 'landscape' : 'portrait');
+    var size = sheet ? ((sheet.paper && sheet.paper.size) || 'A3') : 'auto';
     var win = window.open('', '_blank');
     if (win) {
-      win.document.write('<html><head><title>Floor Plan Export</title><style>@page{size:'+(isLand?'landscape':'portrait')+';margin:0}body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh}img{max-width:100%;max-height:100%}</style></head><body><img src="' + imgData + '" onload="window.print();"/></body></html>');
+      var pageDecl = size === 'auto' ? orient : (size + ' ' + orient);
+      win.document.write('<html><head><title>Floor Plan Export</title><style>@page{size:' + pageDecl + ';margin:0}body{margin:0;display:flex;align-items:center;justify-content:center;height:100vh;background:#fff}img{max-width:100%;max-height:100%}</style></head><body><img src="' + imgData + '" onload="window.print();"/></body></html>');
       win.document.close();
     }
   }
@@ -14854,15 +15672,30 @@ function startApp() {
     var s = props.s, d = props.d;
 
     function doExportDXF() {
-      if (!s.floorPlan && !s.models.length) { alert('Load a model and activate a floor plan cut first.'); return; }
-      var elev = s.floorPlan ? s.floorPlan.elevation : 0;
-      var cutH = s.floorPlan ? s.floorPlan.cutHeight || 1.2 : 3;
+      // Prefer the active sheet; fall back to the transient 3D floor-plan cut.
+      var sheet = s.activeSheetId && (s.sheets || []).find(function(sh) { return sh.id === s.activeSheetId; });
+      var elev, cutH, storeyName, markupsForExport = [], pinsForExport = [];
+      if (sheet) {
+        elev = sheet.elevation; cutH = sheet.cutHeight || 1.2; storeyName = sheet.storeyName || sheet.name || '';
+        markupsForExport = (s.markups || []).filter(function(m) { return m.sheetId === sheet.id; });
+        pinsForExport    = (s.sheetPins || []).filter(function(p) { return p.sheetId === sheet.id; });
+      } else if (s.floorPlan) {
+        elev = s.floorPlan.elevation; cutH = s.floorPlan.cutHeight || 1.2; storeyName = s.floorPlan.storeyName || '';
+      } else if (s.models.length) {
+        elev = 0; cutH = 3;
+      } else {
+        alert('Load a model and create a Sheet (or activate a floor plan cut) first.');
+        return;
+      }
       var outlines = generate2DOutlines(s.models, elev, cutH);
       if (outlines.length === 0) { alert('No geometry found at this elevation.'); return; }
-      var dxfStr = exportDXF(outlines, s.models, elev);
+      if ((s.underlays || []).some(function(u) { return u.visible; })) {
+        console.info('[DXF] Visible underlays are not exported to DXF — only vector outlines + sheet annotations.');
+      }
+      var dxfStr = exportDXF(outlines, s.models, elev, { sheet: sheet, markups: markupsForExport, pins: pinsForExport });
       var blob = new Blob([dxfStr], { type: 'application/dxf' });
       var link = document.createElement('a');
-      link.download = 'floorplan_' + (s.floorPlan ? s.floorPlan.storeyName || '' : '') + '.dxf';
+      link.download = 'floorplan_' + (storeyName || 'sheet') + '.dxf';
       link.href = URL.createObjectURL(blob);
       link.click();
       URL.revokeObjectURL(link.href);
@@ -14876,7 +15709,7 @@ function startApp() {
 
     function doExportPDF() {
       var cvs = window._cc2DCanvas;
-      if (cvs) export2DPDF(cvs);
+      if (cvs || s.activeSheetId) export2DPDF(cvs, s);
       else alert('No 2D view canvas found.');
     }
 
@@ -14886,7 +15719,7 @@ function startApp() {
       <button onClick=${doExportDXF} style=${{ ...EBTN, background: '#1e3a5f', color: '#93c5fd' }}>DXF (AutoCAD)</button>
       <button onClick=${doExportPNG} style=${{ ...EBTN, background: '#1e3a5f', color: '#93c5fd' }}>PNG (Image)</button>
       <button onClick=${doExportPDF} style=${{ ...EBTN, background: '#1e3a5f', color: '#93c5fd' }}>PDF (Print)</button>
-      <span style=${{ fontSize: '.55rem', color: 'var(--text-faint)', marginLeft: 'auto' }}>DXF export generates floor plan from 3D model geometry at the active storey cut · PNG/PDF exports the current 2D view</span>
+      <span style=${{ fontSize: '.55rem', color: 'var(--text-faint)', marginLeft: 'auto' }}>${s.activeSheetId ? 'Exporting active Sheet (layers + markups + pins + title block)' : 'DXF generates outlines from 3D at the active cut · PNG/PDF exports the live 2D view'}</span>
     </div>`;
   }
 
@@ -19560,14 +20393,21 @@ function startApp() {
       }, 120000);
       return function(){ clearInterval(timer); };
     }, []);
-    // Generate 2D outlines for compare mode
+    // Generate 2D outlines for compare mode OR when a sheet is active.
+    // Sheets own their cut plane independently of s.floorPlan (which is the
+    // transient 3D-clip state) so we regen whenever the active sheet changes.
     useEffect(function() {
-      if (s.underlayMode === 'compare' && s.floorPlan && s.models.length) {
+      var sheet = s.activeSheetId && (s.sheets||[]).find(function(sh){return sh.id===s.activeSheetId;});
+      if (sheet && s.models.length) {
+        _cc2DOutlines = generate2DOutlines(s.models, sheet.elevation, sheet.cutHeight);
+      } else if (s.underlayMode === 'compare' && s.floorPlan && s.models.length) {
         _cc2DOutlines = generate2DOutlines(s.models, s.floorPlan.elevation, s.floorPlan.cutHeight);
       } else {
         _cc2DOutlines = null;
       }
-    }, [s.underlayMode, s.floorPlan, s.models]);
+      // Rebuild snap index alongside
+      window._cc2DSnapIndex = _cc2DOutlines ? _ccBuildSnapIndex(_cc2DOutlines) : null;
+    }, [s.underlayMode, s.floorPlan, s.models, s.activeSheetId, s.sheets]);
 
     // ── Global Keyboard Shortcuts (single keys + Revit-style two-key chords) ──
     var _chordRef = useRef({key:null,timer:null});
