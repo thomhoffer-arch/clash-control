@@ -127,12 +127,20 @@
     d({t:'UPD_REVIT_DIRECT', u:{connected:false, loading:false, progress:0, documentName:'', reconnecting:false}});
   }
 
-  function _revitDirectExport(categories) {
+  // Trigger an export from the Revit connector. Parameters:
+  //   categories  — list of Revit categories to include (default ['all'])
+  //   modelFilter — optional object { name: 'Doc.rvt' } to restrict the
+  //                 export to a single linked Revit model. Sent as
+  //                 `modelFilter` on the protocol message so plugins
+  //                 that understand it can scope the pull; older plugins
+  //                 ignore the field and re-export the whole document.
+  function _revitDirectExport(categories, modelFilter) {
     if (!_revitWs || _revitWs.readyState !== 1) return;
     var msg = {type:'export', categories: categories || ['all']};
     // Include projectId for project scoping
     var targetProj = window._ccRevitTargetProject;
     if (targetProj) msg.projectId = targetProj;
+    if (modelFilter) msg.modelFilter = modelFilter;
     // Include known element hashes for content-addressable caching (delta export)
     if (Object.keys(_elementHashCache).length > 0) {
       msg.knownElements = _elementHashCache;
