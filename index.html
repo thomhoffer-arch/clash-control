@@ -191,6 +191,9 @@
     select,select option{background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border)}
     .spin{animation:sp 1s linear infinite;display:inline-block}@keyframes sp{to{transform:rotate(360deg)}}
     @keyframes nlDots{0%,20%{opacity:.2}50%{opacity:1}80%,100%{opacity:.2}}
+    /* Chat message copy button — hidden until the user hovers the bubble */
+    .cc-chat-msg:hover .cc-chat-copy{opacity:1 !important}
+    .cc-chat-copy:hover{color:var(--text-primary) !important;background:var(--bg-primary) !important}
     @keyframes roadmapGlow{0%,100%{text-shadow:0 0 4px rgba(167,139,250,.3);opacity:.7}50%{text-shadow:0 0 10px rgba(167,139,250,.7);opacity:1}}
     @keyframes nlBorderPulse{0%,100%{box-shadow:0 8px 32px rgba(0,0,0,.35),0 0 0 0 rgba(96,165,250,0),0 0 12px rgba(96,165,250,.15);border-color:rgba(96,165,250,.5)}50%{box-shadow:0 8px 32px rgba(0,0,0,.35),0 0 0 3px rgba(96,165,250,.35),0 0 22px rgba(96,165,250,.35);border-color:rgba(96,165,250,.9)}}
     @keyframes nlBorderReady{0%{box-shadow:0 8px 32px rgba(0,0,0,.35),0 0 0 4px rgba(34,197,94,.5),0 0 20px rgba(34,197,94,.4)}100%{box-shadow:0 8px 32px rgba(0,0,0,.35),0 0 0 0 rgba(34,197,94,0),0 0 0 rgba(34,197,94,0)}}
@@ -1276,14 +1279,16 @@ function startApp() {
         tr:  mat.transparent ? 1 : 0
       };
     });
+    var hasPsets = false;
     var elData = result.elements.map(function(el) {
+      if (!hasPsets && el.props && el.props.psets && Object.keys(el.props.psets).length > 0) hasPsets = true;
       return {
         eid:  el.expressId,
         box:  [el.box.min.x, el.box.min.y, el.box.min.z, el.box.max.x, el.box.max.y, el.box.max.z],
         props: el.props
       };
     });
-    return {v:3, meshData:meshData, elData:elData, storeys:result.storeys, storeyData:result.storeyData, relatedPairs:result.relatedPairs||{}, stats:result.stats};
+    return {v:3, hasPsets:hasPsets, meshData:meshData, elData:elData, storeys:result.storeys, storeyData:result.storeyData, relatedPairs:result.relatedPairs||{}, stats:result.stats};
   }
 
   // Reconstruct Three.js objects from a serialised geo cache entry.
@@ -2290,6 +2295,29 @@ function startApp() {
     // about quantities/psets — they were already mutated in place above.
     if (window._ccDispatch) {
       try { window._ccDispatch({t:'UPD_MODEL', id:modelId, u:{_propsVersion:Date.now()}}); } catch(e) {}
+    }
+    // Re-save the geo cache entry with the now-populated psets so that a
+    // page refresh (which restores models directly from the cache without
+    // re-running the worker's phase-2 pass) keeps the inspector populated.
+    // We patch only the elData.props portion to avoid re-serialising all the
+    // quantized geometry — meshes never change at this point.
+    if (merged > 0) {
+      try {
+        idbGetGeoCache(modelId).then(function(cached) {
+          if (!cached || !cached.elData) return;
+          var byEid = {};
+          for (var mi2 = 0; mi2 < model.elements.length; mi2++) {
+            byEid[model.elements[mi2].expressId] = model.elements[mi2];
+          }
+          for (var ei = 0; ei < cached.elData.length; ei++) {
+            var _ed = cached.elData[ei];
+            var _el2 = byEid[_ed.eid];
+            if (_el2 && _el2.props) _ed.props = _el2.props;
+          }
+          cached.hasPsets = true;
+          idbSaveGeoCache(modelId, cached);
+        });
+      } catch(e) { console.warn('[IFC] Failed to refresh geo cache with psets:', e); }
     }
   }
 
@@ -3601,6 +3629,20 @@ function startApp() {
     function _bboxMm(sz) {
       return {dx:Math.round(sz.x*1000*10)/10, dy:Math.round(sz.y*1000*10)/10, dz:Math.round(sz.z*1000*10)/10};
     }
+    // Human-readable label for an IFC type: strip the "Ifc" prefix and split
+    // on CamelCase so IfcPipeSegment becomes "Pipe Segment". Falls back to
+    // "Element" for empty/missing types so the title never shows a bare " × ".
+    function _niceTypeLabel(t) {
+      if (!t) return 'Element';
+      return String(t).replace(/^Ifc/i, '').replace(/([a-z])([A-Z])/g, '$1 $2') || 'Element';
+    }
+    function _niceClashTitle(tA, tB, sameModel) {
+      var a = _niceTypeLabel(tA), b = _niceTypeLabel(tB);
+      // Same-type pairs read better without the duplicate ("Pipe × Pipe" → "Pipe vs Pipe")
+      var core = a === b ? (a + ' vs ' + b) : (a + ' × ' + b);
+      return sameModel ? (core + ' (self)') : core;
+    }
+
     function _buildClashBase(eA, eB, mA, mB, point, sameModel) {
       var pA=eA.props||{}, pB=eB.props||{};
       var tA=pA.ifcType||'Element', tB=pB.ifcType||'Element';
@@ -3700,7 +3742,7 @@ function startApp() {
           var b=_buildClashBase(eA, eB, mA, mB, [ctrA.x,ctrA.y,ctrA.z], sameModel);
           clashes.push(Object.assign(b.obj, {
             type:'duplicate', distance:0,
-            title:'Duplicate: '+b.tA,
+            title:'Duplicate '+_niceTypeLabel(b.tA),
             description:b.nA+' \u2261 '+b.nB+' (same location & size)',
             overlapVolM3:sizeA.x*sizeA.y*sizeA.z, clearanceMm:null
           }));
@@ -3844,7 +3886,7 @@ function startApp() {
         var clrMm=isSoft?Math.round(geoDist*1000):null;
         clashes.push(Object.assign(b.obj, {
           type:hardPt?'hard':'soft', distance:dist,
-          title:sameModel?mA.name+' (self)':mA.discipline.toUpperCase()+' \u2194 '+mB.discipline.toUpperCase(),
+          title:_niceClashTitle(b.tA, b.tB, sameModel),
           description:b.tA+': '+b.nA+' ('+mA.name+') vs '+b.tB+': '+b.nB+' ('+mB.name+')',
           overlapVolM3:ov.vol, clearanceMm:clrMm,
           _trainFV:function(){
@@ -4944,11 +4986,28 @@ function startApp() {
         // 400ms minimum, scale up for longer flights, cap at 1200ms
         return Math.max(400, Math.min(1200, travel * 40));
       }
-      // Core animation runner — all fly functions funnel through this
+      // Core animation runner — all fly functions funnel through this.
+      // Cancels any in-flight fly-to, lerps camera position + orbit target
+      // along an eased curve, and explicitly re-applies the orbit state on
+      // the last frame so that the next mouse drag doesn't snap the view
+      // back to a stale spherical origin. Skipping the final apply() would
+      // leave orbit.sph with values derived from the lerped position; a
+      // subtle clamp drift against apply()'s phi/r bounds could then warp
+      // the first frame of a manual orbit after a fly-to. Also kicks
+      // invalidate(3) instead of the default 2 so a heavy cull pass can't
+      // starve a frame mid-animation.
       function _animateFly(endTarget, endPos, durationOverride) {
-        if(_flyAnim) cancelAnimationFrame(_flyAnim);
+        if(_flyAnim) { cancelAnimationFrame(_flyAnim); _flyAnim = null; }
+        if (!S.orbit || !S.camera) return;
         var startTarget = S.orbit.target.clone();
         var startPos = S.camera.position.clone();
+        // Degenerate jump — no animation needed; just snap + sync once.
+        if (startTarget.distanceToSquared(endTarget) < 1e-8 && startPos.distanceToSquared(endPos) < 1e-8) {
+          S.camera.lookAt(endTarget);
+          S.orbit.sync();
+          invalidate(3);
+          return;
+        }
         var duration = durationOverride || flyDuration(startTarget, endTarget, startPos, endPos);
         var startTime = performance.now();
         function animate(){
@@ -4959,11 +5018,24 @@ function startApp() {
           S.camera.position.lerpVectors(startPos,endPos,e);
           S.camera.lookAt(S.orbit.target);
           S.orbit.sync();
-          invalidate();
-          if(t<1) _flyAnim=requestAnimationFrame(animate);
-          else _flyAnim=null;
+          invalidate(3);
+          if(t<1) {
+            _flyAnim=requestAnimationFrame(animate);
+          } else {
+            // Final frame: snap to exact end state and re-apply the orbit
+            // so sph.r/phi/theta match the final camera placement. Without
+            // this, floating-point drift in the lerp tail can leave sph
+            // subtly out of sync with camera.position, and the first
+            // mouse-drag after a fly-to rotates around the wrong origin.
+            S.orbit.target.copy(endTarget);
+            S.camera.position.copy(endPos);
+            S.camera.lookAt(S.orbit.target);
+            S.orbit.sync(); S.orbit.apply();
+            invalidate(3);
+            _flyAnim=null;
+          }
         }
-        animate();
+        _flyAnim = requestAnimationFrame(animate);
       }
       _flyTo = function(pt, dist, hint) {
         // hint: optional {normal:[x,y,z]} for surface normal
@@ -5449,8 +5521,15 @@ function startApp() {
       // faintly-coloured surroundings.
       function _zoomDist(maxDim) {
         var d = Math.max(maxDim, 0.3);
-        var scale = 1.8 - (Math.min(d, 20) / 20) * 0.9; // 1.8 for tiny, 0.9 for 20m+
-        return d * Math.max(0.9, Math.min(1.8, scale));
+        var scale = 1.8 - (Math.min(d, 20) / 20) * 0.6; // 1.8 for tiny, 1.2 for 20m+
+        // Floor the distance at 1.2 m so the camera never ends up inside
+        // the geometry / behind the near clipping plane after a fly-to
+        // on a pinhole-sized clash between two thick walls — the main
+        // symptom users saw as "fly-to doesn't work anymore" after the
+        // tight-zoom pass was just the camera clipping straight through
+        // the target and rendering a grey void.
+        var out = d * Math.max(1.2, Math.min(1.8, scale));
+        return Math.max(out, 1.2);
       }
 
       _fitToElement = function(expressId, hint, modelId) {
@@ -7828,7 +7907,12 @@ function startApp() {
         chain = chain.then(function(){
           _setGlobalLoading(true);
           return idbGetGeoCache(entry.id).then(function(cached) {
-            if(cached && cached.v >= 1) return _geoDeserialize(cached);
+            // Only trust the cache when it includes IFC psets — an older cache
+            // saved before the lazy-props merge is missing pset data and would
+            // leave the inspector empty after a page refresh. Falling through
+            // to loadIFC re-extracts psets synchronously and refreshes the
+            // cache with hasPsets:true on the way out.
+            if(cached && cached.v >= 1 && cached.hasPsets) return _geoDeserialize(cached);
             return loadIFC(entry.buffer, DISC[0].c, function(){})
               .then(function(result) {
                 if (result) idbSaveGeoCache(entry.id, _geoSerialize(result));
@@ -9637,6 +9721,50 @@ function startApp() {
     var sq = useState(''), treeSearch=sq[0], setTreeSearch=sq[1];
     var ex = useState({}), expanded=ex[0], setExpanded=ex[1];
     function toggle(key){setExpanded(function(prev){var n=Object.assign({},prev);if(n[key])delete n[key];else n[key]=true;return n;});}
+
+    // Pre-index each model's elements by storey + host/child relations.
+    // Before this cache, the Tree/Spatial render walked every element 4–5
+    // times per render — O(elements × storeys) for the spatial filter alone.
+    // Opening the Navigator on a 30k-element model used to stall the main
+    // thread for 1–3 s. Now the heavy walk runs once per s.models change
+    // and every later re-render (expand/collapse/hover) just reads the
+    // pre-computed maps. Keyed on s.models so version bumps / model adds
+    // invalidate correctly; _propsVersion bumps bubble through naturally
+    // because UPD_MODEL replaces the model reference.
+    var modelIndexes = useMemo(function(){
+      var out = {};
+      s.models.forEach(function(model){
+        if (model.visible === false) return;
+        var storeyGroups = {}, noStorey = [];
+        var gidToEl = {}, childrenMap = {}, hasParent = {};
+        var els = model.elements || [];
+        var i, el, p, st, hGid, pEl;
+        for (i = 0; i < els.length; i++) {
+          el = els[i]; p = el.props;
+          if (p && p.globalId) gidToEl[p.globalId] = el;
+        }
+        for (i = 0; i < els.length; i++) {
+          el = els[i]; p = el.props;
+          if (!p) continue;
+          hGid = p.hostId || p.host_global_id;
+          if (!hGid) continue;
+          pEl = gidToEl[hGid];
+          if (!pEl) continue;
+          if (!childrenMap[pEl.expressId]) childrenMap[pEl.expressId] = [];
+          childrenMap[pEl.expressId].push(el);
+          hasParent[el.expressId] = true;
+        }
+        for (i = 0; i < els.length; i++) {
+          el = els[i]; p = el.props;
+          st = (p && p.storey) || '';
+          if (!st) { noStorey.push(el); continue; }
+          if (!storeyGroups[st]) storeyGroups[st] = [];
+          storeyGroups[st].push(el);
+        }
+        out[model.id] = { storeyGroups: storeyGroups, noStorey: noStorey, gidToEl: gidToEl, childrenMap: childrenMap, hasParent: hasParent };
+      });
+      return out;
+    }, [s.models]);
     function expandAll(){
       var all={};
       s.models.forEach(function(m){
@@ -9812,6 +9940,7 @@ function startApp() {
           var sites = sh.sites && sh.sites.length ? sh.sites : [{name:'Default Site'}];
           var buildings = sh.buildings && sh.buildings.length ? sh.buildings : [{name:'Default Building'}];
           var pKey='sp_'+model.id;
+          var _mIdx = modelIndexes[model.id] || {storeyGroups:{}, noStorey:[]};
           // Element row builder reused across storeys
           function _elNode(el, level) {
             var p=el.props||{};
@@ -9858,35 +9987,40 @@ function startApp() {
                     children:[].concat(
                       (model.storeyData||[]).map(function(sd){
                         var stKey='st_'+model.id+'_'+sd.name;
-                        var stEls = (model.elements||[]).filter(function(el){return el.props&&el.props.storey===sd.name;});
+                        var stEls = _mIdx.storeyGroups[sd.name] || [];
+                        var stIsOpen = !!expanded[stKey];
                         return tvNode({
                           key:stKey, level:4,
                           icon:'▬', iconColor:'var(--color-success-fg)',
                           label:sd.name, secondary:sd.elevation.toFixed(1)+'m',
                           count:stEls.length,
-                          hasChildren:stEls.length>0, expanded:!!expanded[stKey],
+                          hasChildren:stEls.length>0, expanded:stIsOpen,
                           selected:explorerFocus===stKey,
                           onClick:function(){toggle(stKey);setExplorerFocus(stKey);},
                           onToggle:function(){toggle(stKey);setExplorerFocus(stKey);},
-                          children:[].concat(
+                          // Only build the leaf element nodes when the storey is
+                          // open — a collapsed storey shouldn't pay for 200
+                          // tvNode allocations on every Navigator re-render.
+                          children:stIsOpen ? [].concat(
                             stEls.slice(0,200).map(function(el){return _elNode(el, 5);}),
                             stEls.length>200 ? [html`<li class="cc-tv__truncate" key="trunc">+${stEls.length-200} more…</li>`] : []
-                          )
+                          ) : null
                         });
                       }),
                       function(){
-                        var noSt=(model.elements||[]).filter(function(el){return !el.props||!el.props.storey;});
+                        var noSt = _mIdx.noStorey || [];
                         if(!noSt.length) return [];
                         var nsKey='st_'+model.id+'_none';
+                        var nsIsOpen = !!expanded[nsKey];
                         return [tvNode({
                           key:nsKey, level:4,
                           label:'(No storey)',
                           count:noSt.length, italic:true,
-                          hasChildren:true, expanded:!!expanded[nsKey],
+                          hasChildren:true, expanded:nsIsOpen,
                           selected:explorerFocus===nsKey,
                           onClick:function(){toggle(nsKey);setExplorerFocus(nsKey);},
                           onToggle:function(){toggle(nsKey);setExplorerFocus(nsKey);},
-                          children:noSt.slice(0,100).map(function(el){return _elNode(el, 5);})
+                          children:nsIsOpen ? noSt.slice(0,100).map(function(el){return _elNode(el, 5);}) : null
                         })];
                       }()
                     )
@@ -9899,28 +10033,11 @@ function startApp() {
         ${viewMode==='tree' && html`<ul role="group" class="cc-tv__list">${s.models.filter(function(m){return m.visible!==false}).map(function(model){
           var mKey = 'm_'+model.id;
           var disc = DISC.find(function(x){return x.id===model.discipline;});
-          var storeyGroups = {};
-          var noStorey = [];
-          // Build host-child map for this model (GlobalId → expressId → children)
-          var _gidToEl = {};
-          (model.elements||[]).forEach(function(el){ if(el.props&&el.props.globalId) _gidToEl[el.props.globalId]=el; });
-          var _childrenMap = {};
-          var _hasParent = {};
-          (model.elements||[]).forEach(function(el){
-            var hGid = el.props&&(el.props.hostId||el.props.host_global_id);
-            if(!hGid) return;
-            var pEl = _gidToEl[hGid];
-            if(!pEl) return;
-            if(!_childrenMap[pEl.expressId]) _childrenMap[pEl.expressId]=[];
-            _childrenMap[pEl.expressId].push(el);
-            _hasParent[el.expressId]=true;
-          });
-          (model.elements||[]).forEach(function(el){
-            var st = (el.props&&el.props.storey)||'';
-            if(!st){noStorey.push(el);return;}
-            if(!storeyGroups[st]) storeyGroups[st]=[];
-            storeyGroups[st].push(el);
-          });
+          var _mIdxT = modelIndexes[model.id] || {storeyGroups:{}, noStorey:[], childrenMap:{}, hasParent:{}};
+          var storeyGroups = _mIdxT.storeyGroups;
+          var noStorey = _mIdxT.noStorey;
+          var _childrenMap = _mIdxT.childrenMap;
+          var _hasParent = _mIdxT.hasParent;
           var storeyKeys = Object.keys(storeyGroups).sort();
           var q = treeSearch.toLowerCase();
           // Element row builder (with optional host-children)
@@ -9957,40 +10074,50 @@ function startApp() {
               })
             });
           }
+          // Skip the per-storey walk entirely when the model row is collapsed
+          // and there's no active search — the user can't see any of it, and
+          // touching every element is the single biggest cost in this panel.
+          var mIsOpen = !!expanded[mKey];
           var storeyChildren = [];
-          storeyKeys.forEach(function(st){
-            var sKey='s_'+model.id+'_'+st;
-            var els=storeyGroups[st];
-            var filtered = q ? els.filter(function(el){var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1||String(el.expressId).indexOf(q)!==-1;}) : els;
-            if(q && filtered.length===0) return;
-            var topLevel = filtered.filter(function(el){ return !_hasParent[el.expressId]; });
-            storeyChildren.push(tvNode({
-              key:sKey, level:2,
-              icon:'▬', iconColor:'var(--color-success-fg)',
-              label:st, count:filtered.length,
-              hasChildren:topLevel.length>0, expanded:!!expanded[sKey],
-              selected:explorerFocus===sKey,
-              onClick:function(){toggle(sKey);setExplorerFocus(sKey);},
-              onToggle:function(){toggle(sKey);setExplorerFocus(sKey);},
-              children:[].concat(
-                topLevel.slice(0,200).map(function(el){return _elNode(el, 3);}),
-                topLevel.length>200 ? [html`<li class="cc-tv__truncate" key="trunc">+${topLevel.length-200} more…</li>`] : []
-              )
-            }));
-          });
-          if(noStorey.length>0){
-            var nsKey='s_'+model.id+'_none';
-            var nsFiltered = noStorey.filter(function(el){if(!q)return true;var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1;});
-            if(nsFiltered.length>0){
+          if (mIsOpen || q) {
+            storeyKeys.forEach(function(st){
+              var sKey='s_'+model.id+'_'+st;
+              var els=storeyGroups[st];
+              var filtered = q ? els.filter(function(el){var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1||String(el.expressId).indexOf(q)!==-1;}) : els;
+              if(q && filtered.length===0) return;
+              var sIsOpen = !!expanded[sKey];
+              // Only compute topLevel + child rows when the storey is actually
+              // expanded. Collapsed storeys just need count + hasChildren hint.
+              var topLevel = sIsOpen ? filtered.filter(function(el){ return !_hasParent[el.expressId]; }) : null;
               storeyChildren.push(tvNode({
-                key:nsKey, level:2,
-                label:'(No storey)', count:nsFiltered.length, italic:true,
-                hasChildren:true, expanded:!!expanded[nsKey],
-                selected:explorerFocus===nsKey,
-                onClick:function(){toggle(nsKey);setExplorerFocus(nsKey);},
-                onToggle:function(){toggle(nsKey);setExplorerFocus(nsKey);},
-                children:nsFiltered.slice(0,100).map(function(el){return _elNode(el, 3);})
+                key:sKey, level:2,
+                icon:'▬', iconColor:'var(--color-success-fg)',
+                label:st, count:filtered.length,
+                hasChildren:filtered.length>0, expanded:sIsOpen,
+                selected:explorerFocus===sKey,
+                onClick:function(){toggle(sKey);setExplorerFocus(sKey);},
+                onToggle:function(){toggle(sKey);setExplorerFocus(sKey);},
+                children:sIsOpen ? [].concat(
+                  topLevel.slice(0,200).map(function(el){return _elNode(el, 3);}),
+                  topLevel.length>200 ? [html`<li class="cc-tv__truncate" key="trunc">+${topLevel.length-200} more…</li>`] : []
+                ) : null
               }));
+            });
+            if(noStorey.length>0){
+              var nsKey='s_'+model.id+'_none';
+              var nsFiltered = noStorey.filter(function(el){if(!q)return true;var p=el.props||{};return (p.name||'').toLowerCase().indexOf(q)!==-1||(p.ifcType||'').toLowerCase().indexOf(q)!==-1;});
+              if(nsFiltered.length>0){
+                var nsIsOpen = !!expanded[nsKey];
+                storeyChildren.push(tvNode({
+                  key:nsKey, level:2,
+                  label:'(No storey)', count:nsFiltered.length, italic:true,
+                  hasChildren:true, expanded:nsIsOpen,
+                  selected:explorerFocus===nsKey,
+                  onClick:function(){toggle(nsKey);setExplorerFocus(nsKey);},
+                  onToggle:function(){toggle(nsKey);setExplorerFocus(nsKey);},
+                  children:nsIsOpen ? nsFiltered.slice(0,100).map(function(el){return _elNode(el, 3);}) : null
+                }));
+              }
             }
           }
           return tvNode({
@@ -9998,7 +10125,7 @@ function startApp() {
             icon:html`<span style=${{display:'inline-block',width:8,height:8,borderRadius:'50%',background:disc?disc.c:'var(--text-muted)'}}></span>`,
             label:model.name,
             count:(model.elements||[]).length,
-            hasChildren:storeyChildren.length>0, expanded:!!expanded[mKey],
+            hasChildren:storeyKeys.length>0 || noStorey.length>0, expanded:mIsOpen,
             selected:explorerFocus===mKey,
             onClick:function(){toggle(mKey);setExplorerFocus(mKey);},
             onToggle:function(){toggle(mKey);setExplorerFocus(mKey);},
@@ -10915,11 +11042,14 @@ function startApp() {
           </div>`;
         }()}
 
-        ${isClashTab && typeList.length>0 && html`<div>
-          <span style=${FL}>Element Type</span>
-          <${MultiSelectDropdown} items=${typeList} excluded=${f.excludedTypes||[]}
-            onToggle=${function(t){var ex=f.excludedTypes||[];d({t:A.UPD_FILTERS,u:{excludedTypes:ex.indexOf(t)===-1?ex.concat(t):ex.filter(function(x){return x!==t;})}});}}
-            onToggleAll=${function(){var ex=f.excludedTypes||[];d({t:A.UPD_FILTERS,u:{excludedTypes:ex.length===0?typeList.slice():[]}});}} />
+        ${isClashTab && html`<div>
+          <span style=${FL}>IFC Type</span>
+          ${typeList.length>0
+            ? html`<${MultiSelectDropdown} items=${typeList} excluded=${f.excludedTypes||[]}
+                onToggle=${function(t){var ex=f.excludedTypes||[];d({t:A.UPD_FILTERS,u:{excludedTypes:ex.indexOf(t)===-1?ex.concat(t):ex.filter(function(x){return x!==t;})}});}}
+                onToggleAll=${function(){var ex=f.excludedTypes||[];d({t:A.UPD_FILTERS,u:{excludedTypes:ex.length===0?typeList.slice():[]}});}} />`
+            : html`<div style=${{fontSize:'0.7rem',color:'var(--text-faint)',padding:'.25rem .4rem',background:'var(--bg-secondary)',borderRadius:6,border:'1px dashed var(--border)'}}>No IFC types on current clashes yet — run detection after the model finishes loading.</div>`
+          }
         </div>`}
 
         ${isClashTab && storeyList.length>0 && html`<div>
@@ -13082,19 +13212,12 @@ function startApp() {
           style=${{marginTop:3,flexShrink:0,accentColor:'var(--accent)',cursor:'pointer'}} />`}
         ${!isClash && html`<span style=${{fontSize:'var(--text-md)',flexShrink:0}}>${icon}</span>`}
         <div style=${{flex:1,minWidth:0}}>
-          <div style=${{display:'flex',alignItems:'center',gap:'var(--space-1)'}}>
-            ${isClash && it.number != null && html`<span class="cc-status-pill"
-              title="Clash number (stable across runs) — copy or share this to identify the clash"
-              style=${{background:'var(--bg-secondary)',color:'var(--text-muted)',fontVariantNumeric:'tabular-nums',padding:'.1rem var(--space-2)'}}>#${it.number}</span>`}
-            ${isClash && typeLabel && html`<span class="cc-status-pill" style=${{background:typeBg,color:typeCol,padding:'.1rem var(--space-2)'}}>${typeLabel}</span>`}
-            ${isClash && sevLabel && html`<span class="cc-status-pill" style=${{background:sevBg,color:sevCol,padding:'.1rem var(--space-2)'}}>${sevLabel}</span>`}
-            ${isClash && it._delta==='new' && html`<span class="cc-status-pill" title="New this run" style=${{background:'var(--color-info-bg)',color:'var(--color-info-fg)'}}>NEW</span>`}
-            ${isClash && it._delta==='auto_resolved' && html`<span class="cc-status-pill" title="No longer detected" style=${{background:'var(--bg-secondary)',color:'var(--text-faint)'}}>AUTO</span>`}
-            <span style=${{color:'var(--text-primary)',fontSize:'var(--text-sm)',fontWeight:'var(--weight-medium)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',flex:1,lineHeight:'var(--leading-base)'}}>${it.title}</span>
-            <span class="cc-status-pill" style=${{background:stBg+'22',color:stBg}}>${(STAT[it.status]||STAT.open).label}</span>
+          <div style=${{display:'flex',alignItems:'center',gap:'var(--space-2)',minWidth:0}}>
+            <span title=${it.title} style=${{color:'var(--text-primary)',fontSize:'var(--text-sm)',fontWeight:'var(--weight-semibold)',whiteSpace:'nowrap',overflow:'hidden',textOverflow:'ellipsis',flex:1,minWidth:0,lineHeight:'var(--leading-base)'}}>${it.title}</span>
+            <span class="cc-status-pill" style=${{background:stBg+'22',color:stBg,flexShrink:0}}>${(STAT[it.status]||STAT.open).label}</span>
             ${isClash && trainingMode && function(){
               var fb=it.aiFeedback;
-              return html`<span style=${{display:'inline-flex',alignItems:'center',gap:'2px',marginLeft:'.15rem',flexShrink:0}}>
+              return html`<span style=${{display:'inline-flex',alignItems:'center',gap:'2px',flexShrink:0}}>
                 ${fb && html`<span style=${{fontSize:'0.63rem',padding:'.02rem .2rem',borderRadius:3,lineHeight:1,fontWeight:700,
                   background:fb==='real_clash'?'#166534':fb==='acceptable'?'#1e3a5f':'#7f1d1d',
                   color:fb==='real_clash'?'#4ade80':fb==='acceptable'?'#93c5fd':'#fca5a5'}}>${fb==='real_clash'?'+':fb==='acceptable'?'-':'×'}</span>`}
@@ -13103,6 +13226,15 @@ function startApp() {
               </span>`;
             }()}
           </div>
+          ${isClash && html`<div style=${{display:'flex',alignItems:'center',gap:'var(--space-1)',marginTop:'2px',flexWrap:'wrap'}}>
+            ${it.number != null && html`<span class="cc-status-pill"
+              title="Clash number (stable across runs) — copy or share this to identify the clash"
+              style=${{background:'var(--bg-secondary)',color:'var(--text-muted)',fontVariantNumeric:'tabular-nums',padding:'.1rem var(--space-2)'}}>#${it.number}</span>`}
+            ${typeLabel && html`<span class="cc-status-pill" style=${{background:typeBg,color:typeCol,padding:'.1rem var(--space-2)'}}>${typeLabel}</span>`}
+            ${sevLabel && html`<span class="cc-status-pill" style=${{background:sevBg,color:sevCol,padding:'.1rem var(--space-2)'}}>${sevLabel}</span>`}
+            ${it._delta==='new' && html`<span class="cc-status-pill" title="New this run" style=${{background:'var(--color-info-bg)',color:'var(--color-info-fg)'}}>NEW</span>`}
+            ${it._delta==='auto_resolved' && html`<span class="cc-status-pill" title="No longer detected" style=${{background:'var(--bg-secondary)',color:'var(--text-faint)'}}>AUTO</span>`}
+          </div>`}
           <p style=${{color:'var(--text-faint)',fontSize:'var(--text-xs)',marginTop:'var(--space-1)',lineHeight:'var(--leading-base)'}} class="lc2">${it.description}</p>
           ${isClash && html`<div style=${{display:'flex',gap:'var(--space-1)',marginTop:'var(--space-1)',flexWrap:'wrap',alignItems:'center'}}>
             ${it.distance!=null && it.distance>=0 && html`<span style=${{fontSize:'var(--text-2xs)',color:'var(--text-muted)',background:'var(--bg-secondary)',padding:'.1rem var(--space-2)',borderRadius:'var(--radius-pill)',fontWeight:'var(--weight-medium)'}}>
@@ -16284,8 +16416,39 @@ function startApp() {
     window._ccNLIsOpen = function(){ return open; };
     window._ccNLSetInput = function(text){ setInput(text); };
     window._ccNLSetStatus = function(status, back){ setLLMStatus(status); setBackend(back); };
-    var stMsgs = useState([{role:'assistant', text:'Hi! I\'m Gemma, your ClashControl assistant. Tell me what you need, or pick a suggestion below. I work best with short commands like "check walls vs pipes" or "group by storey".'}]);
+    // Chat history persistence — survives page refresh so a long back-and-forth
+    // isn't wiped whenever the user reloads the app (or gets knocked offline).
+    // Scoped per project so switching projects shows the right conversation.
+    // Transient message types (in-flight detection spinners, unrendered setup
+    // cards) are stripped before writing to keep the cache tidy.
+    var _chatStorageKey = 'cc_chat_msgs_' + (s.activeProject || 'default');
+    var _greeting = {role:'assistant', text:'Hi! I\'m Gemma, your ClashControl assistant. Tell me what you need, or pick a suggestion below. I work best with short commands like "check walls vs pipes" or "group by storey".'};
+    var stMsgs = useState(function(){
+      try {
+        var raw = localStorage.getItem(_chatStorageKey);
+        if (raw) {
+          var parsed = JSON.parse(raw);
+          if (Array.isArray(parsed) && parsed.length) return parsed;
+        }
+      } catch(e) {}
+      return [_greeting];
+    });
     var msgs = stMsgs[0], setMsgs = stMsgs[1];
+    // Persist messages on every update (debounced via rAF via React batching).
+    // ClashSetupCard state + detecting bubbles are stripped on save — they're
+    // bound to in-flight operations that won't exist after a refresh.
+    useEffect(function(){
+      try {
+        var serialisable = msgs.filter(function(m){ return !m.detecting; }).map(function(m){
+          if (m.setup) return {role:m.role||'assistant', text:'(clash setup card)'};
+          return m;
+        });
+        // Cap stored history at 200 entries so we don't grow the localStorage
+        // entry unbounded on very long conversations.
+        if (serialisable.length > 200) serialisable = serialisable.slice(-200);
+        localStorage.setItem(_chatStorageKey, JSON.stringify(serialisable));
+      } catch(e) { /* quota exceeded — drop the cache silently */ }
+    }, [msgs, _chatStorageKey]);
     var stInput = useState(''), input = stInput[0], setInput = stInput[1];
     var stLoading = useState(false), loading = stLoading[0], setLoading = stLoading[1];
     var stModelLoading = useState(!!window._ccModelLoading), modelLoading = stModelLoading[0], setModelLoading = stModelLoading[1];
@@ -16307,12 +16470,28 @@ function startApp() {
     }, []);
     // Reset progress when detection finishes
     useEffect(function() { if (!s.detecting) { setDetectPct(0); window._ccDetectProgress = null; } }, [s.detecting]);
-    // Clear messages on project switch
+    // On project switch: load the chat history for the new project from
+    // localStorage (keyed by project id) instead of wiping it — each project
+    // keeps its own conversation so switching back-and-forth doesn't lose
+    // context. Falls back to a fresh greeting when the new project has no
+    // saved history yet.
     useEffect(function() {
-      function onSwitch() { setMsgs([{role:'assistant', text:'New project loaded. What do you need?'}]); }
+      function onSwitch() {
+        var nextPid = (window._ccProjectSwitch || s.activeProject || 'default');
+        var nextKey = 'cc_chat_msgs_' + nextPid;
+        var restored = null;
+        try {
+          var raw = localStorage.getItem(nextKey);
+          if (raw) {
+            var parsed = JSON.parse(raw);
+            if (Array.isArray(parsed) && parsed.length) restored = parsed;
+          }
+        } catch(e) {}
+        setMsgs(restored || [{role:'assistant', text:'New project loaded. What do you need?'}]);
+      }
       window.addEventListener('cc-project-switch', onSwitch);
       return function(){ window.removeEventListener('cc-project-switch', onSwitch); };
-    }, []);
+    }, [s.activeProject]);
     // Track model loading state and progress message
     var stLoadMsg = useState(''), modelLoadMsg = stLoadMsg[0], setModelLoadMsg = stLoadMsg[1];
     useEffect(function() {
@@ -16852,6 +17031,79 @@ function startApp() {
     // ── Shared content: header bar, messages area, input ──
     var panelGlow = modelLoading || llmStatus === 'loading' || isDetecting;
 
+    function clearChat() {
+      setMsgs([_greeting]);
+      try { localStorage.removeItem(_chatStorageKey); } catch(e) {}
+      setReplyTo && setReplyTo(null);
+      nlFeedbackRef.current = null;
+      clashCtxRef.current = null;
+    }
+
+    // Transient "just copied" tick per-message (keyed by msg index).
+    var stCopied = useState(-1), copiedIdx = stCopied[0], setCopiedIdx = stCopied[1];
+    function copyMsg(i, text) {
+      var plain = (text || '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1').replace(/`([^`]+)`/g, '$1');
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(plain).then(function(){ setCopiedIdx(i); setTimeout(function(){ setCopiedIdx(-1); }, 1200); });
+          return;
+        }
+      } catch(e) {}
+      // Fallback for non-secure contexts
+      try {
+        var ta = document.createElement('textarea');
+        ta.value = plain; ta.style.position='fixed'; ta.style.opacity='0';
+        document.body.appendChild(ta); ta.select();
+        document.execCommand('copy'); document.body.removeChild(ta);
+        setCopiedIdx(i); setTimeout(function(){ setCopiedIdx(-1); }, 1200);
+      } catch(e) {}
+    }
+
+    // Render a single chat message — shared between the docked and floating
+    // layouts so new features (copy button, etc.) don't need two edits.
+    function renderChatMessage(m, i) {
+      if (m.setup) return html`<${ClashSetupCard} key=${i} setup=${m.setup} s=${s} d=${d} onRun=${executeDetection} setMsgs=${setMsgs} idx=${i} />`;
+      if (m.detecting) return null;
+      var isUser = m.role === 'user';
+      var bubbleBg = isUser ? 'var(--accent)' : aiBubbleBg;
+      var bubbleFg = isUser ? '#fff' : textCol;
+      var canCopy = !isUser && !!m.text;
+      return html`<div key=${i} class="cc-chat-msg" style=${{display:'flex', flexDirection:'column', alignItems: isUser?'flex-end':'flex-start', position:'relative'}}>
+        <div style=${{
+          maxWidth:'85%', padding:'.45rem .7rem',
+          borderRadius: isUser ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
+          background: bubbleBg, color: bubbleFg,
+          fontSize:'0.87rem', lineHeight:1.55, wordBreak:'break-word',
+          position:'relative'
+        }}>
+          ${isUser ? m.text : renderChatText(m.text)}
+          ${canCopy && html`<button
+            class="cc-chat-copy"
+            onClick=${function(e){e.stopPropagation(); copyMsg(i, m.text);}}
+            title=${copiedIdx===i?'Copied':'Copy message'}
+            aria-label=${copiedIdx===i?'Copied':'Copy message'}
+            style=${{
+              position:'absolute', top:-8, right:-8,
+              width:20, height:20, borderRadius:10,
+              background:'var(--bg-secondary)', border:'1px solid '+borderCol,
+              color: copiedIdx===i ? 'var(--color-success-fg)' : mutedCol,
+              cursor:'pointer', fontSize:'0.62rem', lineHeight:1,
+              display:'flex', alignItems:'center', justifyContent:'center',
+              padding:0, boxShadow:'var(--shadow-sm)',
+              opacity: copiedIdx===i ? 1 : 0,
+              transition:'opacity .15s, color .15s'
+            }}>${copiedIdx===i?'✓':'⎘'}</button>`}
+        </div>
+        ${!isUser && m.text && renderAIFeedback(i, m.text)}
+      </div>`;
+    }
+    // Count non-greeting user+assistant turns so the clear button only shows
+    // when there's something worth clearing.
+    var _chatTurnCount = 0;
+    for (var _mci = 0; _mci < msgs.length; _mci++) {
+      var _mm = msgs[_mci];
+      if (_mm && _mm.role === 'user') _chatTurnCount++;
+    }
     var nlHeaderBar = html`<div style=${{
       display:'flex', alignItems:'center', padding:'.45rem .65rem',
       borderBottom:'1px solid '+borderCol, gap:'.4rem', flexShrink:0
@@ -16872,7 +17124,13 @@ function startApp() {
         <span style=${{width:'.4rem', height:'.4rem', borderRadius:'50%', background:'#f87171', display:'inline-block'}}></span>
         AI error
       </span>`}
+      ${_chatTurnCount > 0 && html`<span style=${{fontSize:'0.6rem', color:mutedCol, opacity:0.7}}>${_chatTurnCount} turn${_chatTurnCount===1?'':'s'}</span>`}
       <div style=${{flex:1}}></div>
+      ${_chatTurnCount > 0 && html`<button onClick=${clearChat}
+        title="Clear chat history" aria-label="Clear chat history"
+        style=${{background:'none', border:'1px solid '+borderCol, cursor:'pointer',
+          color:mutedCol, fontSize:'0.66rem', lineHeight:1, padding:'.2rem .45rem',
+          borderRadius:6, fontWeight:500}}>Clear</button>`}
       ${!isDocked && html`<button onClick=${function(){ setOpen(false); }} style=${{
         background:'none', border:'none', cursor:'pointer',
         color:mutedCol, fontSize:'1.26rem', lineHeight:1, padding:'0 .1rem'
@@ -16903,23 +17161,7 @@ function startApp() {
           flex:1, minHeight:0
         }}>
         ${statusBanner}
-        ${msgs.map(function(m, i) {
-          var isUser = m.role === 'user';
-          if (m.setup) return html`<${ClashSetupCard} key=${i} setup=${m.setup} s=${s} d=${d} onRun=${executeDetection} setMsgs=${setMsgs} idx=${i} />`;
-          if (m.detecting) return null;
-          return html`<div key=${i} style=${{display:'flex', flexDirection:'column', alignItems: isUser?'flex-end':'flex-start'}}>
-            <div style=${{
-              maxWidth:'85%', padding:'.45rem .7rem',
-              borderRadius: isUser ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
-              background: isUser ? 'var(--accent)' : aiBubbleBg,
-              color: isUser ? '#fff' : textCol,
-              fontSize:'0.87rem', lineHeight:1.55, wordBreak:'break-word'
-            }}>
-              ${isUser ? m.text : renderChatText(m.text)}
-            </div>
-            ${!isUser && m.text && renderAIFeedback(i, m.text)}
-          </div>`;
-        })}
+        ${msgs.map(renderChatMessage)}
         ${loading && html`<div style=${{display:'flex'}}>
           <div style=${{
             padding:'.45rem .75rem', borderRadius:'12px 12px 12px 3px',
@@ -17073,23 +17315,7 @@ function startApp() {
         maxHeight:panelH, minHeight:80
       }}>
         ${statusBanner}
-        ${msgs.map(function(m, i) {
-          var isUser = m.role === 'user';
-          if (m.setup) return html`<${ClashSetupCard} key=${i} setup=${m.setup} s=${s} d=${d} onRun=${executeDetection} setMsgs=${setMsgs} idx=${i} />`;
-          if (m.detecting) return null;
-          return html`<div key=${i} style=${{display:'flex', flexDirection:'column', alignItems: isUser?'flex-end':'flex-start'}}>
-            <div style=${{
-              maxWidth:'85%', padding:'.45rem .7rem',
-              borderRadius: isUser ? '12px 12px 3px 12px' : '12px 12px 12px 3px',
-              background: isUser ? 'var(--accent)' : aiBubbleBg,
-              color: isUser ? '#fff' : textCol,
-              fontSize:'0.87rem', lineHeight:1.55, wordBreak:'break-word'
-            }}>
-              ${isUser ? m.text : renderChatText(m.text)}
-            </div>
-            ${!isUser && m.text && renderAIFeedback(i, m.text)}
-          </div>`;
-        })}
+        ${msgs.map(renderChatMessage)}
         ${loading && html`<div style=${{display:'flex'}}>
           <div style=${{
             padding:'.45rem .75rem', borderRadius:'12px 12px 12px 3px',
