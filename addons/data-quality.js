@@ -350,12 +350,37 @@
   }
 
   // ── ILS / NL-SfB Check Engine ──────────────────────────────────────
+  //
+  // Rule set derived from the public NL-BIM Basis ILS v2 standard
+  // (bimloket.nl / buildingSMART Benelux). The individual checks are
+  // re-implementations against the standard's requirements — no code
+  // is copied from any specific validator implementation.
+
+  // Storey naming: "-01 Kelder", "00 Begane grond", "01 Eerste…" etc.
+  // Two digits with optional leading minus, then whitespace, then label.
+  var STOREY_NAME_RE = /^-?\d{2}(\s.+)?$/;
+  // Door naming: D-001, D001, D_12, etc. Dutch convention.
+  var DOOR_NAME_RE = /^D[\s\-_]?\d{2,4}/i;
+  // Fire rating values accepted by the standard (minutes) plus the
+  // common EN 13501-2 REI/EI prefixed variants.
+  var VALID_FIRE_RATING_RE = /^(REI|EI|R|E)?\s*-?\s*(30|60|90|120|180|240)$/i;
+  // Approved structural materials for load-bearing walls — Dutch + EN
+  // equivalents. Matches anywhere in the material string so composite
+  // names like "Beton C30/37" still pass.
+  var APPROVED_STRUCT_MAT_RE = /\b(beton|concrete|kalkzandsteen|limestone|cellular|metselwerk|masonry|brick|staal|steel|reinforced)\b/i;
+  // Renovation status vocabulary — Dutch ILS values + common English.
+  var VALID_RENOVATION_RE = /^(bestaand|nieuw|te\s+slopen|existing|new|demolish(ed)?|to\s+(be\s+)?demolish(ed)?|retained)$/i;
+  var MEP_FLOW_TYPES = {IfcFlowSegment:1, IfcPipeSegment:1, IfcDuctSegment:1, IfcCableSegment:1, IfcCableCarrierSegment:1};
 
   function runILSChecks(elements) {
     var acc = {
       noNLSfB: [], invalidNLSfB: [], mismatchNLSfB: [],
       noDescription: [], noMaterial: [], noStorey: [],
-      missingILSProp: [], noObjectType: [], noName: []
+      missingILSProp: [], noObjectType: [], noName: [],
+      // New ILS v2 rules
+      storeyNaming: [], doorNaming: [], spaceIncomplete: [],
+      fireRatingInvalid: [], extWallNoUValue: [],
+      loadBearingInvalidMaterial: [], mepNoRenovationStatus: []
     };
     var nlsfbDist = {};
     function addNLSfBDist(code, el) {
@@ -374,12 +399,79 @@
       IfcSwitchingDevice:1,IfcOutlet:1,IfcDistributionElement:1,IfcFurnishingElement:1,
       IfcFooting:1,IfcPile:1};
 
+    // ── Pre-pass: storey + space checks (not in PHYSICAL set) ──────
+    (elements||[]).forEach(function(el) {
+      var p = el.props||{};
+      var it = {name:p.name||('#'+el.expressId), gid:p.globalId, ifcType:p.ifcType, el:el};
+      if (p.ifcType === 'IfcBuildingStorey') {
+        var sname = (p.name||'').trim();
+        if (!sname || !STOREY_NAME_RE.test(sname)) {
+          acc.storeyNaming.push(Object.assign({}, it, {detail: sname || '(empty)'}));
+        }
+      } else if (p.ifcType === 'IfcSpace') {
+        var spaceMissing = [];
+        if (!p.name || !p.name.trim()) spaceMissing.push('Name');
+        if (!p.longName || !p.longName.trim()) spaceMissing.push('LongName');
+        var q = p.quantities||{};
+        var hasNetArea = false;
+        Object.keys(q).forEach(function(qk){
+          if (/netfloorarea|net\s*floor\s*area|netarea/i.test(qk) && parseFloat(q[qk]) > 0) hasNetArea = true;
+        });
+        if (!hasNetArea) spaceMissing.push('NetFloorArea');
+        if (spaceMissing.length) {
+          acc.spaceIncomplete.push(Object.assign({}, it, {detail: spaceMissing.join(', ')}));
+        }
+      }
+    });
+
     (elements||[]).forEach(function(el) {
       var p = el.props||{};
       if (!PHYSICAL[p.ifcType]) return;
       var psets = p.psets||{};
       var it = {name:p.name||('#'+el.expressId), gid:p.globalId, ifcType:p.ifcType, el:el};
       var issues = 0;
+
+      // Door naming pattern (ILS 3.5)
+      if (p.ifcType === 'IfcDoor') {
+        var dname = (p.name||'').trim();
+        if (!dname || !DOOR_NAME_RE.test(dname)) {
+          acc.doorNaming.push(Object.assign({}, it, {detail: dname || '(empty)'}));
+          issues += 1;
+        }
+      }
+
+      // Wall-specific strict checks (ILS 4.5, 4.6, 4.7.2)
+      if (p.ifcType === 'IfcWall' || p.ifcType === 'IfcWallStandardCase') {
+        var fireVal = _findPropValue(psets, 'FireRating');
+        var loadVal = _findPropValue(psets, 'LoadBearing');
+        var extVal = _findPropValue(psets, 'IsExternal');
+        var isLoadBearing = loadVal && /^(true|1|yes)$/i.test(String(loadVal));
+        var isExternal = extVal && /^(true|1|yes)$/i.test(String(extVal));
+        // 4.5 — FireRating value must match standard enum on internal load-bearing walls
+        if (fireVal && !VALID_FIRE_RATING_RE.test(String(fireVal).trim())) {
+          acc.fireRatingInvalid.push(Object.assign({}, it, {detail: 'Value: "' + fireVal + '" (expected 30/60/90/120)'}));
+          issues += 1;
+        }
+        // 4.6 — External walls need a U-value
+        if (isExternal && !_findPropValue(psets, 'ThermalTransmittance')) {
+          acc.extWallNoUValue.push(it);
+          issues += 1;
+        }
+        // 4.7.2 — Load-bearing walls must use an approved structural material
+        if (isLoadBearing && p.material && !APPROVED_STRUCT_MAT_RE.test(p.material)) {
+          acc.loadBearingInvalidMaterial.push(Object.assign({}, it, {detail: p.material}));
+          issues += 1;
+        }
+      }
+
+      // MEP renovation status (ILS 4.8)
+      if (MEP_FLOW_TYPES[p.ifcType]) {
+        var renov = _findPropValue(psets, 'RenovationStatus') || _findPropValue(psets, 'Status');
+        if (!renov || !VALID_RENOVATION_RE.test(String(renov).trim())) {
+          acc.mepNoRenovationStatus.push(Object.assign({}, it, {detail: renov || '(missing)'}));
+          issues += 1;
+        }
+      }
 
       // NL/SfB classification
       var nlsfb = _extractNLSfB(psets, p.objectType);
@@ -447,6 +539,14 @@
       noStorey:       {label:'Geen bouwlaag toegewezen',             sev:'warn', cat:'location', count:acc.noStorey.length,      ex:acc.noStorey.slice(0,8)},
       noObjectType:   {label:'Geen ObjectType gedefinieerd',         sev:'info', cat:'classification',count:acc.noObjectType.length,ex:acc.noObjectType.slice(0,8)},
       noName:         {label:'Geen elementnaam',                     sev:'warn', cat:'naming', count:acc.noName.length,          ex:acc.noName.slice(0,8)},
+      // NL-BIM Basis ILS v2 additions
+      storeyNaming:   {label:'Bouwlaag naamgeving (ILS 3.3)',        sev:'info', cat:'naming', count:acc.storeyNaming.length,    ex:acc.storeyNaming.slice(0,8)},
+      doorNaming:     {label:'Deurnaamgeving D-### (ILS 3.5)',       sev:'info', cat:'naming', count:acc.doorNaming.length,      ex:acc.doorNaming.slice(0,8)},
+      spaceIncomplete:{label:'IfcSpace mist Name/LongName/Area (ILS 4.1)',sev:'warn',cat:'properties',count:acc.spaceIncomplete.length,ex:acc.spaceIncomplete.slice(0,8)},
+      fireRatingInvalid:{label:'FireRating ongeldige waarde (ILS 4.5)',sev:'warn',cat:'properties',count:acc.fireRatingInvalid.length,ex:acc.fireRatingInvalid.slice(0,8)},
+      extWallNoUValue:{label:'Buitenwand zonder ThermalTransmittance (ILS 4.6)',sev:'warn',cat:'properties',count:acc.extWallNoUValue.length,ex:acc.extWallNoUValue.slice(0,8)},
+      loadBearingInvalidMaterial:{label:'Dragende wand: niet-constructief materiaal (ILS 4.7.2)',sev:'warn',cat:'properties',count:acc.loadBearingInvalidMaterial.length,ex:acc.loadBearingInvalidMaterial.slice(0,8)},
+      mepNoRenovationStatus:{label:'MEP segment zonder RenovationStatus (ILS 4.8)',sev:'info',cat:'properties',count:acc.mepNoRenovationStatus.length,ex:acc.mepNoRenovationStatus.slice(0,8)},
       _total: (elements||[]).length,
       _nlsfbDist: nlsfbDist,
       _compDist: ilsCompDist
