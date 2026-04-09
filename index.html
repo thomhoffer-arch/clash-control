@@ -3197,9 +3197,16 @@ function startApp() {
 
         // Apply model rules
         if (sameModel) {
-          // Self-clash: check selfClashGroup ('both','a','b') or legacy excludeSelf boolean
+          // Self-clash: check selfClashGroup ('both','a','b') or legacy excludeSelf boolean.
+          // Duplicate detection is an exception — duplicate elements
+          // almost always live WITHIN a single model (double imports,
+          // linked files flattened twice, etc.) so we must let
+          // same-model pairs through whenever rules.duplicates is on.
+          // _processCandidate then runs the duplicate check first and,
+          // if excludeSelf was set, bails out before the hard/soft
+          // tests so the cross-model-only policy is still honoured.
           var scg = rules.selfClashGroup || (rules.excludeSelf ? 'none' : 'both');
-          if (scg === 'none') continue;
+          if (scg === 'none' && !rules.duplicates) continue;
           if (scg === 'a' && !inA[cur.m.id]) continue;
           if (scg === 'b' && !inB[cur.m.id]) continue;
           if (!inA[cur.m.id] && !inB[cur.m.id]) continue;
@@ -3678,12 +3685,15 @@ function startApp() {
 
       var bA=eA.box, bB=eB.box;
 
-      // Duplicate detection: identical bounding boxes at same location
+      // Duplicate detection: bounding boxes effectively coincident.
+      // Thresholds loosened to 20mm centre offset and 30mm total L1
+      // size drift so duplicates surviving a round-trip through Revit
+      // exporters (which introduce sub-mm FP drift) still match.
       if (rules.duplicates) {
         var sizeA=bA.getSize(_tmpSizeA), sizeB=bB.getSize(_tmpSizeB);
         var ctrA=bA.getCenter(_tmpCtrA), ctrB=bB.getCenter(_tmpCtrB);
         var sizeDiff=Math.abs(sizeA.x-sizeB.x)+Math.abs(sizeA.y-sizeB.y)+Math.abs(sizeA.z-sizeB.z);
-        if (sizeDiff<0.01 && ctrA.distanceTo(ctrB)<0.01) {
+        if (sizeDiff<0.03 && ctrA.distanceTo(ctrB)<0.02) {
           var b=_buildClashBase(eA, eB, mA, mB, [ctrA.x,ctrA.y,ctrA.z], sameModel);
           clashes.push(Object.assign(b.obj, {
             type:'duplicate', distance:0,
@@ -3693,6 +3703,13 @@ function startApp() {
           }));
           return;
         }
+      }
+      // Same-model pair let through only because rules.duplicates needed
+      // a chance at the block above. If the user also set excludeSelf,
+      // we must NOT emit hard/soft hits for this pair — those would
+      // violate the cross-model-only policy that the label claimed.
+      if (sameModel && rules.excludeSelf && rules.duplicates) {
+        return;
       }
 
       // ── Parallel axis rejection (IFC-based, zero false negatives) ──
@@ -5026,6 +5043,10 @@ function startApp() {
       // holding a reference to any particular clone.
       var _ghostedMeshes = [];
       var _ghostMatCache = new Map(); // origMat.uuid → ghost clone
+      // Target tint the ghost colours blend toward. Picked slightly
+      // cooler than pure grey so warm materials (red brick, orange
+      // beams) don't punch through as much as neutrals.
+      var _GHOST_TINT = new THREE.Color(0x5a6472);
       function _makeGhostClone(origMat) {
         if (!origMat) return origMat;
         if (Array.isArray(origMat)) return origMat.map(_makeGhostClone);
@@ -5034,17 +5055,29 @@ function startApp() {
         if (cached) return cached;
         var g = origMat.clone();
         g.transparent = true;
-        g.opacity = 0.18;
+        g.opacity = 0.10;
         g.depthWrite = false;
         // Quiet down any emissive glow the source material might have had —
         // a ghost should never out-shine the focused clash element.
         if (g.emissive && g.emissive.setScalar) g.emissive.setScalar(0);
-        // Keep surface normals readable under the scene lighting. For basic
-        // materials (no lighting) we fall back to a darker tint so they
-        // still read as "pushed back".
-        if (g.isMeshBasicMaterial && g.color && g.color.multiplyScalar) {
-          g.color.multiplyScalar(0.85);
+        // Desaturate toward a cool neutral tint so saturated reds, blues,
+        // and yellows stop competing with the discipline-coloured
+        // highlight outline. The previous "keep the material colour at
+        // low opacity" approach still left red columns visibly red
+        // against any focused element. 80% blend toward _GHOST_TINT
+        // preserves just enough hue to differentiate walls from pipes
+        // while killing the saturation that used to drown the highlight.
+        if (g.color && g.color.lerp) {
+          g.color.lerp(_GHOST_TINT, 0.8);
         }
+        // Strip specular highlights — they're the brightest pixels on a
+        // Phong surface and would still pop above a low-opacity ghost.
+        if (g.specular && g.specular.setScalar) g.specular.setScalar(0);
+        if (g.shininess != null) g.shininess = 0;
+        // Flatten metalness / roughness on PBR materials for the same
+        // reason: sharp reflections shouldn't read through the ghost.
+        if (g.metalness != null) g.metalness = 0;
+        if (g.roughness != null) g.roughness = 1;
         g._isCCGhost = true;
         _ghostMatCache.set(origMat.uuid, g);
         return g;
@@ -5404,11 +5437,17 @@ function startApp() {
         var dist = Math.max(sz.x,sz.y,sz.z,5)*2;
         _flyTo([ctr.x,ctr.y,ctr.z], dist);
       };
-      // Adaptive zoom distance: smaller objects get more padding, large objects get tighter framing
+      // Adaptive zoom distance: smaller objects get more padding, large
+      // objects get tighter framing. Tightened from the previous
+      // 2.5×..1.2× range to 1.8×..0.9× because clash review needs the
+      // user close enough to see the intersection — the earlier values
+      // framed whole walls from a room-scale distance, which with the
+      // new shaded ghosts made the highlight hard to spot in a sea of
+      // faintly-coloured surroundings.
       function _zoomDist(maxDim) {
-        var d = Math.max(maxDim, 0.5);
-        var scale = 2.5 - (Math.min(d, 20) / 20) * 1.3; // 2.5 for tiny, 1.2 for 20m+
-        return d * Math.max(1.2, Math.min(2.5, scale));
+        var d = Math.max(maxDim, 0.3);
+        var scale = 1.8 - (Math.min(d, 20) / 20) * 0.9; // 1.8 for tiny, 0.9 for 20m+
+        return d * Math.max(0.9, Math.min(1.8, scale));
       }
 
       _fitToElement = function(expressId, hint, modelId) {
@@ -5430,13 +5469,21 @@ function startApp() {
       // Accepts either bare expressIds (legacy) or {modelId, expressId}
       // refs — the latter are correctly scoped per model so cross-model
       // expressId collisions don't expand the bbox to random meshes.
+      //
+      // For clash fly-to (multi-ref + a fallbackPt clash point) the
+      // framing distance is based on the SMALLEST element's max dim and
+      // the camera centres on the clash point itself, not the combined
+      // bbox centre. A clash between a 12m wall and a 100mm pipe used to
+      // frame the whole wall from 20m back; now it frames the
+      // intersection closely so the user can actually see it.
       _flyToElements = function(targets, fallbackPt) {
         if(!S.mg||!S.orbit) return;
         if(!targets||!targets.length){
           if(fallbackPt) _flyTo(fallbackPt);
           return;
         }
-        var box = new THREE.Box3();
+        var combined = new THREE.Box3();
+        var perRefMaxDims = [];
         var foundAny = false;
         var hiddenMeshes = [];
         targets.forEach(function(t){
@@ -5444,6 +5491,8 @@ function startApp() {
           if (t && typeof t === 'object') { expressId = t.expressId; modelId = t.modelId || null; }
           else { expressId = t; modelId = null; }
           if (expressId == null) return;
+          var refBox = new THREE.Box3();
+          var refFound = false;
           S.mg.traverse(function(obj){
             if(!obj.isMesh || obj.userData.expressId !== expressId) return;
             if (modelId) {
@@ -5451,18 +5500,45 @@ function startApp() {
               if (mm !== modelId) return;
             }
             if(!obj.visible && obj.userData._frustumCulled){obj.visible=true;hiddenMeshes.push(obj);}
-            box.expandByObject(obj);
+            refBox.expandByObject(obj);
+            combined.expandByObject(obj);
             foundAny = true;
+            refFound = true;
           });
+          if (refFound && !refBox.isEmpty()) {
+            var rsz = refBox.getSize(new THREE.Vector3());
+            perRefMaxDims.push(Math.max(rsz.x, rsz.y, rsz.z));
+          }
         });
         hiddenMeshes.forEach(function(m){m.visible=false;});
         if(!foundAny){
           if(fallbackPt) _flyTo(fallbackPt);
           return;
         }
-        var ctr = box.getCenter(new THREE.Vector3());
-        var sz = box.getSize(new THREE.Vector3());
-        _flyTo([ctr.x, ctr.y, ctr.z], _zoomDist(Math.max(sz.x,sz.y,sz.z)));
+        var combinedSize = combined.getSize(new THREE.Vector3());
+        var combinedMax = Math.max(combinedSize.x, combinedSize.y, combinedSize.z);
+        // Pick the framing dim: for clash fly-to (2+ refs + a point), use
+        // the smallest element so we zoom in tight on the conflict;
+        // for single-element fits or when the refs are roughly similar
+        // in size, fall back to the combined extent.
+        var framingDim;
+        if (perRefMaxDims.length >= 2 && fallbackPt) {
+          var smallest = Math.min.apply(null, perRefMaxDims);
+          // Clamp so we never zoom in further than ~1m and never further
+          // out than the combined extent.
+          framingDim = Math.max(1, Math.min(smallest * 1.5, combinedMax));
+        } else {
+          framingDim = combinedMax;
+        }
+        var ctrX, ctrY, ctrZ;
+        if (fallbackPt && fallbackPt.length >= 3) {
+          // Centre on the clash point — that's what the user needs to see.
+          ctrX = fallbackPt[0]; ctrY = fallbackPt[1]; ctrZ = fallbackPt[2];
+        } else {
+          var ctr = combined.getCenter(new THREE.Vector3());
+          ctrX = ctr.x; ctrY = ctr.y; ctrZ = ctr.z;
+        }
+        _flyTo([ctrX, ctrY, ctrZ], _zoomDist(framingDim));
       };
 
       // Expose for addons (e.g. Revit Bridge selection sync)
@@ -9478,7 +9554,7 @@ function startApp() {
       ${open && html`<div style=${{padding:'.5rem',borderTop:'1px solid var(--border)',display:'flex',flexDirection:'column',gap:'.35rem'}}>
         <select value=${m.discipline} onChange=${function(e){var p=DISC.find(function(x){return x.id===e.target.value});d({t:A.UPD_MODEL,id:m.id,u:{discipline:e.target.value,color:p?p.c:m.color}})}}
           style=${{...S_INPUT,fontSize:'0.8rem',padding:'.2rem .4rem'}}>
-          ${DISC.map(function(p){return html`<option key=${p.id} value=${p.id}>${p.label}</option>`})}
+          ${DISC.slice().sort(function(a,b){return a.label.localeCompare(b.label);}).map(function(p){return html`<option key=${p.id} value=${p.id}>${p.label}</option>`})}
         </select>
         <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
           <span style=${{fontSize:'0.8rem',color:m.discipline==='other'?'var(--text-secondary)':'var(--text-faint)',opacity:m.discipline==='other'?1:0.5}}>Tag</span>
@@ -10770,7 +10846,7 @@ function startApp() {
           <span style=${FL}>Discipline</span>
           <select value=${f.discipline} onChange=${function(e){d({t:A.UPD_FILTERS,u:{discipline:e.target.value}})}} style=${SELSTYLE}>
             <option value="all">All disciplines</option>
-            ${DISC.map(function(p){return html`<option key=${p.id} value=${p.id}>${p.label}</option>`})}
+            ${DISC.slice().sort(function(a,b){return a.label.localeCompare(b.label);}).map(function(p){return html`<option key=${p.id} value=${p.id}>${p.label}</option>`})}
           </select>
         </div>`}
 
