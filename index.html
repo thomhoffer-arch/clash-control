@@ -13388,7 +13388,11 @@ function startApp() {
 
     if(items.length===0) return html`<div style=${{flex:1,overflowY:'auto'}}>
       <div style=${{textAlign:'center',color:'var(--text-faint)',fontSize:'0.86rem',padding:'2.5rem 1rem'}}>
-        <div style=${{fontSize:'2.3rem',marginBottom:'.3rem'}}>${isClash?'✅':'📋'}</div>
+        <div style=${{marginBottom:'.3rem',display:'flex',justifyContent:'center'}}>
+          ${isClash
+            ? html`<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>`
+            : html`<svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M4 15s1-1 4-1 5 2 8 2 4-1 4-1V3s-1 1-4 1-5-2-8-2-4 1-4 1z"/><line x1="4" y1="22" x2="4" y2="15"/></svg>`}
+        </div>
         ${'No '+(isClash?'clashes found yet':'issues yet')}
       </div>
     </div>`;
@@ -17311,6 +17315,11 @@ function startApp() {
     // Feedback state — hoisted above the early return for closed state to keep hook order stable
     var stFeedback = useState({}), feedback = stFeedback[0], setFeedback = stFeedback[1];
     var stReplyTo = useState(null), replyTo = stReplyTo[0], setReplyTo = stReplyTo[1];
+    // Transient "just copied" tick per-message — also hoisted above the early
+    // return so mobile (where the panel starts collapsed) doesn't hit React
+    // error #310 ("rendered more hooks than previous render") when the user
+    // opens the chat for the first time.
+    var stCopied = useState(-1), copiedIdx = stCopied[0], setCopiedIdx = stCopied[1];
     function onResizeStart(e, dir) {
       e.preventDefault();
       var startX = e.clientX, startY = e.clientY, startW = panelW, startH = panelH;
@@ -17414,7 +17423,7 @@ function startApp() {
     }
 
     // Transient "just copied" tick per-message (keyed by msg index).
-    var stCopied = useState(-1), copiedIdx = stCopied[0], setCopiedIdx = stCopied[1];
+    // State declared above the closed-state early return — see top of fn.
     function copyMsg(i, text) {
       var plain = (text || '').replace(/\*\*([^*]+)\*\*/g, '$1').replace(/\*([^*]+)\*/g, '$1').replace(/`([^`]+)`/g, '$1');
       try {
