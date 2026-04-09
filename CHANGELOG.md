@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.11.20 (2026-04-09)
+- Chrome overlap + Gemma model-count context + property panel polish
+
 ## v4.11.19 (2026-04-09)
 - Fix local-engine DataCloneError + show detection phases + Revit first-sync
 
