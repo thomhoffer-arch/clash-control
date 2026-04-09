@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.11.22 (2026-04-09)
+- Fix Navigator visibility, Color toggle, and overlay panel cleanup
+
 ## v4.11.21 (2026-04-09)
 - Single element panel + Box button toggle
 
