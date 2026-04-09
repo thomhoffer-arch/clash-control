@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.11.19 (2026-04-09)
+- Fix local-engine DataCloneError + show detection phases + Revit first-sync
+
 ## v4.11.18 (2026-04-09)
 - Next-level chat + navigator speedups + persistence fixes
 
