@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.11.7 (2026-04-09)
+- feat(engine,revit): optimistic connect flow + Revit 2024-2027 installer
+
 ## v4.11.6 (2026-04-09)
 - Multi-select sort and group for clashes and issues
 
