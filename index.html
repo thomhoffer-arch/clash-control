@@ -9476,7 +9476,7 @@ function startApp() {
       ${open && html`<div style=${{padding:'.5rem',borderTop:'1px solid var(--border)',display:'flex',flexDirection:'column',gap:'.35rem'}}>
         <select value=${m.discipline} onChange=${function(e){var p=DISC.find(function(x){return x.id===e.target.value});d({t:A.UPD_MODEL,id:m.id,u:{discipline:e.target.value,color:p?p.c:m.color}})}}
           style=${{...S_INPUT,fontSize:'0.8rem',padding:'.2rem .4rem'}}>
-          ${DISC.map(function(p){return html`<option key=${p.id} value=${p.id}>${p.label}</option>`})}
+          ${DISC.slice().sort(function(a,b){return a.label.localeCompare(b.label);}).map(function(p){return html`<option key=${p.id} value=${p.id}>${p.label}</option>`})}
         </select>
         <div style=${{display:'flex',alignItems:'center',gap:'.3rem'}}>
           <span style=${{fontSize:'0.8rem',color:m.discipline==='other'?'var(--text-secondary)':'var(--text-faint)',opacity:m.discipline==='other'?1:0.5}}>Tag</span>
@@ -10768,7 +10768,7 @@ function startApp() {
           <span style=${FL}>Discipline</span>
           <select value=${f.discipline} onChange=${function(e){d({t:A.UPD_FILTERS,u:{discipline:e.target.value}})}} style=${SELSTYLE}>
             <option value="all">All disciplines</option>
-            ${DISC.map(function(p){return html`<option key=${p.id} value=${p.id}>${p.label}</option>`})}
+            ${DISC.slice().sort(function(a,b){return a.label.localeCompare(b.label);}).map(function(p){return html`<option key=${p.id} value=${p.id}>${p.label}</option>`})}
           </select>
         </div>`}
 
