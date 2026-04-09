@@ -17698,19 +17698,54 @@ function startApp() {
                   </div>
                   ${s.revitDirect.loading ? html`<div style=${{display:'flex',gap:'.3rem',alignItems:'center'}}>
                     <span style=${{fontSize:'0.69rem',color:'var(--text-muted)',flex:1}}>
-                      ${s.revitDirect.progress > 0 ? Math.round(s.revitDirect.progress*100) + '%' : s.revitDirect.elementCount > 0 ? s.revitDirect.elementCount + ' elements' : 'Pulling model...'}
+                      ${s.revitDirect.progress > 0 ? Math.round(s.revitDirect.progress*100) + '%' : s.revitDirect.elementCount > 0 ? s.revitDirect.elementCount + ' elements' : 'Updating model...'}
                     </span>
                     <button onClick=${function(){if(window._revitDirectCancelExport) window._revitDirectCancelExport(); d({t:'UPD_REVIT_DIRECT', u:{loading:false, progress:0}});}}
                       style=${{padding:'.25rem .6rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',background:'#7f1d1d',color:'#fca5a5',fontFamily:'inherit'}}>Cancel</button>
-                  </div>` : html`<div style=${{display:'flex',gap:'.3rem'}}>
-                    <button onClick=${function(){if(window._revitDirectExport) window._revitDirectExport(['all'])}}
-                      style=${{padding:'.25rem .5rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',flex:1,
-                        background:'#1e3a5f',color:'#93c5fd',fontFamily:'inherit'}}>Pull Model</button>
-                    <button onClick=${function(){if(window._revitDirectPushClashes) window._revitDirectPushClashes(s,d)}}
-                      style=${{padding:'.25rem .5rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',flex:1,background:'#052e16',color:'#4ade80',fontFamily:'inherit'}}>Push Clashes</button>
-                    <button onClick=${function(){if(window._revitDirectDisconnect) window._revitDirectDisconnect(d)}}
-                      style=${{padding:'.25rem .5rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',background:'#7f1d1d',color:'#fca5a5',fontFamily:'inherit'}}>Disconnect</button>
-                  </div>`}
+                  </div>` : function(){
+                    // List already-linked Revit-sourced models. If more
+                    // than one is present, let the user pick which one
+                    // to update; otherwise just show the Update button.
+                    // "All" triggers a full re-pull of the connected
+                    // Revit document.
+                    var linkedRevitModels = (s.models||[]).filter(function(m){
+                      return m.stats && m.stats.source === 'revit-direct';
+                    });
+                    var selected = window._ccRevitUpdateTarget || 'all';
+                    if (linkedRevitModels.length > 1 && selected !== 'all' &&
+                        !linkedRevitModels.some(function(m){return m.name===selected;})) {
+                      selected = 'all';
+                    }
+                    return html`<div style=${{display:'flex',flexDirection:'column',gap:'.3rem'}}>
+                      ${linkedRevitModels.length > 1 && html`<select
+                        value=${selected}
+                        onChange=${function(e){window._ccRevitUpdateTarget = e.target.value;
+                          // Force re-render by dispatching a no-op update
+                          d({t:'UPD_REVIT_DIRECT', u:{}});
+                        }}
+                        style=${{padding:'.2rem .35rem',borderRadius:5,fontSize:'0.69rem',
+                          background:'var(--bg-primary)',color:'var(--text-primary)',
+                          border:'1px solid var(--border)',fontFamily:'inherit'}}>
+                        <option value="all">All linked models (${linkedRevitModels.length})</option>
+                        ${linkedRevitModels.map(function(m){return html`<option key=${m.id} value=${m.name}>${m.name}</option>`})}
+                      </select>`}
+                      <div style=${{display:'flex',gap:'.3rem'}}>
+                        <button onClick=${function(){
+                            if(!window._revitDirectExport) return;
+                            var target = window._ccRevitUpdateTarget || 'all';
+                            if (target === 'all') window._revitDirectExport(['all']);
+                            else window._revitDirectExport(['all'], {name: target});
+                          }}
+                          title=${linkedRevitModels.length > 1 ? 'Re-pull the selected Revit model from the connector' : linkedRevitModels.length === 1 ? 'Re-pull the linked Revit model' : 'Pull the current Revit document for the first time'}
+                          style=${{padding:'.25rem .5rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',flex:1,
+                            background:'#1e3a5f',color:'#93c5fd',fontFamily:'inherit'}}>${linkedRevitModels.length === 0 ? 'Pull Model' : 'Update Model'}</button>
+                        <button onClick=${function(){if(window._revitDirectPushClashes) window._revitDirectPushClashes(s,d)}}
+                          style=${{padding:'.25rem .5rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',flex:1,background:'#052e16',color:'#4ade80',fontFamily:'inherit'}}>Push Clashes</button>
+                        <button onClick=${function(){if(window._revitDirectDisconnect) window._revitDirectDisconnect(d)}}
+                          style=${{padding:'.25rem .5rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',background:'#7f1d1d',color:'#fca5a5',fontFamily:'inherit'}}>Disconnect</button>
+                      </div>
+                    </div>`;
+                  }()}
                   ${s.revitDirect.loading && html`<div style=${{width:'100%',height:3,background:'var(--bg-primary)',borderRadius:2,overflow:'hidden'}}>
                     <div style=${{width:Math.round((s.revitDirect.progress||0)*100)+'%',height:'100%',background:'var(--accent)',borderRadius:2,transition:'width .3s'}}></div>
                   </div>`}
