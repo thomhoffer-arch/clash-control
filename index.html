@@ -17463,11 +17463,6 @@ function startApp() {
       </span>`}
       ${_chatTurnCount > 0 && html`<span style=${{fontSize:'0.6rem', color:mutedCol, opacity:0.7}}>${_chatTurnCount} turn${_chatTurnCount===1?'':'s'}</span>`}
       <div style=${{flex:1}}></div>
-      ${_chatTurnCount > 0 && html`<button onClick=${clearChat}
-        title="Clear chat history" aria-label="Clear chat history"
-        style=${{background:'none', border:'1px solid '+borderCol, cursor:'pointer',
-          color:mutedCol, fontSize:'0.66rem', lineHeight:1, padding:'.2rem .45rem',
-          borderRadius:6, fontWeight:500}}>Clear</button>`}
       ${!isDocked && html`<button onClick=${function(){ setOpen(false); }} style=${{
         background:'none', border:'none', cursor:'pointer',
         color:mutedCol, fontSize:'1.26rem', lineHeight:1, padding:'0 .1rem'
@@ -17546,6 +17541,13 @@ function startApp() {
             >${sug}</div>`})}
           </div>`;
         }()}
+        ${_chatTurnCount > 0 && html`<div style=${{display:'flex',justifyContent:'center',paddingBottom:'.3rem'}}>
+          <button onClick=${clearChat}
+            title="Clear chat history" aria-label="Clear chat history"
+            style=${{background:'none',border:'1px solid '+borderCol,cursor:'pointer',
+              color:mutedCol,fontSize:'0.66rem',lineHeight:1,padding:'.25rem .8rem',
+              borderRadius:20,fontWeight:500,opacity:.7}}>Clear chat</button>
+        </div>`}
         <div ref=${bottomRef}></div>
       </div>
 
@@ -17670,6 +17672,13 @@ function startApp() {
               <span style=${{animation:'nlDots 1.4s ease-in-out .4s infinite',color:'#93c5fd'}}>.</span>
             </span>
           </div>
+        </div>`}
+        ${_chatTurnCount > 0 && html`<div style=${{display:'flex',justifyContent:'center',paddingBottom:'.3rem'}}>
+          <button onClick=${clearChat}
+            title="Clear chat history" aria-label="Clear chat history"
+            style=${{background:'none',border:'1px solid '+borderCol,cursor:'pointer',
+              color:mutedCol,fontSize:'0.66rem',lineHeight:1,padding:'.25rem .8rem',
+              borderRadius:20,fontWeight:500,opacity:.7}}>Clear chat</button>
         </div>`}
         <div ref=${bottomRef}></div>
       </div>
@@ -18630,9 +18639,11 @@ function startApp() {
         background:'transparent',transition:'background .15s',borderRadius:'14px 0 0 14px'}} onMouseEnter=${function(e){e.currentTarget.style.background='rgba(59,130,246,0.3)';}} onMouseLeave=${function(e){e.currentTarget.style.background='transparent';}}></div>
       <button onClick=${function(){ setCollapsed(true); try{localStorage.setItem('cc_ai_panel_collapsed','1');}catch(e){} }}
         title="Collapse AI chat" style=${{
-          position:'absolute', right:6, top:6, zIndex:11, background:'transparent',
-          border:'none', cursor:'pointer', color:'var(--text-muted)', fontSize:'1rem',
-          padding:'.15rem .35rem', lineHeight:1
+          position:'absolute', right:8, top:'50%', transform:'translateY(-50%)', zIndex:11,
+          background:'var(--bg-secondary)', border:'1px solid var(--border)',
+          borderRadius:6, cursor:'pointer', color:'var(--text-secondary)',
+          fontSize:'1.3rem', padding:'.3rem .45rem', lineHeight:1,
+          boxShadow:'var(--shadow-sm)'
         }}>›</button>
       <${NLCommandPanel} s=${s} d=${d} docked=${true} />
     </div>`;
