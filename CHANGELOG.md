@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.14.15 (2026-04-10)
+- Fix walk mode navigation: orbit interference, nav cube, speed, up/down
+
 ## v4.14.14 (2026-04-10)
 - Walk mode: derive geometry unit scale from storey + geoFactor
 
