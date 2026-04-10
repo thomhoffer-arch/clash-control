@@ -5,6 +5,9 @@
 //   - ChatGPT (via REST bridge + OpenAPI Actions)
 //   - Any LLM with function calling (via REST API)
 //
+// One-click install: downloads a standalone binary, registers a URL
+// scheme (clashcontrol-bridge://start), and polls until connected.
+//
 // Receives tool calls from the bridge server (localhost:19802),
 // executes them via window._ccDispatch and friends, sends results back.
 
@@ -12,11 +15,130 @@
   'use strict';
 
   var WS_URL = 'ws://127.0.0.1:19802';
+  var REST_URL = 'http://127.0.0.1:19803';
   var _ws = null;
-  var _reconnectTimer = null;
-  var _reconnectDelay = 0;
-  var _userDisabled = false;
   var _connected = false;
+
+  // ── Download URLs for standalone binaries ─────────────────────────
+  var _releaseTag = 'v0.1.0';
+  var _releaseBase = 'https://github.com/clashcontrol-io/ClashControlSmartBridge/releases/download/' + _releaseTag + '/';
+  var _downloads = {
+    win:   {url: _releaseBase + 'clashcontrol-smart-bridge-win.exe',       label: 'Windows (.exe)',    cmd: 'clashcontrol-smart-bridge.exe'},
+    mac:   {url: _releaseBase + 'clashcontrol-smart-bridge-mac.tar.gz',    label: 'macOS (.tar.gz)',   cmd: 'tar -xzf clashcontrol-smart-bridge-mac.tar.gz\n./clashcontrol-smart-bridge'},
+    linux: {url: _releaseBase + 'clashcontrol-smart-bridge-linux.tar.gz',  label: 'Linux (.tar.gz)',   cmd: 'tar -xzf clashcontrol-smart-bridge-linux.tar.gz\n./clashcontrol-smart-bridge'}
+  };
+
+  function _detectOS() {
+    var ua = navigator.userAgent || '';
+    if (/Win/.test(navigator.platform || ua)) return 'win';
+    if (/Mac/.test(navigator.platform || ua)) return 'mac';
+    return 'linux';
+  }
+
+  // ── Status probe ──────────────────────────────────────────────────
+
+  function _probeStatus(timeoutMs) {
+    var fetchOpts = {method:'GET', cache:'no-store'};
+    try { if (AbortSignal.timeout) fetchOpts.signal = AbortSignal.timeout(timeoutMs || 500); } catch(e){}
+    return fetch(REST_URL + '/status', fetchOpts)
+      .then(function(r){ if (!r.ok) throw new Error('HTTP '+r.status); return r.json(); });
+  }
+
+  // ── Download trigger ──────────────────────────────────────────────
+  // Must be called synchronously within a user gesture (click handler)
+
+  function _triggerDownload() {
+    var os = _detectOS();
+    var dl = _downloads[os];
+    var a = document.createElement('a');
+    a.href = dl.url;
+    a.download = '';
+    a.rel = 'noopener';
+    a.style.display = 'none';
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(function(){ document.body.removeChild(a); }, 100);
+    return true;
+  }
+
+  // ── URL-scheme launch ─────────────────────────────────────────────
+
+  function _launchBridge() {
+    try {
+      var a = document.createElement('a');
+      a.href = 'clashcontrol-bridge://start';
+      a.rel = 'noopener';
+      a.click();
+    } catch (e) {
+      console.log('[Smart Bridge] URL-scheme launch failed:', e && e.message || e);
+    }
+  }
+
+  // ── Connect with polling ──────────────────────────────────────────
+
+  var _connectGen = 0;
+  function _cancelPendingConnect() { _connectGen++; }
+
+  function _connectBridge(d, opts) {
+    opts = opts || {};
+    _cancelPendingConnect();
+    var gen = _connectGen;
+    var timeoutMs = opts.installing ? 600000 : 6000; // 10min for install, 6s for reconnect
+
+    if (d) d({t:'UPD_SMART_BRIDGE', u:{
+      connecting: true, installing: !!opts.installing, failed: false
+    }});
+
+    // Try URL scheme launch (for returning users with registered handler)
+    if (!opts.installing) {
+      _launchBridge();
+    }
+
+    var start = Date.now();
+    var deadline = start + timeoutMs;
+    function tick() {
+      if (gen !== _connectGen) return Promise.resolve(null);
+      if (Date.now() >= deadline) {
+        if (d) d({t:'UPD_SMART_BRIDGE', u:{connecting:false, installing:false, failed:true}});
+        return Promise.reject(new Error('BRIDGE_NOT_INSTALLED'));
+      }
+      var elapsed = Date.now() - start;
+      var pollInterval = elapsed < 6000 ? 300 : 2000;
+      return _probeStatus(500)
+        .then(function(j) {
+          if (gen !== _connectGen) return null;
+          // Bridge is running — connect WebSocket
+          if (d) d({t:'UPD_SMART_BRIDGE', u:{
+            available: true, connecting: false, installing: false, failed: false,
+            wasInstalled: true, version: j.version || null
+          }});
+          try { localStorage.setItem('cc_smart_bridge','1'); } catch(e){}
+          _connectWs(d);
+          return j;
+        })
+        .catch(function() {
+          return new Promise(function(r){ setTimeout(r, pollInterval); }).then(tick);
+        });
+    }
+    return tick();
+  }
+
+  // ── Passive status check (no URL scheme, no install) ──────────────
+
+  function _checkBridge(d) {
+    if (d) d({t:'UPD_SMART_BRIDGE', u:{checking:true}});
+    return _probeStatus(1000)
+      .then(function(j) {
+        if (d) d({t:'UPD_SMART_BRIDGE', u:{
+          checking:false, available:true, version: j.version || null
+        }});
+        return j;
+      })
+      .catch(function() {
+        if (d) d({t:'UPD_SMART_BRIDGE', u:{checking:false, available:false}});
+        return null;
+      });
+  }
 
   // ── State helpers ─────────────────────────────────────────────────
 
@@ -29,7 +151,6 @@
   }
 
   // ── Action handlers ───────────────────────────────────────────────
-  // Each handler receives params and returns a result (string or object).
 
   var handlers = {};
 
@@ -40,15 +161,13 @@
     });
     var r = s.rules || {};
     return {
-      models: models,
-      modelCount: models.length,
+      models: models, modelCount: models.length,
       clashCount: (s.clashes || []).length,
       openClashes: (s.clashes || []).filter(function(c) { return c.status !== 'resolved'; }).length,
       issueCount: (s.issues || []).length,
       activeProject: s.activeProject || null,
       rules: { maxGap: r.maxGap || 10, hard: !!r.hard, modelA: r.modelA || 'all', modelB: r.modelB || 'all', excludeSelf: !!r.excludeSelf },
-      activeTab: s.tab || 'clashes',
-      walkMode: !!s.walkMode,
+      activeTab: s.tab || 'clashes', walkMode: !!s.walkMode,
       theme: document.documentElement.getAttribute('data-theme') || 'dark'
     };
   };
@@ -56,46 +175,28 @@
   handlers.get_clashes = function(p) {
     var s = _getState();
     var clashes = s.clashes || [];
-    if (p.status && p.status !== 'all') {
-      clashes = clashes.filter(function(c) { return c.status === p.status; });
-    }
+    if (p.status && p.status !== 'all') clashes = clashes.filter(function(c) { return c.status === p.status; });
     var limit = p.limit || 50;
     return {
       total: clashes.length,
       clashes: clashes.slice(0, limit).map(function(c, i) {
-        return {
-          index: i,
-          title: c.title || c.aiTitle || ('Clash ' + (i + 1)),
-          status: c.status || 'open',
-          priority: c.priority || 'normal',
-          storey: c.storey || null,
-          typeA: c.typeA || null,
-          typeB: c.typeB || null,
-          nameA: c.nameA || null,
-          nameB: c.nameB || null,
+        return { index: i, title: c.title || c.aiTitle || ('Clash ' + (i + 1)),
+          status: c.status || 'open', priority: c.priority || 'normal',
+          storey: c.storey || null, typeA: c.typeA || null, typeB: c.typeB || null,
+          nameA: c.nameA || null, nameB: c.nameB || null,
           distance: c.distance != null ? c.distance : null,
-          aiSeverity: c.aiSeverity || null,
-          aiCategory: c.aiCategory || null
-        };
+          aiSeverity: c.aiSeverity || null, aiCategory: c.aiCategory || null };
       })
     };
   };
 
   handlers.get_issues = function(p) {
-    var s = _getState();
-    var issues = s.issues || [];
-    var limit = p.limit || 50;
-    return {
-      total: issues.length,
+    var s = _getState(); var issues = s.issues || []; var limit = p.limit || 50;
+    return { total: issues.length,
       issues: issues.slice(0, limit).map(function(issue, i) {
-        return {
-          index: i,
-          title: issue.title || ('Issue ' + (i + 1)),
-          status: issue.status || 'open',
-          priority: issue.priority || 'normal',
-          assignee: issue.assignee || null,
-          description: issue.description || null
-        };
+        return { index: i, title: issue.title || ('Issue ' + (i + 1)),
+          status: issue.status || 'open', priority: issue.priority || 'normal',
+          assignee: issue.assignee || null, description: issue.description || null };
       })
     };
   };
@@ -110,207 +211,77 @@
     if (p.hard != null) updates.hard = p.hard;
     if (p.excludeSelf != null) updates.excludeSelf = p.excludeSelf;
     _dispatch({ t: 'UPD_RULES', u: updates });
-    // Trigger detection via the global helper
     if (window._ccRunDetection) {
       window._ccRunDetection();
       return 'Detection started: ' + (p.modelA || 'all') + ' vs ' + (p.modelB || 'all') +
-        (p.maxGap != null ? ', gap ' + p.maxGap + 'mm' : '') +
-        (p.hard ? ', hard clashes' : '');
+        (p.maxGap != null ? ', gap ' + p.maxGap + 'mm' : '') + (p.hard ? ', hard clashes' : '');
     }
     return 'Detection trigger not available. Make sure models are loaded.';
   };
 
   handlers.set_detection_rules = function(p) {
-    var updates = {};
-    if (p.maxGap != null) updates.maxGap = p.maxGap;
-    if (p.hard != null) updates.hard = p.hard;
-    if (p.excludeSelf != null) updates.excludeSelf = p.excludeSelf;
-    if (p.duplicates != null) updates.duplicates = p.duplicates;
-    _dispatch({ t: 'UPD_RULES', u: updates });
-    return 'Detection rules updated.';
+    var u = {};
+    if (p.maxGap != null) u.maxGap = p.maxGap;
+    if (p.hard != null) u.hard = p.hard;
+    if (p.excludeSelf != null) u.excludeSelf = p.excludeSelf;
+    if (p.duplicates != null) u.duplicates = p.duplicates;
+    _dispatch({ t: 'UPD_RULES', u: u }); return 'Detection rules updated.';
   };
 
   handlers.update_clash = function(p) {
-    var s = _getState();
-    var clashes = s.clashes || [];
+    var s = _getState(); var clashes = s.clashes || [];
     if (p.clashIndex < 0 || p.clashIndex >= clashes.length) return 'Invalid clash index.';
-    var clash = clashes[p.clashIndex];
-    var updates = {};
-    if (p.status) updates.status = p.status;
-    if (p.priority) updates.priority = p.priority;
-    if (p.assignee != null) updates.assignee = p.assignee;
-    if (p.title) updates.title = p.title;
-    _dispatch({ t: 'UPD_CLASH', id: clash.id, u: updates });
-    return 'Updated clash ' + (p.clashIndex + 1) + ': ' + JSON.stringify(updates);
+    var u = {};
+    if (p.status) u.status = p.status; if (p.priority) u.priority = p.priority;
+    if (p.assignee != null) u.assignee = p.assignee; if (p.title) u.title = p.title;
+    _dispatch({ t: 'UPD_CLASH', id: clashes[p.clashIndex].id, u: u });
+    return 'Updated clash ' + (p.clashIndex + 1) + '.';
   };
 
   handlers.batch_update_clashes = function(p) {
-    // Delegate to processNLCommand for batch operations
-    if (typeof processNLCommand === 'function') {
-      return processNLCommand('batch ' + p.action + ' ' + p.filter, _getState(), _dispatch) || 'Batch update applied.';
-    }
-    return 'Batch update: not available in this context.';
+    if (window._ccProcessNLCommand) return window._ccProcessNLCommand('batch ' + p.action + ' ' + p.filter) || 'Batch update applied.';
+    return 'Batch update: not available.';
   };
 
   handlers.set_view = function(p) {
     var viewMap = { top: 'top view', front: 'front view', back: 'back view', left: 'left view', right: 'right view', isometric: 'isometric view', reset: 'reset view' };
-    var cmd = viewMap[p.view] || p.view;
-    // Use the NL command processor for view changes
-    if (window._ccProcessNLCommand) {
-      window._ccProcessNLCommand(cmd);
-      return (p.view === 'reset' ? 'View reset.' : p.view.charAt(0).toUpperCase() + p.view.slice(1) + ' view.');
-    }
+    if (window._ccProcessNLCommand) { window._ccProcessNLCommand(viewMap[p.view] || p.view); return (p.view === 'reset' ? 'View reset.' : p.view.charAt(0).toUpperCase() + p.view.slice(1) + ' view.'); }
     return 'View change not available.';
   };
 
-  handlers.set_render_style = function(p) {
-    var map = { wireframe: 'wireframe', shaded: 'shaded', rendered: 'rendered', standard: 'standard' };
-    _dispatch({ t: 'RENDER_STYLE', v: map[p.style] || 'shaded' });
-    return 'Render style: ' + p.style;
-  };
-
-  handlers.set_section = function(p) {
-    _dispatch({ t: 'SECTION', axis: p.axis === 'none' ? null : p.axis });
-    return p.axis === 'none' ? 'Section cleared.' : 'Section cut: ' + p.axis.toUpperCase() + ' axis';
-  };
-
-  handlers.color_by = function(p) {
-    var v = p.by === 'none' ? null : 'by' + p.by.charAt(0).toUpperCase() + p.by.slice(1);
-    _dispatch({ t: 'COLOR_BY_CLASS', v: v });
-    return p.by === 'none' ? 'Colors reset.' : 'Colored by ' + p.by + '.';
-  };
-
-  handlers.set_theme = function(p) {
-    document.documentElement.setAttribute('data-theme', p.theme);
-    try { localStorage.setItem('cc_theme', p.theme); } catch (e) {}
-    return p.theme.charAt(0).toUpperCase() + p.theme.slice(1) + ' theme applied.';
-  };
-
-  handlers.set_visibility = function(p) {
-    if (p.option === 'grid') _dispatch({ t: 'TOGGLE_GRID', v: p.visible });
-    else if (p.option === 'axes') _dispatch({ t: 'TOGGLE_AXES', v: p.visible });
-    else if (p.option === 'markers') _dispatch({ t: 'TOGGLE_MARKERS', v: p.visible });
-    return (p.visible ? 'Showing' : 'Hiding') + ' ' + p.option + '.';
-  };
-
-  handlers.restore_visibility = function() {
-    if (window._ccUnghostAll) window._ccUnghostAll();
-    return 'All elements restored to full visibility.';
-  };
-
-  handlers.fly_to_clash = function(p) {
-    var s = _getState();
-    var clashes = s.clashes || [];
-    if (p.clashIndex < 0 || p.clashIndex >= clashes.length) return 'Invalid clash index.';
-    _dispatch({ t: 'SELECT_CLASH', id: clashes[p.clashIndex].id });
-    return 'Flying to clash ' + (p.clashIndex + 1) + '.';
-  };
-
-  handlers.navigate_tab = function(p) {
-    _dispatch({ t: 'TAB', v: p.tab });
-    return 'Switched to ' + p.tab + ' tab.';
-  };
-
-  handlers.filter_clashes = function(p) {
-    var u = {};
-    if (p.status) u.status = p.status;
-    if (p.priority) u.priority = p.priority;
-    _dispatch({ t: 'UPD_FILTERS', u: u });
-    return 'Filters updated.';
-  };
-
-  handlers.sort_clashes = function(p) {
-    _dispatch({ t: 'CLASH_SORT', v: p.sortBy });
-    return 'Sorted by ' + p.sortBy + '.';
-  };
-
-  handlers.group_clashes = function(p) {
-    _dispatch({ t: 'CLASH_GROUP_BY', v: p.groupBy === 'none' ? [] : [p.groupBy] });
-    return 'Grouped by ' + p.groupBy + '.';
-  };
-
-  handlers.export_bcf = function(p) {
-    var s = _getState();
-    var items = s.issues && s.issues.length ? s.issues : (s.clashes || []);
-    if (!items.length) return 'Nothing to export — no clashes or issues.';
-    if (window._ccExportBCF) {
-      window._ccExportBCF(items, p.version || '2.1');
-      return 'Exported ' + items.length + ' items as BCF ' + (p.version || '2.1') + '.';
-    }
-    return 'BCF export not available.';
-  };
-
-  handlers.create_project = function(p) {
-    _dispatch({ t: 'CREATE_PROJECT', name: p.name });
-    return 'Project "' + p.name + '" created.';
-  };
-
-  handlers.switch_project = function(p) {
-    var s = _getState();
-    var projects = s.projectList || [];
-    var match = projects.find(function(proj) {
-      return (proj.name || '').toLowerCase().indexOf(p.name.toLowerCase()) >= 0;
-    });
-    if (match) {
-      _dispatch({ t: 'SET_PROJECT', id: match.id });
-      return 'Switched to project "' + match.name + '".';
-    }
-    return 'Project "' + p.name + '" not found. Available: ' + projects.map(function(pr) { return pr.name; }).join(', ');
-  };
-
-  handlers.measure = function(p) {
-    if (p.mode === 'stop') {
-      _dispatch({ t: 'MEASURE_MODE', v: null });
-      return 'Measurement stopped.';
-    }
-    if (p.mode === 'clear') {
-      _dispatch({ t: 'CLEAR_MEASUREMENTS' });
-      return 'Measurements cleared.';
-    }
-    _dispatch({ t: 'MEASURE_MODE', v: p.mode });
-    return 'Measurement mode: ' + p.mode + '. Click elements in the 3D view.';
-  };
-
+  handlers.set_render_style = function(p) { _dispatch({ t: 'RENDER_STYLE', v: p.style || 'shaded' }); return 'Render style: ' + p.style; };
+  handlers.set_section = function(p) { _dispatch({ t: 'SECTION', axis: p.axis === 'none' ? null : p.axis }); return p.axis === 'none' ? 'Section cleared.' : 'Section cut: ' + p.axis.toUpperCase(); };
+  handlers.color_by = function(p) { var v = p.by === 'none' ? null : 'by' + p.by.charAt(0).toUpperCase() + p.by.slice(1); _dispatch({ t: 'COLOR_BY_CLASS', v: v }); return p.by === 'none' ? 'Colors reset.' : 'Colored by ' + p.by + '.'; };
+  handlers.set_theme = function(p) { document.documentElement.setAttribute('data-theme', p.theme); try { localStorage.setItem('cc_theme', p.theme); } catch (e) {} return p.theme.charAt(0).toUpperCase() + p.theme.slice(1) + ' theme.'; };
+  handlers.set_visibility = function(p) { if (p.option === 'grid') _dispatch({ t: 'TOGGLE_GRID', v: p.visible }); else if (p.option === 'axes') _dispatch({ t: 'TOGGLE_AXES', v: p.visible }); else if (p.option === 'markers') _dispatch({ t: 'TOGGLE_MARKERS', v: p.visible }); return (p.visible ? 'Showing' : 'Hiding') + ' ' + p.option + '.'; };
+  handlers.restore_visibility = function() { if (window._ccUnghostAll) window._ccUnghostAll(); return 'All elements restored.'; };
+  handlers.fly_to_clash = function(p) { var s = _getState(); var cl = s.clashes || []; if (p.clashIndex < 0 || p.clashIndex >= cl.length) return 'Invalid clash index.'; _dispatch({ t: 'SELECT_CLASH', id: cl[p.clashIndex].id }); return 'Flying to clash ' + (p.clashIndex + 1) + '.'; };
+  handlers.navigate_tab = function(p) { _dispatch({ t: 'TAB', v: p.tab }); return 'Switched to ' + p.tab + ' tab.'; };
+  handlers.filter_clashes = function(p) { var u = {}; if (p.status) u.status = p.status; if (p.priority) u.priority = p.priority; _dispatch({ t: 'UPD_FILTERS', u: u }); return 'Filters updated.'; };
+  handlers.sort_clashes = function(p) { _dispatch({ t: 'CLASH_SORT', v: p.sortBy }); return 'Sorted by ' + p.sortBy + '.'; };
+  handlers.group_clashes = function(p) { _dispatch({ t: 'CLASH_GROUP_BY', v: p.groupBy === 'none' ? [] : [p.groupBy] }); return 'Grouped by ' + p.groupBy + '.'; };
+  handlers.export_bcf = function(p) { var s = _getState(); var items = s.issues && s.issues.length ? s.issues : (s.clashes || []); if (!items.length) return 'Nothing to export.'; if (window._ccExportBCF) { window._ccExportBCF(items, p.version || '2.1'); return 'Exported ' + items.length + ' items as BCF.'; } return 'BCF export not available.'; };
+  handlers.create_project = function(p) { _dispatch({ t: 'CREATE_PROJECT', name: p.name }); return 'Project "' + p.name + '" created.'; };
+  handlers.switch_project = function(p) { var s = _getState(); var projects = s.projectList || []; var match = projects.find(function(pr) { return (pr.name || '').toLowerCase().indexOf(p.name.toLowerCase()) >= 0; }); if (match) { _dispatch({ t: 'SET_PROJECT', id: match.id }); return 'Switched to "' + match.name + '".'; } return 'Project "' + p.name + '" not found.'; };
+  handlers.measure = function(p) { if (p.mode === 'stop') { _dispatch({ t: 'MEASURE_MODE', v: null }); return 'Measurement stopped.'; } if (p.mode === 'clear') { _dispatch({ t: 'CLEAR_MEASUREMENTS' }); return 'Measurements cleared.'; } _dispatch({ t: 'MEASURE_MODE', v: p.mode }); return 'Measurement mode: ' + p.mode + '.'; };
   handlers.walk_mode = function(p) {
     if (p.enabled) {
       _dispatch({ t: 'WALK_MODE', v: true });
-      if (window._ccWalkEnter) {
-        var s = _getState();
-        var elev = 0;
-        if (s.floorPlan) elev = s.floorPlan.elevation;
-        else {
-          var storeys = (typeof _ccCollectStoreys === 'function') ? _ccCollectStoreys(s.models || []) : [];
-          if (storeys.length) {
-            var gf = (typeof _ccStoreyToGeoFactor === 'function') ? _ccStoreyToGeoFactor(s.models || []) : 1;
-            elev = storeys[0].elevation * gf;
-          }
-        }
-        window._ccWalkEnter(elev);
-      }
-      return 'Walk mode activated. Use WASD to move, click canvas for mouse look.';
-    } else {
-      if (window._ccWalkExit) window._ccWalkExit();
-      _dispatch({ t: 'WALK_MODE', v: false });
-      return 'Walk mode deactivated.';
-    }
+      if (window._ccWalkEnter) { var s = _getState(); var elev = 0; if (s.floorPlan) elev = s.floorPlan.elevation; else { var storeys = (typeof _ccCollectStoreys === 'function') ? _ccCollectStoreys(s.models || []) : []; if (storeys.length) { var gf = (typeof _ccStoreyToGeoFactor === 'function') ? _ccStoreyToGeoFactor(s.models || []) : 1; elev = storeys[0].elevation * gf; } } window._ccWalkEnter(elev); }
+      return 'Walk mode activated.';
+    } else { if (window._ccWalkExit) window._ccWalkExit(); _dispatch({ t: 'WALK_MODE', v: false }); return 'Walk mode deactivated.'; }
   };
 
   // ── WebSocket connection ──────────────────────────────────────────
 
-  function _connect() {
-    if (_userDisabled) return;
+  function _connectWs(d) {
     if (_ws && _ws.readyState <= 1) return;
-
-    try { _ws = new WebSocket(WS_URL); } catch (e) {
-      _scheduleReconnect();
-      return;
-    }
+    try { _ws = new WebSocket(WS_URL); } catch (e) { return; }
 
     _ws.onopen = function() {
       _connected = true;
-      _reconnectDelay = 0;
-      _updateUI();
-      console.log('%c[Smart Bridge] Connected to MCP server', 'color:#22c55e;font-weight:bold');
+      if (d) d({t:'UPD_SMART_BRIDGE', u:{connected:true}});
+      console.log('%c[Smart Bridge] Connected', 'color:#22c55e;font-weight:bold');
     };
 
     _ws.onmessage = function(evt) {
@@ -319,63 +290,39 @@
         if (msg.id != null && msg.action) {
           var handler = handlers[msg.action];
           var result;
-          if (handler) {
-            try {
-              result = handler(msg.params || {});
-            } catch (e) {
-              result = 'Error executing ' + msg.action + ': ' + e.message;
-            }
-          } else {
-            result = 'Unknown action: ' + msg.action;
-          }
+          if (handler) { try { result = handler(msg.params || {}); } catch (e) { result = 'Error: ' + e.message; } }
+          else { result = 'Unknown action: ' + msg.action; }
           _ws.send(JSON.stringify({ id: msg.id, result: result }));
         }
-      } catch (e) {
-        console.error('[Smart Bridge] Message error:', e);
-      }
+      } catch (e) { console.error('[Smart Bridge] Message error:', e); }
     };
 
     _ws.onclose = function() {
       _connected = false;
-      _updateUI();
-      _scheduleReconnect();
+      if (d) d({t:'UPD_SMART_BRIDGE', u:{connected:false}});
+      // Auto-reconnect after 3s
+      setTimeout(function() { _connectWs(d); }, 3000);
     };
 
-    _ws.onerror = function() {
-      // onclose will fire after this
-    };
+    _ws.onerror = function() {};
   }
 
-  function _disconnect() {
-    _userDisabled = true;
-    clearTimeout(_reconnectTimer);
+  function _disconnectWs() {
+    _cancelPendingConnect();
     if (_ws) { try { _ws.close(); } catch (e) {} }
     _ws = null;
     _connected = false;
-    _updateUI();
   }
 
-  function _scheduleReconnect() {
-    if (_userDisabled) return;
-    _reconnectDelay = Math.min((_reconnectDelay || 2000) * 1.5, 30000);
-    _reconnectTimer = setTimeout(_connect, _reconnectDelay);
-  }
+  // ── Expose globals ────────────────────────────────────────────────
 
-  function _updateUI() {
-    if (window._ccDispatch) {
-      window._ccDispatch({ t: 'UPD_SMART_BRIDGE', u: { connected: _connected } });
-    }
-  }
+  window._ccSmartBridgeConnect = function(d) { _connectBridge(d || window._ccDispatch); };
+  window._ccSmartBridgeInstall = function(d) { _triggerDownload(); _connectBridge(d || window._ccDispatch, {installing:true}); };
+  window._ccSmartBridgeDisconnect = function() { _disconnectWs(); _dispatch({t:'UPD_SMART_BRIDGE', u:{connected:false, available:false}}); };
+  window._ccSmartBridgeCheck = function(d) { _checkBridge(d || window._ccDispatch); };
 
-  // ── Expose globals for the core UI ────────────────────────────────
+  // ── Register addon ────────────────────────────────────────────────
 
-  window._ccSmartBridgeConnect = function() { _userDisabled = false; _reconnectDelay = 0; _connect(); };
-  window._ccSmartBridgeDisconnect = _disconnect;
-  window._ccSmartBridgeStatus = function() { return { connected: _connected, url: WS_URL }; };
-
-  // Auto-connect is handled by the addon init() callback above
-
-  // Register as addon
   if (window._ccRegisterAddon) {
     window._ccRegisterAddon({
       id: 'smart-bridge',
@@ -385,7 +332,9 @@
       icon: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>',
 
       initState: {
-        smartBridge: { connected: false }
+        smartBridge: { connected: false, available: false, checking: false,
+          connecting: false, installing: false, failed: false,
+          wasInstalled: false, version: null }
       },
 
       reducerCases: {
@@ -396,30 +345,104 @@
 
       init: function(dispatch) {
         console.log('[Smart Bridge] Addon activated');
-        var wasActive = false;
-        try { wasActive = localStorage.getItem('cc_smart_bridge') === '1'; } catch (e) {}
-        if (wasActive) {
-          _userDisabled = false;
-          _reconnectDelay = 0;
-          setTimeout(_connect, 1500);
+        var wasInstalled = false;
+        try { wasInstalled = localStorage.getItem('cc_smart_bridge') === '1'; } catch (e) {}
+        if (wasInstalled) {
+          dispatch({t:'UPD_SMART_BRIDGE', u:{wasInstalled:true}});
+          // Passive check — if bridge is already running, connect automatically
+          _checkBridge(dispatch).then(function(j) {
+            if (j) _connectWs(dispatch);
+          });
         }
       },
 
+      onEnable: function(dispatch) {
+        var wasInstalled = false;
+        try { wasInstalled = localStorage.getItem('cc_smart_bridge') === '1'; } catch (e) {}
+        if (wasInstalled) {
+          // Returning user: try URL scheme launch + fast poll
+          _connectBridge(dispatch);
+        } else {
+          // First time: download binary + long poll
+          _triggerDownload();
+          _connectBridge(dispatch, {installing: true});
+        }
+        try { localStorage.setItem('cc_smart_bridge','1'); } catch (e) {}
+      },
+
       destroy: function() {
-        _disconnect();
+        _disconnectWs();
         try { localStorage.removeItem('cc_smart_bridge'); } catch (e) {}
       },
 
-      onEnable: function() {
-        _userDisabled = false;
-        _reconnectDelay = 0;
-        _connect();
-        try { localStorage.setItem('cc_smart_bridge', '1'); } catch (e) {}
-      },
+      // ── Addon panel (rendered inside the addon card) ──────────────
+      panel: function(html, s, d) {
+        var sb = s.smartBridge || {};
+        var os = _detectOS();
+        var dl = _downloads[os];
 
-      onDisable: function() {
-        _disconnect();
-        try { localStorage.removeItem('cc_smart_bridge'); } catch (e) {}
+        // Connected state
+        if (sb.connected) {
+          return html`<div style=${{display:'flex',flexDirection:'column',gap:'.4rem'}}>
+            <div style=${{display:'flex',alignItems:'center',gap:'.4rem'}}>
+              <span style=${{width:7,height:7,borderRadius:'50%',background:'#22c55e',flexShrink:0}}></span>
+              <span style=${{fontSize:'0.75rem',color:'#4ade80',flex:1}}>Connected${sb.version ? ' \u2014 v' + sb.version : ''}</span>
+            </div>
+            <div style=${{fontSize:'0.63rem',color:'var(--text-faint)',lineHeight:1.5}}>
+              Your AI assistant can now control ClashControl.<br/>
+              <b>Claude:</b> Add MCP server to Claude Desktop config<br/>
+              <b>ChatGPT:</b> Import <code style=${{fontSize:'0.57rem',background:'var(--bg-tertiary)',padding:'1px 3px',borderRadius:2}}>http://localhost:19803/openapi.json</code> as Action<br/>
+              <b>Any LLM:</b> POST to <code style=${{fontSize:'0.57rem',background:'var(--bg-tertiary)',padding:'1px 3px',borderRadius:2}}>http://localhost:19803/call/{tool}</code>
+            </div>
+          </div>`;
+        }
+
+        // Installing / connecting state
+        if (sb.connecting || sb.installing) {
+          return html`<div style=${{display:'flex',flexDirection:'column',gap:'.4rem'}}>
+            <div style=${{display:'flex',alignItems:'center',gap:'.4rem'}}>
+              <span style=${{width:7,height:7,borderRadius:'50%',background:'#eab308',flexShrink:0,animation:'pulse 1s infinite'}}></span>
+              <span style=${{fontSize:'0.75rem',color:'#facc15',flex:1}}>${sb.installing ? 'Waiting for installation...' : 'Connecting...'}</span>
+            </div>
+            ${sb.installing && html`<div style=${{fontSize:'0.63rem',color:'var(--text-faint)',lineHeight:1.5}}>
+              <b>1.</b> Run the downloaded file<br/>
+              ${os === 'win' ? html`<code style=${{fontSize:'0.57rem',background:'var(--bg-tertiary)',padding:'2px 4px',borderRadius:3}}>${dl.cmd}</code>` :
+                html`<code style=${{fontSize:'0.57rem',background:'var(--bg-tertiary)',padding:'2px 4px',borderRadius:3,whiteSpace:'pre'}}>${dl.cmd}</code>`}
+              <br/><b>2.</b> The bridge will connect automatically
+            </div>`}
+          </div>`;
+        }
+
+        // Failed state
+        if (sb.failed) {
+          return html`<div style=${{display:'flex',flexDirection:'column',gap:'.4rem'}}>
+            <div style=${{fontSize:'0.69rem',color:'#fca5a5'}}>Could not connect to Smart Bridge.</div>
+            <div style=${{display:'flex',gap:'.3rem'}}>
+              <button onClick=${function(){ _connectBridge(d); }}
+                style=${{padding:'.25rem .6rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',background:'var(--accent)',color:'#fff',fontFamily:'inherit'}}>Retry</button>
+              <button onClick=${function(){ _triggerDownload(); _connectBridge(d, {installing:true}); }}
+                style=${{padding:'.25rem .6rem',borderRadius:5,fontSize:'0.69rem',fontWeight:600,cursor:'pointer',border:'none',background:'#1e3a5f',color:'#93c5fd',fontFamily:'inherit'}}>Re-download</button>
+            </div>
+          </div>`;
+        }
+
+        // Idle state (not connected, not trying)
+        return html`<div style=${{display:'flex',flexDirection:'column',gap:'.4rem'}}>
+          <div style=${{fontSize:'0.63rem',color:'var(--text-faint)',lineHeight:1.5}}>
+            Connect any AI assistant to control ClashControl with natural language. Supports Claude, ChatGPT, and more.
+          </div>
+          ${sb.wasInstalled ?
+            html`<button onClick=${function(){ _connectBridge(d); }}
+              style=${{padding:'.3rem .7rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',border:'none',background:'var(--accent)',color:'#fff',fontFamily:'inherit',width:'100%'}}>Connect to Smart Bridge</button>` :
+            html`<button onClick=${function(){ _triggerDownload(); _connectBridge(d, {installing:true}); }}
+              style=${{padding:'.3rem .7rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',border:'none',background:'var(--accent)',color:'#fff',fontFamily:'inherit',width:'100%'}}>Install & Connect</button>`}
+          <div style=${{display:'flex',gap:'.3rem',flexWrap:'wrap'}}>
+            ${Object.keys(_downloads).map(function(k) {
+              var d2 = _downloads[k];
+              return html`<a key=${k} href=${d2.url} download="" style=${{fontSize:'0.57rem',color:'var(--text-faint)',textDecoration:'underline'}}>${d2.label}</a>`;
+            })}
+          </div>
+        </div>`;
       }
     });
   }

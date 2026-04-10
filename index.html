@@ -20121,22 +20121,6 @@ function startApp() {
                   </div>
                 </div>`}
               </div>`}
-              ${active && id==='smart-bridge' && html`<div style=${{borderTop:'1px solid var(--border-subtle)',marginTop:'.5rem',paddingTop:'.5rem',display:'flex',flexDirection:'column',gap:'.4rem'}}>
-                <div style=${{display:'flex',alignItems:'center',gap:'.4rem'}}>
-                  <span style=${{width:7,height:7,borderRadius:'50%',background:s.smartBridge&&s.smartBridge.connected?'#22c55e':'#64748b',flexShrink:0}}></span>
-                  <span style=${{fontSize:'0.75rem',color:s.smartBridge&&s.smartBridge.connected?'#4ade80':'var(--text-muted)',flex:1}}>
-                    ${s.smartBridge&&s.smartBridge.connected ? 'Connected to Smart Bridge' : 'Not connected'}
-                  </span>
-                </div>
-                ${!(s.smartBridge&&s.smartBridge.connected) && html`<div style=${{fontSize:'0.63rem',color:'var(--text-faint)',lineHeight:1.5}}>
-                  <b>Setup:</b> Download and run the Smart Bridge:<br/>
-                  <code style=${{fontSize:'0.57rem',background:'var(--bg-tertiary)',padding:'2px 4px',borderRadius:3}}>cd mcp-server && npm install && npm run rest</code><br/>
-                  <span style=${{fontSize:'0.57rem',opacity:.7}}>Connects Claude (MCP), ChatGPT (OpenAPI), or any LLM (REST).</span>
-                </div>`}
-                ${s.smartBridge&&s.smartBridge.connected && html`<div style=${{fontSize:'0.63rem',color:'var(--text-faint)',lineHeight:1.5}}>
-                  Smart Bridge connected. Your AI assistant can now control ClashControl.
-                </div>`}
-              </div>`}
               ${active && addon.panel && html`<div style=${{borderTop:'1px solid var(--border-subtle)',marginTop:'.4rem',paddingTop:'.2rem'}}>
                 ${addon.panel(html, s, d)}
               </div>`}
