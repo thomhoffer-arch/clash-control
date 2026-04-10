@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.13.2 (2026-04-10)
+- feat: 2D/BCF dropdown menus, Walk button visibility, FPS overlay, icon refresh
+
 ## v4.13.1 (2026-04-10)
 - chore: bump version to 4.13.0
 
