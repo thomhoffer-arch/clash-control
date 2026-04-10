@@ -21,7 +21,7 @@
 
   // ── Download URLs for standalone binaries ─────────────────────────
   var _releaseTag = 'v0.1.0';
-  var _releaseBase = 'https://github.com/clashcontrol-io/ClashControlSmartBridge/releases/download/' + _releaseTag + '/';
+  var _releaseBase = 'https://github.com/thomhoffer-arch/ClashControlSmartBridge/releases/download/' + _releaseTag + '/';
   var _downloads = {
     win:   {url: _releaseBase + 'clashcontrol-smart-bridge-win.exe',       label: 'Windows (.exe)',    cmd: 'clashcontrol-smart-bridge.exe'},
     mac:   {url: _releaseBase + 'clashcontrol-smart-bridge-mac.tar.gz',    label: 'macOS (.tar.gz)',   cmd: 'tar -xzf clashcontrol-smart-bridge-mac.tar.gz\n./clashcontrol-smart-bridge'},
