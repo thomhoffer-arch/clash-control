@@ -14811,16 +14811,45 @@ function startApp() {
     }).sort(function(a, b) { return a.elevation - b.elevation; });
   }
 
+  // Detect model unit scale from storey elevations.
+  // If inter-storey spacing is > 100, the model is likely in mm; if > 10 maybe cm; else meters.
+  function _ccDetectUnitScale(models) {
+    var storeys = _ccCollectStoreys(models || []);
+    if (storeys.length < 2) {
+      // Fallback: check bounding box of first model
+      var m0 = (models || [])[0];
+      if (m0 && m0.elements && m0.elements.length) {
+        var maxY = 0;
+        for (var i = 0; i < Math.min(m0.elements.length, 200); i++) {
+          var b = m0.elements[i].box;
+          if (b && b.max && b.max.y > maxY) maxY = b.max.y;
+        }
+        if (maxY > 500) return 1000;  // mm
+        if (maxY > 50) return 100;    // cm
+      }
+      return 1; // meters
+    }
+    var span = Math.abs(storeys[storeys.length-1].elevation - storeys[0].elevation);
+    var avgSpacing = span / (storeys.length - 1);
+    if (avgSpacing > 500) return 1000;   // mm (typical floor spacing ~3000mm)
+    if (avgSpacing > 50) return 100;     // cm
+    return 1;                             // meters
+  }
+
   // Create a default Sheet object for a given storey
   function _ccMakeSheet(storeyName, elevation) {
     var id = (typeof uid === 'function' ? uid() : 'SH' + Date.now().toString(36).toUpperCase());
+    var s = window._ccLatestState || {};
+    var unitScale = _ccDetectUnitScale(s.models);
+    var cutH = 1.2 * unitScale; // 1.2m in model units
     return {
       id: id,
       name: storeyName + ' Plan',
       storeyName: storeyName,
       elevation: Number(elevation) || 0,
-      cutHeight: 1.2,
-      scale: { pxPerMeter: 100 }, // ~1:100 at natural zoom
+      cutHeight: cutH,
+      _unitScale: unitScale, // 1=meters, 1000=mm, 100=cm
+      scale: { pxPerMeter: 100 / unitScale }, // ~1:100 at natural zoom, adjusted for units
       paper: { size: 'A3', orient: 'landscape' },
       titleBlock: { project: '', author: '', date: new Date().toLocaleDateString(), revision: '', notes: '' },
       northDeg: 0,
@@ -14831,22 +14860,50 @@ function startApp() {
 
   // Toolbar controls: sheet picker, new sheet, plot clashes, title block editor
   // Expose global create-sheet so the sidebar rail can call it without SheetToolbarControls being mounted
+  // Opens a storey picker modal instead of a browser prompt()
+  window._ccShowStoreyPicker = null; // set by App component
   window._ccCreateSheet = function() {
     var d = window._ccDispatch;
     if (!d) return;
     var s = window._ccLatestState || {};
     var storeys = _ccCollectStoreys(s.models || []);
     if (!storeys.length) { alert('Load a model with storey data first.'); return; }
-    var names = storeys.map(function(st, i) { return (i + 1) + '. ' + st.name + ' (' + st.elevation.toFixed(2) + ' m)'; }).join('\n');
-    var pick = prompt('Pick a storey:\n' + names + '\n\nEnter number:');
-    var idx = parseInt(pick, 10) - 1;
-    if (isNaN(idx) || idx < 0 || idx >= storeys.length) return;
-    var st = storeys[idx];
-    var sh = _ccMakeSheet(st.name, st.elevation);
-    d({ t: A.SHEET_ADD, v: sh });
-    // Auto-enter 2D view so the user sees the sheet
-    d({ t: 'UNDERLAY_MODE', v: 'view2d' });
+    if (window._ccShowStoreyPicker) window._ccShowStoreyPicker(true);
   };
+
+  function StoreyPickerModal(props) {
+    var s = props.s, d = props.d, onClose = props.onClose;
+    var storeys = _ccCollectStoreys(s.models || []);
+    var unitScale = _ccDetectUnitScale(s.models);
+    function pick(st) {
+      var sh = _ccMakeSheet(st.name, st.elevation);
+      d({ t: A.SHEET_ADD, v: sh });
+      d({ t: 'UNDERLAY_MODE', v: 'view2d' });
+      onClose();
+    }
+    return html`<div class="cc-modal-backdrop" style=${S_BACKDROP} role="dialog" aria-modal="true"
+      onClick=${onClose}>
+      <div class="cc-modal-card" style=${{...S_MODAL_CARD,width:360,padding:0}} onClick=${function(e){e.stopPropagation();}}>
+        <div style=${{padding:'var(--space-4) var(--space-4) var(--space-2)',borderBottom:'1px solid var(--border-subtle)',display:'flex',alignItems:'center',justifyContent:'space-between'}}>
+          <span style=${{fontWeight:700,fontSize:'0.95rem',color:'var(--text-primary)'}}>Select Level</span>
+          <button onClick=${onClose} style=${{...S_BTN,background:'none',color:'var(--text-faint)',fontSize:'1rem',padding:'0 var(--space-1)'}}>✕</button>
+        </div>
+        ${unitScale > 1 && html`<div style=${{padding:'var(--space-1) var(--space-4)',fontSize:'0.67rem',color:'var(--text-faint)',background:'var(--bg-tertiary)'}}>Model units: ${unitScale===1000?'mm':'cm'} — elevations shown in meters</div>`}
+        <div style=${{maxHeight:'50vh',overflowY:'auto',padding:'var(--space-2) 0'}}>
+          ${storeys.map(function(st, i) {
+            return html`<button key=${i} onClick=${function(){pick(st);}}
+              style=${{...S_BTN,width:'100%',padding:'var(--space-2) var(--space-4)',background:'none',
+                color:'var(--text-primary)',fontSize:'0.82rem',justifyContent:'flex-start',borderRadius:0,
+                gap:'var(--space-2)',borderBottom:'1px solid var(--border-subtle)'}}>
+              <span style=${{color:'var(--text-faint)',fontSize:'0.72rem',minWidth:20,textAlign:'right'}}>${i+1}.</span>
+              <span style=${{flex:1,textAlign:'left'}}>${st.name}</span>
+              <span style=${{color:'var(--text-muted)',fontSize:'0.72rem'}}>${(st.elevation / unitScale).toFixed(2)} m</span>
+            </button>`;
+          })}
+        </div>
+      </div>
+    </div>`;
+  }
 
   function SheetToolbarControls(props) {
     var s = props.s, d = props.d;
@@ -14856,13 +14913,7 @@ function startApp() {
 
     function newSheet() {
       if (!storeys.length) { alert('Load a model with storey data first.'); return; }
-      var names = storeys.map(function(st, i) { return (i + 1) + '. ' + st.name + ' (' + st.elevation.toFixed(2) + ' m)'; }).join('\n');
-      var pick = prompt('Pick a storey:\n' + names + '\n\nEnter number:');
-      var idx = parseInt(pick, 10) - 1;
-      if (isNaN(idx) || idx < 0 || idx >= storeys.length) return;
-      var st = storeys[idx];
-      var sh = _ccMakeSheet(st.name, st.elevation);
-      d({ t: A.SHEET_ADD, v: sh });
+      if (window._ccShowStoreyPicker) window._ccShowStoreyPicker(true);
     }
 
     function plotClashes() {
@@ -15215,8 +15266,9 @@ function startApp() {
       ctx.font = '10px sans-serif';
       ctx.fillStyle = '#94a3b8';
       ctx.fillText('Storey: ' + (sheet.storeyName || '—'), x + 8, y + 38);
-      ctx.fillText('Elev: ' + (sheet.elevation != null ? sheet.elevation.toFixed(2) + ' m' : '—'), x + 8, y + 52);
-      ctx.fillText('Cut: ' + ((sheet.cutHeight || 1.2).toFixed(2)) + ' m', x + 8, y + 66);
+      var _us = sheet._unitScale || 1;
+      ctx.fillText('Elev: ' + (sheet.elevation != null ? (sheet.elevation / _us).toFixed(2) + ' m' : '—'), x + 8, y + 52);
+      ctx.fillText('Cut: ' + (((sheet.cutHeight || 1.2) / _us).toFixed(2)) + ' m', x + 8, y + 66);
       ctx.fillText('Scale 1:' + Math.round(1000 / ((sheet.scale && sheet.scale.pxPerMeter) || 100) * 10), x + 8, y + 80);
       ctx.fillText(tb.author ? 'By ' + tb.author : '', x + 8, y + 94);
       ctx.fillText(tb.date || new Date(sheet.createdAt || Date.now()).toLocaleDateString(), x + bw * 0.6 + 8, y + 38);
@@ -15747,7 +15799,8 @@ function startApp() {
       var tb = sheet.titleBlock || {};
       writeText('TitleBlock', tbX + 0.2, tbY + tbH - lineH,     (tb.project || sheet.name || 'ClashControl Plan'), lineH * 0.4);
       writeText('TitleBlock', tbX + 0.2, tbY + tbH - 2 * lineH, 'Storey: ' + (sheet.storeyName || '—'),             lineH * 0.35);
-      writeText('TitleBlock', tbX + 0.2, tbY + tbH - 3 * lineH, 'Elev: ' + (sheet.elevation != null ? sheet.elevation.toFixed(2) : '—') + ' m   Cut: ' + ((sheet.cutHeight || 1.2).toFixed(2)) + ' m', lineH * 0.3);
+      var _usDxf = sheet._unitScale || 1;
+      writeText('TitleBlock', tbX + 0.2, tbY + tbH - 3 * lineH, 'Elev: ' + (sheet.elevation != null ? (sheet.elevation/_usDxf).toFixed(2) : '—') + ' m   Cut: ' + (((sheet.cutHeight || 1.2)/_usDxf).toFixed(2)) + ' m', lineH * 0.3);
       writeText('TitleBlock', tbX + 0.2, tbY + tbH - 4 * lineH, 'Scale: 1:' + Math.round(1000 / ((sheet.scale && sheet.scale.pxPerMeter) || 100) * 10), lineH * 0.3);
       writeText('TitleBlock', tbX + 0.2, tbY + tbH - 5 * lineH, (tb.author ? 'By ' + tb.author + '   ' : '') + (tb.date || ''), lineH * 0.3);
       if (tb.revision) writeText('TitleBlock', tbX + tbW * 0.55, tbY + tbH - 5 * lineH, 'Rev ' + tb.revision, lineH * 0.3);
@@ -15904,8 +15957,9 @@ function startApp() {
     ctx.fillText(tb.project || sheet.name || 'ClashControl Plan', bx + 10, by + 20);
     ctx.font = '12px sans-serif';
     ctx.fillText('Storey: ' + (sheet.storeyName || '—'), bx + 10, by + 48);
-    ctx.fillText('Elev: ' + (sheet.elevation != null ? sheet.elevation.toFixed(2) : '—') + ' m', bx + 10, by + 66);
-    ctx.fillText('Cut: ' + ((sheet.cutHeight || 1.2).toFixed(2)) + ' m', bx + 10, by + 84);
+    var _us2 = sheet._unitScale || 1;
+    ctx.fillText('Elev: ' + (sheet.elevation != null ? (sheet.elevation / _us2).toFixed(2) : '—') + ' m', bx + 10, by + 66);
+    ctx.fillText('Cut: ' + (((sheet.cutHeight || 1.2) / _us2).toFixed(2)) + ' m', bx + 10, by + 84);
     ctx.fillText('Scale 1:' + Math.round(1000 / ((sheet.scale && sheet.scale.pxPerMeter) || 100) * 10), bx + 10, by + 102);
     ctx.fillText((tb.author ? 'By ' + tb.author : ''), bx + 10, by + 120);
     ctx.fillText(tb.date || new Date().toLocaleDateString(), bx + bw * 0.6 + 10, by + 48);
@@ -20694,6 +20748,8 @@ function startApp() {
     var _pwaUpdate = useState(!!window._ccUpdateAvailable), pwaUpdateAvail=_pwaUpdate[0], setPwaUpdateAvail=_pwaUpdate[1];
     var _pwaInstall = useState(!!(window._ccPwaInstallPrompt && window._ccPwaInstallPrompt())), pwaInstallAvail=_pwaInstall[0], setPwaInstallAvail=_pwaInstall[1];
     var _pwaDismissed = useState(false), pwaDismissed=_pwaDismissed[0], setPwaDismissed=_pwaDismissed[1];
+    var _storeyPicker = useState(false), storeyPickerOpen=_storeyPicker[0], setStoreyPickerOpen=_storeyPicker[1];
+    window._ccShowStoreyPicker = setStoreyPickerOpen;
     useEffect(function(){
       function onUpdate(){ setPwaUpdateAvail(true); }
       function onInstall(){ setPwaInstallAvail(true); }
@@ -20966,6 +21022,7 @@ function startApp() {
       </div>
       <${AIChatPanel} s=${s} d=${d} />
       ${s.showModal && html`<${NewIssueModal} d=${d} el=${s.modalElement} prefs=${s.prefs} clashes=${s.clashes} activeId=${s.activeId} />`}
+      ${storeyPickerOpen && html`<${StoreyPickerModal} s=${s} d=${d} onClose=${function(){setStoreyPickerOpen(false);}} />`}
       ${s.showSettings && html`<${SettingsModal} d=${d} s=${s} prefs=${s.prefs} models=${s.models} rules=${s.rules} />`}
       ${s.showRevitBridge && html`<${RevitBridgePanel} s=${s} d=${d} />`}
       <${MobileNav} s=${s} d=${d} />
