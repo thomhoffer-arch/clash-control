@@ -1934,50 +1934,39 @@ function startApp() {
     return propMap;
   }
 
-  // IFC type ID to human-readable name map
+  // IFC type ID → human-readable name (built from IFC constants above to avoid repeating numeric IDs)
   var IFC_TYPE_NAMES = {};
-  IFC_TYPE_NAMES[839292159] = 'IfcWall'; IFC_TYPE_NAMES[3512223829] = 'IfcWall';
-  IFC_TYPE_NAMES[1529196076] = 'IfcSlab'; IFC_TYPE_NAMES[753842376] = 'IfcBeam';
-  IFC_TYPE_NAMES[843113511] = 'IfcColumn'; IFC_TYPE_NAMES[395920057] = 'IfcDoor';
-  IFC_TYPE_NAMES[3304561284] = 'IfcWindow'; IFC_TYPE_NAMES[2016517767] = 'IfcRoof';
-  IFC_TYPE_NAMES[331165859] = 'IfcStair'; IFC_TYPE_NAMES[2262370178] = 'IfcRailing';
-  IFC_TYPE_NAMES[263784265] = 'IfcFurnishingElement';
-  IFC_TYPE_NAMES[987401354] = 'IfcFlowSegment'; IFC_TYPE_NAMES[2058353004] = 'IfcFlowTerminal';
-  IFC_TYPE_NAMES[4278956645] = 'IfcFlowFitting'; IFC_TYPE_NAMES[3040386961] = 'IfcDistributionFlowElement';
-  IFC_TYPE_NAMES[3612865200] = 'IfcPipeSegment'; IFC_TYPE_NAMES[3518393246] = 'IfcDuctSegment';
-  IFC_TYPE_NAMES[1073191201] = 'IfcMember'; IFC_TYPE_NAMES[3171933400] = 'IfcPlate';
-  IFC_TYPE_NAMES[900683007] = 'IfcFooting'; IFC_TYPE_NAMES[1687234759] = 'IfcPile';
-  IFC_TYPE_NAMES[1973544240] = 'IfcCovering'; IFC_TYPE_NAMES[3856911033] = 'IfcSpace';
-  IFC_TYPE_NAMES[2769231204] = 'IfcVirtualElement'; IFC_TYPE_NAMES[1674181508] = 'IfcAnnotation'; IFC_TYPE_NAMES[3009204131] = 'IfcGrid';
-  // MEP: energy conversion, flow moving/storage/treatment, controllers
-  IFC_TYPE_NAMES[1658829314] = 'IfcEnergyConversionDevice'; IFC_TYPE_NAMES[3132237377] = 'IfcFlowMovingDevice';
-  IFC_TYPE_NAMES[3508470533] = 'IfcFlowStorageDevice'; IFC_TYPE_NAMES[3310460725] = 'IfcFlowTreatmentDevice';
-  // MEP: cable/duct segments and fittings
-  IFC_TYPE_NAMES[4217484030] = 'IfcCableSegment'; IFC_TYPE_NAMES[3758799889] = 'IfcCableCarrierSegment';
-  IFC_TYPE_NAMES[342316401] = 'IfcDuctFitting';
-  // MEP: terminals
-  IFC_TYPE_NAMES[1634111441] = 'IfcAirTerminal'; IFC_TYPE_NAMES[1426591983] = 'IfcFireSuppressionTerminal';
-  IFC_TYPE_NAMES[3290496277] = 'IfcSanitaryTerminal'; IFC_TYPE_NAMES[4237592921] = 'IfcWasteTerminal';
-  IFC_TYPE_NAMES[76236018] = 'IfcLamp'; IFC_TYPE_NAMES[629592764] = 'IfcLightFixture';
-  IFC_TYPE_NAMES[3694346114] = 'IfcOutlet';
-  // MEP: valves, pumps, fans, sensors, actuators
-  IFC_TYPE_NAMES[4207607924] = 'IfcValve'; IFC_TYPE_NAMES[2250791053] = 'IfcPump';
-  IFC_TYPE_NAMES[3415622556] = 'IfcFan'; IFC_TYPE_NAMES[4086658281] = 'IfcSensor';
-  IFC_TYPE_NAMES[2087101272] = 'IfcActuator';
-  // MEP: boxes, coils, compressors, condensers, cooling towers, unitary
-  IFC_TYPE_NAMES[177149247] = 'IfcAirTerminalBox'; IFC_TYPE_NAMES[639361253] = 'IfcCoil';
-  IFC_TYPE_NAMES[3571504051] = 'IfcCompressor'; IFC_TYPE_NAMES[2272882330] = 'IfcCondenser';
-  IFC_TYPE_NAMES[3640358203] = 'IfcCoolingTower'; IFC_TYPE_NAMES[4292641817] = 'IfcUnitaryEquipment';
-  // MEP: electrical
-  IFC_TYPE_NAMES[402227799] = 'IfcElectricMotor'; IFC_TYPE_NAMES[264262732] = 'IfcElectricGenerator';
-  IFC_TYPE_NAMES[3825984169] = 'IfcTransformer'; IFC_TYPE_NAMES[1162798199] = 'IfcSwitchingDevice';
-  IFC_TYPE_NAMES[738039164] = 'IfcProtectiveDevice';
-  // Structural/envelope
-  IFC_TYPE_NAMES[3495092785] = 'IfcCurtainWall'; IFC_TYPE_NAMES[4252922144] = 'IfcStairFlight';
-  IFC_TYPE_NAMES[3283111854] = 'IfcRampFlight'; IFC_TYPE_NAMES[3024970846] = 'IfcRamp';
-  IFC_TYPE_NAMES[1095909175] = 'IfcBuildingElementProxy'; IFC_TYPE_NAMES[979691226] = 'IfcReinforcingBar';
-  IFC_TYPE_NAMES[2320036040] = 'IfcReinforcingMesh'; IFC_TYPE_NAMES[3101698114] = 'IfcTendon';
-  IFC_TYPE_NAMES[1329646415] = 'IfcShadingDevice'; IFC_TYPE_NAMES[3296154744] = 'IfcChimney';
+  (function() {
+    var m = {
+      IFCWALL:'IfcWall', IFCWALLSTANDARDCASE:'IfcWall', IFCSLAB:'IfcSlab', IFCBEAM:'IfcBeam',
+      IFCCOLUMN:'IfcColumn', IFCDOOR:'IfcDoor', IFCWINDOW:'IfcWindow', IFCROOF:'IfcRoof',
+      IFCSTAIR:'IfcStair', IFCRAILING:'IfcRailing', IFCFURNISHINGELEMENT:'IfcFurnishingElement',
+      IFCFLOWSEGMENT:'IfcFlowSegment', IFCFLOWTERMINAL:'IfcFlowTerminal',
+      IFCFLOWFITTING:'IfcFlowFitting', IFCDISTRIBUTIONFLOWELEMENT:'IfcDistributionFlowElement',
+      IFCPIPESEGMENT:'IfcPipeSegment', IFCDUCTSEGMENT:'IfcDuctSegment',
+      IFCMEMBER:'IfcMember', IFCPLATE:'IfcPlate', IFCFOOTING:'IfcFooting', IFCPILE:'IfcPile',
+      IFCCOVERING:'IfcCovering', IFCSPACE:'IfcSpace',
+      IFCVIRTUALELEMENT:'IfcVirtualElement', IFCANNOTATION:'IfcAnnotation', IFCGRID:'IfcGrid',
+      IFCENERGYCONVERSIONDEVICE:'IfcEnergyConversionDevice', IFCFLOWMOVINGDEVICE:'IfcFlowMovingDevice',
+      IFCFLOWSTORAGEDEVICE:'IfcFlowStorageDevice', IFCFLOWTREATMENTDEVICE:'IfcFlowTreatmentDevice',
+      IFCCABLESEGMENT:'IfcCableSegment', IFCCABLECARRIERSEGMENT:'IfcCableCarrierSegment',
+      IFCDUCTFITTING:'IfcDuctFitting', IFCAIRTERMINAL:'IfcAirTerminal',
+      IFCFIRESUPPRESSIONTERMINAL:'IfcFireSuppressionTerminal', IFCSANITARYTERMINAL:'IfcSanitaryTerminal',
+      IFCWASTETERMINAL:'IfcWasteTerminal', IFCLAMP:'IfcLamp', IFCLIGHTFIXTURE:'IfcLightFixture',
+      IFCOUTLET:'IfcOutlet', IFCVALVE:'IfcValve', IFCPUMP:'IfcPump', IFCFAN:'IfcFan',
+      IFCSENSOR:'IfcSensor', IFCACTUATOR:'IfcActuator', IFCAIRTERMINALBOX:'IfcAirTerminalBox',
+      IFCCOIL:'IfcCoil', IFCCOMPRESSOR:'IfcCompressor', IFCCONDENSER:'IfcCondenser',
+      IFCCOOLINGTOWER:'IfcCoolingTower', IFCUNITARYEQUIPMENT:'IfcUnitaryEquipment',
+      IFCELECTRICMOTOR:'IfcElectricMotor', IFCELECTRICGENERATOR:'IfcElectricGenerator',
+      IFCTRANSFORMER:'IfcTransformer', IFCSWITCHINGDEVICE:'IfcSwitchingDevice',
+      IFCPROTECTIVEDEVICE:'IfcProtectiveDevice', IFCCURTAINWALL:'IfcCurtainWall',
+      IFCSTAIRFLIGHT:'IfcStairFlight', IFCRAMPFLIGHT:'IfcRampFlight', IFCRAMP:'IfcRamp',
+      IFCBUILDINGELEMENTPROXY:'IfcBuildingElementProxy', IFCREINFORCINGBAR:'IfcReinforcingBar',
+      IFCREINFORCINGMESH:'IfcReinforcingMesh', IFCTENDON:'IfcTendon',
+      IFCSHADINGDEVICE:'IfcShadingDevice', IFCCHIMNEY:'IfcChimney'
+    };
+    Object.keys(m).forEach(function(k) { if (IFC[k] != null) IFC_TYPE_NAMES[IFC[k]] = m[k]; });
+  })();
 
   // Spatial container types — aggregates from these are not meaningful for clash suppression
   var _SPATIAL_CONTAINERS = {};
