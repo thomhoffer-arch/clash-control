@@ -83,11 +83,74 @@
     }
   }
 
+  // ── Update check: GET /update ────────────────────────────────────
+  // Called once after each successful connection and periodically.
+  // If the bridge reports update_available, automatically triggers the
+  // self-update flow (POST /update + poll until restart).
+  // Silently ignored if the bridge is down or doesn't support the endpoint.
+  function _checkForUpdate(d) {
+    var fetchOpts = {method:'GET', cache:'no-store'};
+    try { if (AbortSignal.timeout) fetchOpts.signal = AbortSignal.timeout(3000); } catch(e){}
+    return fetch(REST_URL + '/update', fetchOpts)
+      .then(function(r){ if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(j) {
+        if (j && j.update_available) {
+          console.log('%c[Smart Bridge] Update available — auto-updating to', 'color:#fbbf24;font-weight:bold', j.version || 'latest');
+          // Auto-trigger the self-update: POST /update, then poll /status
+          // until the bridge restarts. No user interaction required.
+          _applyBridgeUpdate(d);
+        }
+      })
+      .catch(function() { /* /update not present or bridge unreachable — ignore */ });
+  }
+
+  // ── Poll /status until bridge restarts (post-update) ──────────────
+  // Does NOT fire the URL scheme — the bridge restarts itself.
+  function _pollForRestart(d, timeoutMs) {
+    var gen = ++_connectGen;
+    var deadline = Date.now() + (timeoutMs || 30000);
+    function tick() {
+      if (gen !== _connectGen) return;
+      if (Date.now() >= deadline) {
+        if (d) d({t:'UPD_SMART_BRIDGE', u:{updating:false, available:false, failed:true}});
+        return;
+      }
+      _probeStatus(2000)
+        .then(function(j) {
+          if (gen !== _connectGen) return;
+          if (d) d({t:'UPD_SMART_BRIDGE', u:{available:true, updating:false, version:j.version||null}});
+          _connectWs(d);
+        })
+        .catch(function() { setTimeout(tick, 2000); });
+    }
+    setTimeout(tick, 1500); // wait for bridge to start shutting down
+  }
+
+  // ── Trigger self-update: POST /update ──────────────────────────────
+  // Tells the bridge to download the latest release, replace its own
+  // binary, and restart. We then poll until it comes back online.
+  function _applyBridgeUpdate(d) {
+    if (d) d({t:'UPD_SMART_BRIDGE', u:{updating:true, updateAvailable:false}});
+    var fetchOpts = {method:'POST', cache:'no-store'};
+    try { if (AbortSignal.timeout) fetchOpts.signal = AbortSignal.timeout(5000); } catch(e){}
+    return fetch(REST_URL + '/update', fetchOpts)
+      .then(function() {
+        console.log('%c[Smart Bridge] Self-update triggered, waiting for restart\u2026', 'color:#fbbf24');
+        _pollForRestart(d, 60000); // up to 60s for the update + restart
+      })
+      .catch(function(e) {
+        console.warn('[Smart Bridge] POST /update failed:', e && e.message || e);
+        if (d) d({t:'UPD_SMART_BRIDGE', u:{updating:false, updateAvailable:true}});
+      });
+  }
+
   // ── Connect with polling ──────────────────────────────────────────
 
   var _connectGen = 0;
   function _cancelPendingConnect() { _connectGen++; }
   var _wsGen = 0;
+  var _updateChecked = false;   // true after first /update check per connection
+  var _updateInterval = null;   // periodic /update check handle
 
   function _connectBridge(d, opts) {
     opts = opts || {};
@@ -125,6 +188,8 @@
           try { localStorage.setItem('cc_smart_bridge','1'); } catch(e){}
           try { localStorage.setItem('cc_sb_downloaded','1'); } catch(e){}
           _connectWs(d);
+          // Check for updates after successful connection
+          if (!_updateChecked) { _updateChecked = true; _checkForUpdate(d); }
           return j;
         })
         .catch(function() {
@@ -143,6 +208,8 @@
         if (d) d({t:'UPD_SMART_BRIDGE', u:{
           checking:false, available:true, version: j.version || null
         }});
+        // Check for updates after successful connection
+        if (!_updateChecked) { _updateChecked = true; _checkForUpdate(d); }
         return j;
       })
       .catch(function() {
@@ -386,7 +453,7 @@
           connecting: false, installing: false, failed: false,
           wasInstalled: false, version: null,
           updateAvailable: false, updateVersion: null, updateUrl: null,
-          bridgeUpdating: false, bridgeReconnecting: false }
+          bridgeUpdating: false, bridgeReconnecting: false, updating: false }
       },
 
       reducerCases: {
@@ -397,7 +464,13 @@
 
       init: function(dispatch) {
         console.log('[Smart Bridge] Addon activated');
+        _updateChecked = false; // reset on activation
         _doInit(dispatch);
+        // Periodic update check every 30 minutes while the addon is active.
+        _updateInterval = setInterval(function() {
+          var sb = (window._ccLatestState || {}).smartBridge;
+          if (sb && sb.available && !sb.updating) _checkForUpdate(dispatch);
+        }, 30 * 60 * 1000);
       },
 
       onEnable: function(dispatch) {
@@ -416,6 +489,7 @@
 
       destroy: function() {
         _disconnectWs();
+        clearInterval(_updateInterval); _updateInterval = null;
         try { localStorage.removeItem('cc_smart_bridge'); } catch (e) {}
         // cc_sb_downloaded is intentionally kept so re-enabling never re-downloads the binary.
       },
@@ -471,6 +545,19 @@
             var btn = document.getElementById('cc-sb-copy-btn');
             if (btn) { var orig = btn.textContent; btn.textContent = 'Copied!'; setTimeout(function(){ btn.textContent = orig; }, 1500); }
           });
+        }
+
+        // Updating (self-update in progress)
+        if (sb.updating) {
+          return html`<div style=${{display:'flex',flexDirection:'column',gap:'.4rem'}}>
+            <div style=${{display:'flex',alignItems:'center',gap:'.4rem'}}>
+              <div style=${{width:7,height:7,border:'1.5px solid #fbbf24',borderTopColor:'transparent',borderRadius:'50%',animation:'cc-spin .6s linear infinite',flexShrink:0}}></div>
+              <span style=${{fontSize:'0.75rem',color:'#fbbf24',flex:1}}>Updating bridge\u2026</span>
+            </div>
+            <div style=${{fontSize:'0.6rem',color:'var(--text-faint)',lineHeight:1.5}}>
+              Downloading update and restarting. Reconnecting automatically\u2026
+            </div>
+          </div>`;
         }
 
         // Reconnecting after self-update (WebSocket dropped, bridge is restarting)
