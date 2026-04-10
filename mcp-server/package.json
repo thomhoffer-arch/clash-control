@@ -1,0 +1,17 @@
+{
+  "name": "@clashcontrol/mcp-server",
+  "version": "0.1.0",
+  "description": "MCP server for ClashControl — lets Claude Desktop/Code control your BIM clash detection",
+  "main": "index.js",
+  "bin": {
+    "clashcontrol-mcp": "./index.js"
+  },
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "ws": "^8.18.0"
+  },
+  "license": "MIT"
+}

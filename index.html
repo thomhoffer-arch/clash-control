@@ -548,6 +548,17 @@ function startApp() {
   // Expose core utilities for addons
   window._ccUid = uid;
   window._ccDISC = DISC;
+  // Expose detection for addons (Claude Bridge, etc.)
+  window._ccRunDetection = function() {
+    var s = window._ccLatestState;
+    var d = window._ccDispatch;
+    if (!s || !d || !s.models || !s.models.length) return;
+    d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
+    detectClashesAsync(s.models, s.rules).then(function(result) {
+      classifyClashes(result);
+      d({t:'MERGE_CLASHES', v:result});
+    });
+  };
 
   // ── Reducer ────────────────────────────────────────────────────
 
@@ -774,7 +785,7 @@ function startApp() {
 
   // Load addon scripts — called after app mounts
   function _loadAddonScripts() {
-    var addonFiles = ['training-data', 'pwa', 'local-engine', 'shared-project', 'revit-bridge', 'data-quality'];
+    var addonFiles = ['training-data', 'pwa', 'local-engine', 'shared-project', 'revit-bridge', 'data-quality', 'claude-bridge'];
     addonFiles.forEach(function(name) {
       var script = document.createElement('script');
       script.src = 'addons/' + name + '.js';
@@ -17064,6 +17075,11 @@ function startApp() {
   function processNLCommand(raw, s, d) {
     _gcEvent('nl-command');
     var text = raw.trim().toLowerCase();
+    // Expose for addons (Claude Bridge uses this for view commands)
+    if (!window._ccProcessNLCommand) window._ccProcessNLCommand = function(cmd) {
+      var _s = window._ccLatestState, _d = window._ccDispatch;
+      if (_s && _d) return processNLCommand(cmd, _s, _d);
+    };
 
     // ── Handle yes/no response to fuzzy confirmation ──────────────
     if (window._ccFuzzyPending) {
@@ -20103,6 +20119,23 @@ function startApp() {
                       }}
                       style=${{padding:'.25rem .6rem',borderRadius:5,fontSize:'0.72rem',fontWeight:600,cursor:'pointer',border:'none',background:'var(--accent)',color:'#fff',fontFamily:'inherit'}}>Connect</button>
                   </div>
+                </div>`}
+              </div>`}
+              ${active && id==='claude-bridge' && html`<div style=${{borderTop:'1px solid var(--border-subtle)',marginTop:'.5rem',paddingTop:'.5rem',display:'flex',flexDirection:'column',gap:'.4rem'}}>
+                <div style=${{display:'flex',alignItems:'center',gap:'.4rem'}}>
+                  <span style=${{width:7,height:7,borderRadius:'50%',background:s.claudeBridge&&s.claudeBridge.connected?'#22c55e':'#64748b',flexShrink:0}}></span>
+                  <span style=${{fontSize:'0.75rem',color:s.claudeBridge&&s.claudeBridge.connected?'#4ade80':'var(--text-muted)',flex:1}}>
+                    ${s.claudeBridge&&s.claudeBridge.connected ? 'Connected to MCP server' : 'Not connected'}
+                  </span>
+                </div>
+                ${!(s.claudeBridge&&s.claudeBridge.connected) && html`<div style=${{fontSize:'0.63rem',color:'var(--text-faint)',lineHeight:1.5}}>
+                  <b>Setup:</b> Install the MCP server, then add it to Claude Desktop config:<br/>
+                  <code style=${{fontSize:'0.57rem',background:'var(--bg-tertiary)',padding:'2px 4px',borderRadius:3}}>cd mcp-server && npm install</code><br/>
+                  <span style=${{fontSize:'0.57rem',opacity:.7}}>Then in Claude Desktop settings → MCP Servers → Add:</span><br/>
+                  <code style=${{fontSize:'0.57rem',background:'var(--bg-tertiary)',padding:'2px 4px',borderRadius:3}}>node /path/to/mcp-server/index.js</code>
+                </div>`}
+                ${s.claudeBridge&&s.claudeBridge.connected && html`<div style=${{fontSize:'0.63rem',color:'var(--text-faint)',lineHeight:1.5}}>
+                  Claude can now control ClashControl. Try asking Claude to run clashes, change views, or analyze results.
                 </div>`}
               </div>`}
               ${active && addon.panel && html`<div style=${{borderTop:'1px solid var(--border-subtle)',marginTop:'.4rem',paddingTop:'.2rem'}}>
