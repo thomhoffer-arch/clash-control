@@ -28,33 +28,32 @@
   // mac/linux ship as tar.gz (preserves executable bit); Windows is a self-contained .exe.
   // Release tag is fetched from GitHub API; falls back to v0.2.2 if unavailable.
   var _engineReleaseTag = 'v0.2.2'; // fallback; will be updated from GitHub API
-  var _releaseBase = null;
-  var _downloads = null; // built lazily with actual release tag
-
-  function _initializeDownloads() {
-    if (_downloads) return Promise.resolve(_downloads);
-
-    return fetch('https://api.github.com/repos/clashcontrol-io/ClashControlEngine/releases/latest', {cache:'no-store'})
-      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-      .then(function(j) {
-        _engineReleaseTag = (j && j.tag_name) || _engineReleaseTag;
-        _buildDownloads();
-        return _downloads;
-      })
-      .catch(function() {
-        // Silently fall back to hardcoded version
-        _buildDownloads();
-        return _downloads;
-      });
-  }
 
   function _buildDownloads() {
-    _releaseBase = 'https://github.com/clashcontrol-io/ClashControlEngine/releases/download/' + _engineReleaseTag + '/';
-    _downloads = {
+    var _releaseBase = 'https://github.com/clashcontrol-io/ClashControlEngine/releases/download/' + _engineReleaseTag + '/';
+    return {
       win:   {url: _releaseBase + 'clashcontrol-engine-win.exe',       label: 'Windows (.exe)',    cmd: 'clashcontrol-engine.exe --install'},
       mac:   {url: _releaseBase + 'clashcontrol-engine-mac.tar.gz',    label: 'macOS (.tar.gz)',   cmd: 'tar -xzf clashcontrol-engine-mac.tar.gz\n./clashcontrol-engine --install'},
       linux: {url: _releaseBase + 'clashcontrol-engine-linux.tar.gz',  label: 'Linux (.tar.gz)',   cmd: 'tar -xzf clashcontrol-engine-linux.tar.gz\n./clashcontrol-engine --install'}
     };
+  }
+
+  // Initializes with fallback version, then updates if API succeeds.
+  // This ensures downloads work immediately without waiting for the API.
+  var _downloads = _buildDownloads();
+
+  function _fetchLatestReleaseTag() {
+    fetch('https://api.github.com/repos/clashcontrol-io/ClashControlEngine/releases/latest', {cache:'no-store'})
+      .then(function(r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+      .then(function(j) {
+        var newTag = (j && j.tag_name) || _engineReleaseTag;
+        if (newTag !== _engineReleaseTag) {
+          _engineReleaseTag = newTag;
+          _downloads = _buildDownloads(); // rebuild with new tag
+          console.log('%c[LocalEngine] Latest release: ' + _engineReleaseTag, 'color:#22c55e;font-weight:bold');
+        }
+      })
+      .catch(function() { /* silently ignore API failures */ });
   }
 
   function _detectOS() {
@@ -193,22 +192,20 @@
   // <a download> click — the standard cross-browser pattern that forces
   // a file download rather than opening in a new tab.
   function _triggerEngineDownload() {
-    _initializeDownloads().then(function() {
-      try {
-        var os = _detectOS();
-        var dl = _downloads[os];
-        var a = document.createElement('a');
-        a.href = dl.url;
-        a.download = '';
-        a.rel = 'noopener';
-        a.style.display = 'none';
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(function(){ try { document.body.removeChild(a); } catch(e){} }, 100);
-      } catch(e) {
-        console.warn('[LocalEngine] download trigger failed:', e && e.message || e);
-      }
-    });
+    try {
+      var os = _detectOS();
+      var dl = _downloads[os];
+      var a = document.createElement('a');
+      a.href = dl.url;
+      a.download = '';
+      a.rel = 'noopener';
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(function(){ try { document.body.removeChild(a); } catch(e){} }, 100);
+    } catch(e) {
+      console.warn('[LocalEngine] download trigger failed:', e && e.message || e);
+    }
   }
 
   // ── Optimistic connect: URL scheme → poll → fall through ─────
@@ -307,7 +304,7 @@
 
     init: function(dispatch) {
       console.log('[LocalEngine] Addon init');
-      _initializeDownloads(); // fetch latest release tag from GitHub
+      _fetchLatestReleaseTag(); // fetch latest release tag from GitHub (non-blocking)
       var wasActive = false;
       try { wasActive = localStorage.getItem('cc_local_engine') === '1'; } catch(e){}
       if (wasActive) {
