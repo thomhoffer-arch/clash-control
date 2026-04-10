@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.14.20 (2026-04-10)
+- Add INTERNALS.md § references to 26 section headers in index.html
+
 ## v4.14.19 (2026-04-10)
 - Strip ~1960 what-comments from index.html, keep section headers + why-comments
 
