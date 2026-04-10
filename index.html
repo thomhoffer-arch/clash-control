@@ -16978,23 +16978,35 @@ function startApp() {
     // round-trip to Gemma. This also guarantees window._ccPendingOffer is set
     // correctly — Gemma sometimes replies with plain text under intent:unknown
     // and never sets up the offer, so the "yes" loop gets stuck.
+    //
+    // Smart context check: keywords like "walk", "run", "check", "find" are
+    // common English words that appear in casual conversation. We only
+    // pre-block when the input LOOKS like a BIM command — either it's short
+    // (≤ 8 words, typical command style) or it contains a BIM-specific term
+    // that wouldn't appear in casual speech (clash, bcf, wireframe, etc.).
     if (!replyContext) {
       var _pbRaw = raw.trim().toLowerCase();
-      // Commands that clearly need a loaded model to make sense
-      var _needsModels = /\b(?:run|check|detect|find|clash(?:es)?|analy[sz]e?|analyse|summar(?:y|ize|ise)|report|overview|worst|most|how\s+many\s+clash|export|bcf|save|download|hide|isolate|show\s+\w|section|ghost|wireframe|render|walk|fly|measure)\b/;
+      var _pbWordCount = _pbRaw.split(/\s+/).length;
+      // BIM-specific terms — always pre-block regardless of sentence length
+      var _bimSpecific = /\b(?:clash(?:es)?|bcf|ifc|wireframe|ghost|section\s*(?:box|plane|cut)|isolate|storey|floor\s*plan)\b/;
+      // Ambiguous terms — only pre-block for short command-like inputs (≤ 8 words)
+      var _needsModelsAmbig = /\b(?:run|check|detect|find|analy[sz]e?|analyse|summar(?:y|ize|ise)|report|overview|worst|most|how\s+many\s+clash|export|save|download|hide|show\s+\w|render|walk|fly|measure)\b/;
+      var _needsModelsMatch = _bimSpecific.test(_pbRaw) || (_pbWordCount <= 8 && _needsModelsAmbig.test(_pbRaw));
       // Commands that need clashes but not necessarily models checked separately
       var _needsClashes = /\b(?:analy[sz]e?|analyse|summar(?:y|ize|ise)|report|overview|worst|most)\b/;
+      var _needsClashesMatch = _bimSpecific.test(_pbRaw) || (_pbWordCount <= 8 && _needsClashes.test(_pbRaw));
       // Commands that need something exportable
       var _needsExport = /\b(?:export|bcf|save|download)\b/;
-      if (!s.models.length && _needsModels.test(_pbRaw)) {
+      var _needsExportMatch = /\bbcf\b/.test(_pbRaw) || (_pbWordCount <= 8 && _needsExport.test(_pbRaw));
+      if (!s.models.length && _needsModelsMatch) {
         if (_ccDbg()) console.log('%c[CC NL ⛔ pre-block: no models]','color:#f87171;font-weight:bold', _pbRaw);
         return Promise.resolve(_captureNL(_offerLoadIFC(), 'pre-block-models'));
       }
-      if (s.models.length && !s.clashes.length && _needsClashes.test(_pbRaw)) {
+      if (s.models.length && !s.clashes.length && _needsClashesMatch) {
         if (_ccDbg()) console.log('%c[CC NL ⛔ pre-block: no clashes]','color:#f87171;font-weight:bold', _pbRaw);
         return Promise.resolve(_captureNL(_offerRunDetection(s), 'pre-block-clashes'));
       }
-      if (!s.clashes.length && !s.issues.length && _needsExport.test(_pbRaw)) {
+      if (!s.clashes.length && !s.issues.length && _needsExportMatch) {
         if (_ccDbg()) console.log('%c[CC NL ⛔ pre-block: nothing to export]','color:#f87171;font-weight:bold', _pbRaw);
         return Promise.resolve(_captureNL(_offerExport(s), 'pre-block-export'));
       }
