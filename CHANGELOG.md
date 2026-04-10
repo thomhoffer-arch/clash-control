@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.14.21 (2026-04-10)
+- fix: match Smart Bridge icon color to other addon icons (#60a5fa)
+
 ## v4.14.20 (2026-04-10)
 - Add INTERNALS.md § references to 26 section headers in index.html
 
