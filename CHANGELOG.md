@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.14.24 (2026-04-10)
+- fix: add api.github.com to CSP connect-src for release tag fetching
+
 ## v4.14.23 (2026-04-10)
 - refactor: fetch release tags dynamically from GitHub API
 
