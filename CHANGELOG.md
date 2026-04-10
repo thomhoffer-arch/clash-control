@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.12.0 (2026-04-10)
+- feat: annotated floorplans (Sheets) with full DXF export
+
 ## v4.11.29 (2026-04-09)
 - api/nl: cascade fallback through Gemini Flash family
 
