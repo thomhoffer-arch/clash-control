@@ -114,6 +114,7 @@
             wasInstalled: true, version: j.version || null
           }});
           try { localStorage.setItem('cc_smart_bridge','1'); } catch(e){}
+          try { localStorage.setItem('cc_sb_downloaded','1'); } catch(e){}
           _connectWs(d);
           return j;
         })
@@ -330,7 +331,7 @@
 
   function _doInit(dispatch) {
     var wasInstalled = false;
-    try { wasInstalled = localStorage.getItem('cc_smart_bridge') === '1'; } catch (e) {}
+    try { wasInstalled = localStorage.getItem('cc_sb_downloaded') === '1' || localStorage.getItem('cc_smart_bridge') === '1'; } catch (e) {}
     if (wasInstalled) {
       dispatch({t:'UPD_SMART_BRIDGE', u:{wasInstalled:true}});
       // Passive check — if bridge is already running, connect automatically
@@ -366,24 +367,23 @@
       },
 
       onEnable: function(dispatch) {
-        var wasInstalled = false;
-        try { wasInstalled = localStorage.getItem('cc_smart_bridge') === '1'; } catch (e) {}
-        if (wasInstalled) {
-          // Returning user: try URL scheme launch + fast poll
+        var wasDownloaded = false;
+        try { wasDownloaded = localStorage.getItem('cc_sb_downloaded') === '1'; } catch (e) {}
+        if (wasDownloaded) {
+          // Binary already in Downloads: skip re-download, try URL scheme + fast poll
           _connectBridge(dispatch);
         } else {
           // First time: download binary + long poll
           _triggerDownload();
+          try { localStorage.setItem('cc_sb_downloaded', '1'); } catch (e) {}
           _connectBridge(dispatch, {installing: true});
         }
-        // NOTE: localStorage flag is set inside _connectBridge on successful connection,
-        // not here — setting it early would cause page reloads before the binary runs
-        // to skip the long install poll and immediately fail after 6s.
       },
 
       destroy: function() {
         _disconnectWs();
         try { localStorage.removeItem('cc_smart_bridge'); } catch (e) {}
+        // cc_sb_downloaded is intentionally kept so re-enabling never re-downloads the binary.
       },
 
       // ── Addon panel (rendered inside the addon card) ──────────────
@@ -394,6 +394,24 @@
 
         var _codeStyle = {fontSize:'0.57rem',background:'var(--bg-tertiary)',padding:'2px 5px',borderRadius:3,wordBreak:'break-all'};
         var _btnSmall = {padding:'.25rem .6rem',borderRadius:5,fontSize:'0.63rem',fontWeight:600,cursor:'pointer',border:'none',fontFamily:'inherit'};
+        var _installerFile = dl.url.split('/').pop();
+
+        function _copyInstallerName() {
+          navigator.clipboard.writeText(_installerFile).catch(function() {
+            var ta = document.createElement('textarea');
+            ta.value = _installerFile; ta.style.position='fixed'; ta.style.opacity='0';
+            document.body.appendChild(ta); ta.select(); document.execCommand('copy');
+            document.body.removeChild(ta);
+          });
+        }
+
+        var _cleanupRow = html`<div style=${{display:'flex',alignItems:'center',gap:'.4rem',padding:'.3rem .45rem',background:'var(--bg-secondary)',borderRadius:5,marginTop:'.1rem'}}>
+          <span style=${{fontSize:'0.57rem',color:'var(--text-faint)',flex:1,lineHeight:1.4}}>
+            Installer <code style=${{background:'var(--bg-tertiary)',padding:'1px 4px',borderRadius:2,fontSize:'0.57rem'}}>${_installerFile}</code>${' '}can be deleted from your Downloads folder
+          </span>
+          <button onClick=${_copyInstallerName}
+            style=${{padding:'2px 7px',borderRadius:4,fontSize:'0.57rem',fontWeight:600,cursor:'pointer',border:'none',background:'var(--bg-tertiary)',color:'var(--text-muted)',fontFamily:'inherit',flexShrink:0}}>Copy name</button>
+        </div>`;
 
         // Claude Desktop MCP config snippet
         var _claudeConfig = JSON.stringify({
@@ -463,6 +481,7 @@
                 <a href="http://localhost:19803/openapi.json" target="_blank" rel="noopener" style=${{color:'var(--accent)',textDecoration:'underline'}}>OpenAPI spec</a>
               </div>
             </div>
+            ${_cleanupRow}
           </div>`;
         }
 
@@ -506,7 +525,8 @@
           </div>
           ${sb.wasInstalled ?
             html`<button onClick=${function(){ _connectBridge(d); }}
-              style=${{padding:'.3rem .7rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',border:'none',background:'var(--accent)',color:'#fff',fontFamily:'inherit',width:'100%'}}>Connect to Smart Bridge</button>` :
+              style=${{padding:'.3rem .7rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',border:'none',background:'var(--accent)',color:'#fff',fontFamily:'inherit',width:'100%'}}>Connect to Smart Bridge</button>
+            ${_cleanupRow}` :
             html`<button onClick=${function(){ _triggerDownload(); _connectBridge(d, {installing:true}); }}
               style=${{padding:'.3rem .7rem',borderRadius:6,fontSize:'0.75rem',fontWeight:600,cursor:'pointer',border:'none',background:'var(--accent)',color:'#fff',fontFamily:'inherit',width:'100%'}}>Install & Connect</button>`}
           <div style=${{display:'flex',gap:'.3rem',flexWrap:'wrap'}}>
