@@ -15731,23 +15731,36 @@ function startApp() {
   function generate2DOutlines(models, elevation, cutHeight) {
     var outlines = [];
     var cutAt = elevation + (cutHeight || 1.2);
+    var _dbg = {total:0, noBox:0, empty:0, nonPhys:0, outOfRange:0, hasMesh:0, noMesh:0, meshSegs:0, aabb:0};
+    console.log('[2D Outlines] elevation=' + elevation + ', cutHeight=' + cutHeight + ', cutAt=' + cutAt + ', models=' + models.length);
     models.forEach(function(m) {
-      if (!m.visible) return;
+      if (!m.visible) { console.log('[2D Outlines] model ' + m.name + ' not visible, skipping'); return; }
+      console.log('[2D Outlines] model ' + m.name + ': ' + (m.elements||[]).length + ' elements');
+      // Sample a few element bbox Y ranges
+      var sampleCount = 0;
       (m.elements || []).forEach(function(el) {
-        if (!el.box) return;
+        _dbg.total++;
+        if (!el.box) { _dbg.noBox++; return; }
         var b = el.box;
-        if (b.isEmpty && b.isEmpty()) return;
+        if (b.isEmpty && b.isEmpty()) { _dbg.empty++; return; }
+        if (sampleCount < 5) {
+          console.log('[2D Outlines] sample el #' + el.expressId + ' box Y: [' + b.min.y.toFixed(3) + ', ' + b.max.y.toFixed(3) + '] meshes: ' + (el.meshes ? el.meshes.length : 'null'));
+          sampleCount++;
+        }
         var ifcType = el.props && el.props.ifcType;
-        if (ifcType && _NON_PHYSICAL_TYPES && _NON_PHYSICAL_TYPES[ifcType]) return;
-        if (b.min.y > cutAt || b.max.y < elevation) return;
+        if (ifcType && _NON_PHYSICAL_TYPES && _NON_PHYSICAL_TYPES[ifcType]) { _dbg.nonPhys++; return; }
+        if (b.min.y > cutAt || b.max.y < elevation) { _dbg.outOfRange++; return; }
         var layer = _ccFloorPlanLayerCode(ifcType);
         // True mesh cut: walk triangles and intersect with cut plane
         var meshSegs = (el.meshes && el.meshes.length) ? _cutElementAtPlane(el, cutAt) : null;
+        if (el.meshes && el.meshes.length) _dbg.hasMesh++; else _dbg.noMesh++;
         if (meshSegs && meshSegs.length) {
+          _dbg.meshSegs += meshSegs.length;
           for (var si = 0; si < meshSegs.length; si++) {
             outlines.push([meshSegs[si][0], meshSegs[si][1], meshSegs[si][2], meshSegs[si][3], layer]);
           }
         } else {
+          _dbg.aabb++;
           // AABB fallback — projects bounding box edges at cut level
           var x1 = b.min.x, z1 = b.min.z, x2 = b.max.x, z2 = b.max.z;
           outlines.push([x1, z1, x2, z1, layer]); // bottom
@@ -15757,6 +15770,7 @@ function startApp() {
         }
       });
     });
+    console.log('[2D Outlines] RESULT: ' + outlines.length + ' segments | ' + JSON.stringify(_dbg));
     return outlines;
   }
 
@@ -20986,7 +21000,27 @@ function startApp() {
     useEffect(function() {
       var sheet = s.activeSheetId && (s.sheets||[]).find(function(sh){return sh.id===s.activeSheetId;});
       if (sheet && s.models.length) {
+        // Auto-migrate old sheets that have storey-unit elevation (pre-geoFactor fix).
+        // Old sheets lack _geoFactor and have elevation in raw IFC units (e.g. 4500mm
+        // instead of 4.5m). Detect by comparing elevation against geometry bbox.
+        if (!sheet._geoFactor && s.models.length) {
+          var gf = _ccStoreyToGeoFactor(s.models);
+          if (gf !== 1) {
+            var newElev = sheet.elevation * gf;
+            console.log('[Sheet migrate] old elevation=' + sheet.elevation + ' → geo=' + newElev + ' (factor=' + gf + ')');
+            d({t:A.SHEET_UPD, id:sheet.id, u:{
+              elevation: newElev,
+              _storeyElevation: sheet.elevation,
+              _geoFactor: gf,
+              cutHeight: 1.2,
+              scale: {pxPerMeter: 100},
+              _unitScale: _ccDetectUnitScale(s.models)
+            }});
+            return; // effect will re-run with updated sheet
+          }
+        }
         _cc2DOutlines = generate2DOutlines(s.models, sheet.elevation, sheet.cutHeight);
+        console.log('[2D Sheet] outlines generated: ' + (_cc2DOutlines ? _cc2DOutlines.length : 0) + ' segments, elev=' + sheet.elevation + ', cutH=' + sheet.cutHeight);
         // Auto-fit view to outline extents on first generation
         setTimeout(function(){ if (window._ccFit2DOutlines) window._ccFit2DOutlines(); }, 50);
       } else if (s.underlayMode === 'compare' && s.floorPlan && s.models.length) {
