@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.14.4 (2026-04-10)
+- Make CC logo letters taller
+
 ## v4.14.3 (2026-04-10)
 - Restore previous CC logo (mirrored C's) replacing chain-link icon
 
