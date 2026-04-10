@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.12.1 (2026-04-10)
+- feat: true mesh-cut outlines + BCF sheet plan attachment
+
 ## v4.12.0 (2026-04-10)
 - feat: annotated floorplans (Sheets) with full DXF export
 
