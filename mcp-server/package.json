@@ -1,0 +1,19 @@
+{
+  "name": "@clashcontrol/mcp-server",
+  "version": "0.1.0",
+  "description": "ClashControl Smart Bridge — LLM bridge connecting Claude, ChatGPT, or any AI assistant to BIM clash detection",
+  "main": "smart-bridge.js",
+  "bin": {
+    "clashcontrol-smart-bridge": "./smart-bridge.js"
+  },
+  "scripts": {
+    "start": "node smart-bridge.js",
+    "mcp": "node smart-bridge.js --mcp",
+    "bundle": "npx pkg smart-bridge.js --targets node18-win-x64,node18-macos-x64,node18-linux-x64 --output dist/clashcontrol-smart-bridge"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "ws": "^8.18.0"
+  },
+  "license": "MIT"
+}

@@ -548,6 +548,17 @@ function startApp() {
   // Expose core utilities for addons
   window._ccUid = uid;
   window._ccDISC = DISC;
+  // Expose detection for addons (Claude Bridge, etc.)
+  window._ccRunDetection = function() {
+    var s = window._ccLatestState;
+    var d = window._ccDispatch;
+    if (!s || !d || !s.models || !s.models.length) return;
+    d({t:'DETECTING'}); d({t:'TAB',v:'clashes'});
+    detectClashesAsync(s.models, s.rules).then(function(result) {
+      classifyClashes(result);
+      d({t:'MERGE_CLASHES', v:result});
+    });
+  };
 
   // ── Reducer ────────────────────────────────────────────────────
 
@@ -774,7 +785,7 @@ function startApp() {
 
   // Load addon scripts — called after app mounts
   function _loadAddonScripts() {
-    var addonFiles = ['training-data', 'pwa', 'local-engine', 'shared-project', 'revit-bridge', 'data-quality'];
+    var addonFiles = ['training-data', 'pwa', 'local-engine', 'shared-project', 'revit-bridge', 'data-quality', 'smart-bridge'];
     addonFiles.forEach(function(name) {
       var script = document.createElement('script');
       script.src = 'addons/' + name + '.js';
@@ -17064,6 +17075,11 @@ function startApp() {
   function processNLCommand(raw, s, d) {
     _gcEvent('nl-command');
     var text = raw.trim().toLowerCase();
+    // Expose for addons (Claude Bridge uses this for view commands)
+    if (!window._ccProcessNLCommand) window._ccProcessNLCommand = function(cmd) {
+      var _s = window._ccLatestState, _d = window._ccDispatch;
+      if (_s && _d) return processNLCommand(cmd, _s, _d);
+    };
 
     // ── Handle yes/no response to fuzzy confirmation ──────────────
     if (window._ccFuzzyPending) {
