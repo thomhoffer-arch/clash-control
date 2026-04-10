@@ -1,13 +1,16 @@
 {
   "name": "@clashcontrol/mcp-server",
   "version": "0.1.0",
-  "description": "MCP server for ClashControl — lets Claude Desktop/Code control your BIM clash detection",
+  "description": "MCP + REST bridge for ClashControl — lets Claude, ChatGPT, or any LLM control your BIM clash detection",
   "main": "index.js",
   "bin": {
-    "clashcontrol-mcp": "./index.js"
+    "clashcontrol-mcp": "./index.js",
+    "clashcontrol-rest": "./rest-bridge.js"
   },
   "scripts": {
-    "start": "node index.js"
+    "start": "node index.js",
+    "rest": "node rest-bridge.js",
+    "both": "node index.js & node rest-bridge.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1",
