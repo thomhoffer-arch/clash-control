@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.14.23 (2026-04-10)
+- refactor: fetch release tags dynamically from GitHub API
+
 ## v4.14.22 (2026-04-10)
 - docs: document addon server CSP origins in index.html
 
