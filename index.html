@@ -301,7 +301,7 @@
 <body>
 
 <div id="boot" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;text-align:center">
-  <div style="width:48px;height:48px;background:linear-gradient(135deg,#00e5ff 0%,#7c3aed 100%);border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:1rem;box-shadow:0 8px 24px rgba(124,58,237,.35)"><span style="display:inline-flex;align-items:center;color:#fff;font-weight:800;font-size:14px;font-family:'Syne',system-ui,sans-serif;line-height:1"><span>C</span><span style="display:inline-block;transform:scaleX(-1);margin-left:-1px">C</span></span></div>
+  <div style="width:48px;height:48px;background:var(--logo-gradient);border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:1rem;box-shadow:0 8px 24px rgba(124,58,237,.35)"><span style="display:inline-flex;align-items:center;color:#fff;font-weight:800;font-size:14px;font-family:'Syne',system-ui,sans-serif;line-height:1"><span>C</span><span style="display:inline-block;transform:scaleX(-1);margin-left:-1px">C</span></span></div>
   <div style="font-size:1.4rem;font-weight:800;margin-bottom:.4rem;font-family:'Syne',system-ui,sans-serif;letter-spacing:-.01em">ClashControl</div>
   <div id="boot-msg" style="color:#64748b;font-size:0.92rem;font-family:'DM Sans',system-ui,sans-serif">Loading…</div>
 </div>
@@ -13245,7 +13245,7 @@ function startApp() {
       if(this.state.hasError){
         var self=this;
         return h('div',{style:{padding:'2rem',textAlign:'center',color:'var(--text-primary)',background:'var(--bg-primary)',height:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}},
-          h('div',{style:{width:48,height:48,background:'linear-gradient(135deg,#00e5ff 0%,#7c3aed 100%)',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:'1rem',boxShadow:'0 8px 24px rgba(124,58,237,.35)'}},
+          h('div',{style:{width:48,height:48,background:'var(--logo-gradient)',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:'1rem',boxShadow:'0 8px 24px rgba(124,58,237,.35)'}},
             h('span',{style:{display:'inline-flex',alignItems:'center',color:'#fff',fontWeight:800,fontSize:14,fontFamily:'Syne,system-ui,sans-serif',lineHeight:1}},
             h('span',null,'C'),
             h('span',{style:{display:'inline-block',transform:'scaleX(-1)',marginLeft:'-1px'}},'C'))),
