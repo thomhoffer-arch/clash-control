@@ -416,6 +416,7 @@
         }
         // Tool call request
         if (msg.id != null && msg.action) {
+          if (d) d({t:'UPD_SMART_BRIDGE', u:{llmConnected:true}});
           var handler = handlers[msg.action];
           var result;
           if (handler) { try { result = handler(msg.params || {}); } catch (e) { result = 'Error: ' + e.message; } }
@@ -427,7 +428,7 @@
 
     _ws.onclose = function() {
       _connected = false;
-      if (d) d({t:'UPD_SMART_BRIDGE', u:{connected:false}});
+      if (d) d({t:'UPD_SMART_BRIDGE', u:{connected:false, llmConnected:false}});
       // Auto-reconnect after 3s, but only if still in the same session (not destroyed)
       setTimeout(function() { if (_wsGen === capturedGen) _connectWs(d); }, 3000);
     };
@@ -479,7 +480,8 @@
           connecting: false, installing: false, failed: false,
           wasInstalled: false, version: null,
           updateAvailable: false, updateVersion: null, updateUrl: null,
-          bridgeUpdating: false, bridgeReconnecting: false, updating: false }
+          bridgeUpdating: false, bridgeReconnecting: false, updating: false,
+          llmConnected: false }
       },
 
       reducerCases: {
@@ -621,11 +623,11 @@
               ${_updateHref && html`<a href=${_updateHref} target="_blank" rel="noopener"
                 style=${{fontSize:'0.63rem',fontWeight:600,color:'#fbbf24',textDecoration:'none',background:'rgba(234,179,8,.15)',padding:'2px 7px',borderRadius:4,flexShrink:0}}>Download</a>`}
             </div>`}
-            <div style=${{fontSize:'0.63rem',color:'var(--text-faint)',lineHeight:1.6}}>
+            ${!sb.llmConnected && html`<div style=${{fontSize:'0.63rem',color:'var(--text-faint)',lineHeight:1.6}}>
               Smart Bridge is running. Connect your AI assistant:
-            </div>
+            </div>`}
 
-            <div style=${{background:'var(--bg-secondary)',borderRadius:6,padding:'.45rem .5rem',display:'flex',flexDirection:'column',gap:'.35rem'}}>
+            ${!sb.llmConnected && html`<div style=${{background:'var(--bg-secondary)',borderRadius:6,padding:'.45rem .5rem',display:'flex',flexDirection:'column',gap:'.35rem'}}>
               <div style=${{display:'flex',alignItems:'center',gap:'.4rem'}}>
                 <span style=${{fontSize:'0.69rem',fontWeight:600,color:'#c084fc',flex:1}}>Claude Desktop / Claude Code</span>
                 <button id="cc-sb-copy-btn" onClick=${_copyClaudeConfig}
@@ -638,17 +640,17 @@
                 <summary style=${{fontSize:'0.58rem',color:'var(--text-faint)',cursor:'pointer',userSelect:'none'}}>Show block to add</summary>
                 <pre style=${{..._codeStyle,margin:'.3rem 0 0',padding:'.35rem .4rem',whiteSpace:'pre-wrap',lineHeight:1.4,fontSize:'0.57rem'}}>${_claudeConfig}</pre>
               </details>
-            </div>
+            </div>`}
 
-            <div style=${{background:'var(--bg-secondary)',borderRadius:6,padding:'.5rem',display:'flex',flexDirection:'column',gap:'.3rem'}}>
+            ${!sb.llmConnected && html`<div style=${{background:'var(--bg-secondary)',borderRadius:6,padding:'.5rem',display:'flex',flexDirection:'column',gap:'.3rem'}}>
               <div style=${{fontSize:'0.69rem',fontWeight:600,color:'#22c55e'}}>ChatGPT</div>
               <div style=${{fontSize:'0.6rem',color:'var(--text-faint)',lineHeight:1.5}}>
                 Create a custom GPT → Configure → Actions → Import from URL:
               </div>
               <code style=${_codeStyle}>http://localhost:19803/openapi.json</code>
-            </div>
+            </div>`}
 
-            <div style=${{background:'var(--bg-secondary)',borderRadius:6,padding:'.5rem',display:'flex',flexDirection:'column',gap:'.3rem'}}>
+            ${!sb.llmConnected && html`<div style=${{background:'var(--bg-secondary)',borderRadius:6,padding:'.5rem',display:'flex',flexDirection:'column',gap:'.3rem'}}>
               <div style=${{fontSize:'0.69rem',fontWeight:600,color:'#60a5fa'}}>Any LLM / HTTP Client</div>
               <div style=${{fontSize:'0.6rem',color:'var(--text-faint)',lineHeight:1.5}}>
                 Call tools via REST API:
@@ -659,7 +661,7 @@
                 ${' · '}
                 <a href="http://localhost:19803/openapi.json" target="_blank" rel="noopener" style=${{color:'var(--accent)',textDecoration:'underline'}}>OpenAPI spec</a>
               </div>
-            </div>
+            </div>`}
             ${_cleanupRow}
           </div>`;
         }

@@ -1,158 +1,78 @@
-# How to Detect IFC Clashes for Free — Right in Your Browser
+# Your Clash Detection Software Costs $5,000 a Year. It Doesn't Have To.
 
-**Primary keyword:** free IFC clash detection
-**Meta description:** ClashControl lets you load IFC models and detect hard and soft clashes directly in your browser — no install, no license, no subscription. Here's how it works.
-**Target length:** ~1,000 words
-**Tone:** Practical, direct, slightly opinionated
+The coordination meeting is in two hours. You need to run a clash check on the updated MEP model. Your Navisworks seat is on a machine in the office. You're working from home. Your colleague has the only other license and they're already in a meeting.
 
----
+You know what the output of that clash check is going to be. You've run it a hundred times. But the $5,000-a-year software is sitting behind a license wall and a VPN, and now you're going to walk into a coordination meeting with stale results.
 
-## Headline options
-1. How to Detect IFC Clashes for Free — Right in Your Browser *(recommended)*
-2. Free IFC Clash Detection Is Here — And It Runs in a Browser Tab
-3. No Navisworks? No Problem. ClashControl Does Clash Detection for Free
+This is the daily reality of BIM coordination in 2026. Not a technical problem. A licensing problem.
 
 ---
 
-Every BIM coordinator has been there.
+## Clash detection that lives in a browser tab
 
-You have two models from two different disciplines. You *know* there are clashes. You need to find them before the contractor does. And your only option is a $5,000-a-year Navisworks seat you have to beg IT to install on a locked-down machine.
+[ClashControl](https://www.clashcontrol.io) is a free, open-source IFC clash detection tool. There is no installer. There is no license key. There is no account to create. You open a browser, drag in your IFC files, and start detecting clashes — on any machine, anywhere, right now.
 
-There's a better way.
+Load multiple IFC models simultaneously. Set up clash rules: architecture versus MEP, structure versus MEP, hard clashes for actual intersections, soft clashes for clearance violations with a distance you define. Hit Run. In 5–30 seconds, depending on model size, you have a full clash list, prioritised and ready to review.
 
-**ClashControl** is a free, open-source clash detection tool that runs entirely in your browser. No install. No license. No subscription. Open the file, load your IFCs, and detect clashes in about two minutes.
-
-Here's exactly how to use it.
+That's it. That's the whole barrier to entry: having a browser.
 
 ---
 
-## What is IFC clash detection?
+## What the review actually looks like
 
-Before we get into the how, a quick refresher.
+Every clash in the list has an AI-generated plain-English title. Not "CLASH_0047." Something like: *"Supply duct intersects primary structural beam — Level 3, Grid B4."* You click it, the 3D camera flies to the conflict, and the two offending elements are highlighted in their discipline colors — MEP in red, structural in blue, architectural in purple.
 
-In a BIM workflow, different disciplines — architecture, structure, MEP — model their work independently. When those models are combined, elements sometimes physically overlap or come too close together. A duct passes through a beam. A pipe runs through a wall. A sprinkler head conflicts with a ceiling plenum.
+From there you can inspect every IFC property on both elements, assign a status (New / Active / Resolved / Waived), set priority, assign it to the right discipline lead, and add notes. The AI classifier has already flagged the likely false positives so you're not manually reviewing every near-miss in a dense ceiling plenum.
 
-These are *clashes*. Finding them in software, before they become expensive site surprises, is clash detection.
-
-Traditional tools like Navisworks Manage, Solibri Model Checker, or BIMcollab Zoom handle this. They're excellent. They're also expensive — often per-seat, annually renewed, requiring an IT-managed install.
-
-ClashControl does the same core job at zero cost.
+If you'd rather just ask a question: type *"how many unresolved critical clashes are on Level 2?"* into the chat. ClashControl understands plain English. No filter menus, no query syntax.
 
 ---
 
-## Step 1: Open ClashControl
+## Walk through it. Print it out.
 
-Go to [clashcontrol.io](https://www.clashcontrol.io) or download `index.html` from GitHub and open it locally. That's literally it — no account, no install wizard, no activation key.
+Two features in v4.14 close gaps that used to require separate tools.
 
-The app runs in Chrome, Edge, or Firefox. It works offline once loaded.
+**Walk mode** drops you into first-person navigation at eye height. Move through a mechanical room to see whether that clearance violation is actually a problem in context, or whether the model is just being pessimistic about a pipe that will flex on site. Unit-aware speed, configurable eye height, smooth controls.
 
----
-
-## Step 2: Load your IFC models
-
-Drag and drop your IFC files into the sidebar, or click the **+** button to browse. ClashControl supports IFC 2x3 and IFC 4.
-
-You can load multiple models simultaneously — the typical workflow is architecture + MEP or structure + MEP.
-
-Each model appears as a separate layer in the **Model Explorer**, where you can toggle visibility by storey, IFC type, or discipline.
+**Sheets** generates annotated floor plan cuts at any height you choose. Label elements, set the view depth and cut height, pick a paper size and plot scale, and export as DXF. For the site team that has AutoCAD open and has no interest in loading a 3D model just to see where the clash is.
 
 ---
 
-## Step 3: Configure your clash rules
+## BCF out. Revit, BIMcollab, Navisworks back in.
 
-In the **Detect** panel, set up a clash rule:
+When the review is done, export to BCF 2.1. The clash report carries locations, camera viewpoints, statuses, priorities, assignees, notes, and 3D snapshots — everything packaged in the open standard that every major BIM platform reads.
 
-- **Model A vs. Model B** — which disciplines to compare
-- **Hard clashes** — elements that physically intersect
-- **Soft clashes** — elements within a defined clearance distance (e.g., 50mm between a duct and structural element)
-- **Clearance distance** — how far apart elements must be to pass
-
-Most teams run architecture vs. MEP and structure vs. MEP as separate rules.
-
----
-
-## Step 4: Run detection
-
-Hit **Run**. ClashControl uses OBB-based (Oriented Bounding Box) collision detection to check every element pair across the two models.
-
-Depending on model size, detection takes 5–30 seconds. The clash list populates in the right panel as results come in.
-
-You'll see:
-- **Clash count** by severity
-- **AI-generated titles** describing each clash in plain English ("Duct passes through structural beam at Level 2 — Grid C3")
-- **Discipline-colored outlines**: MEP in red, structural in blue, architectural in purple
-
----
-
-## Step 5: Review and triage
-
-Click any clash to fly to it in the 3D viewer. The conflicting elements are isolated and highlighted. You can:
-
-- Inspect element properties (IFC type, name, storey, material)
-- Set status: **New, Active, Resolved, Waived**
-- Set priority: **Low, Medium, High, Critical**
-- Assign to a team member
-- Add notes
-
-The **AI classification** flags likely false positives automatically — saving you from manually reviewing every clash in a dense MEP run.
-
-You can also use the **natural language chat** to query your model: *"Show me all unresolved critical clashes on Level 3"* or *"How many structural clashes are still open?"*
-
----
-
-## Step 6: Export to BCF
-
-When your review is done, export to **BCF 2.1** — the open standard used by Revit, Navisworks, Solibri, BIMcollab, and every major BIM platform.
-
-Your BCF file carries:
-- Clash locations and camera viewpoints
-- Issue status and priority
-- Assigned users and notes
-- 3D snapshots
-
-Send the BCF to your Revit users, import into BIMcollab for issue tracking, or archive it as a project record.
-
----
-
-## What ClashControl doesn't do (yet)
-
-ClashControl is a coordination tool, not a full BIM authoring environment. It doesn't:
-
-- Create or modify IFC geometry
-- Run rule-based checks (though the Data Quality addon handles BIM basics and ILS-NL/SfB checks)
-- Replace a full issue management platform for large teams (though a shared `.ccproject` file covers most coordination workflows)
-
-For exact mesh-to-mesh clash verification on complex geometry, the optional [local engine](https://github.com/clashcontrol-io/clashcontrol) addon bridges to a Python-based exact-intersection backend.
+Your Revit users open it natively. It loads straight into BIMcollab. Navisworks imports it. The workflow is completely interoperable. You're not locked into anything.
 
 ---
 
 ## Why it's free
 
-ClashControl is open-source because BIM coordination shouldn't be gated behind expensive licenses. Every project team — from a two-person architecture studio to a student doing their first coordination exercise — should be able to run a clash check.
+Because the tool exists is not a mystery. The reason *it costs nothing* is.
 
-The source is on GitHub. You can audit every line of code, including the analytics endpoint (it's opt-out and collects only anonymous aggregate data). There's no SaaS account, no freemium trap, no "you've hit your free plan limit."
+BIM coordination is already a hard job. Wrangling federated models from three different consultants, each on a different version of a different authoring tool, all working to a coordination protocol that was written in 2019 and hasn't been updated since — there's plenty of legitimate friction in the process.
 
-If it saves your team money, consider [sponsoring the project](https://github.com/sponsors/clashcontrol-io).
+Licensing fees aren't legitimate friction. They're a tax on doing your job. A two-person architecture studio shouldn't need to budget $15,000 to run three clash checks a month. A freelance coordinator between contracts shouldn't lose tool access when their subscription lapses. A structural engineering student shouldn't need an Autodesk Education license to learn BCF workflows before it expires in May.
 
----
+ClashControl is MIT-licensed, source on GitHub, no freemium tier, no feature flags behind a paywall. Audit every line. Fork it. Run it locally. It works offline.
 
-## Get started
-
-1. Open [clashcontrol.io](https://www.clashcontrol.io)
-2. Load two IFC files
-3. Run detection
-4. Export BCF
-
-That's the whole workflow. No tutorial needed — but if you want one, there's a walkthrough video [on YouTube](#).
+If it saves your team money this year, [consider sponsoring the project](https://github.com/sponsors/clashcontrol-io).
 
 ---
 
-*ClashControl is free, open-source, and actively maintained. Star the repo on GitHub and follow [@clashcontrol](#) for updates.*
+## The workflow from zero to BCF export
+
+1. Go to [clashcontrol.io](https://www.clashcontrol.io) — or download `index.html` from GitHub and open it locally
+2. Drag in your IFC models (IFC 2x3 and IFC 4 both supported)
+3. Set up clash rules in the Detect panel: pick your model pairs, set hard/soft, define clearance distance
+4. Hit Run
+5. Review the clash list, assign statuses and owners
+6. Export BCF 2.1
+
+That's the coordination round-trip. From two IFC files to a BCF report your whole team can work from, in under five minutes, on whatever machine you happen to be using, without touching a license server.
+
+The meeting starts in two hours. You have time.
 
 ---
 
-**SEO notes:**
-- Primary keyword "free IFC clash detection" appears in H1, first paragraph, and meta description
-- Related keywords used naturally: "open-source clash detection," "BIM coordination," "BCF export," "IFC models," "Navisworks alternative"
-- Link opportunities: link "BCF 2.1" to buildingSMART spec; link "OBB-based" to a geometry explainer; internal link to Data Quality addon page
-- Add image alt text: "ClashControl 3D viewer showing MEP duct clashing with structural beam, discipline-colored highlights"
+*[ClashControl](https://www.clashcontrol.io) is free, open-source, and actively maintained. v4.14.26 — released April 13, 2026.*

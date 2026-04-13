@@ -2,119 +2,67 @@
 
 **Send timing:** Week 3 of campaign
 **Audience:** Existing users / opt-in list
-**Goal:** Re-engage, drive return visits, spark word-of-mouth
 
 ---
 
-## Subject lines (A/B test these)
+## Subject lines
 
-**Option A:** What's new in ClashControl v4.14 — Walk mode, Sheets, IDS export
-**Option B:** You can now walk through your IFC model. Here's everything new in v4.14.
-**Option C:** Free clash detection just got a lot more capable
+**A:** You can now walk through your IFC model. Here's what else is new.
+**B:** v4.14 is out — walk mode, floor plan sheets, IDS export
+**C:** The biggest ClashControl update yet just dropped
 
-**Preview text:** Walk mode, annotated floor plans with DXF export, IDS support, AI improvements, and more.
-
----
-
-## Email body
+**Preview text:** First-person navigation, annotated DXF floor plans, IDS import/export, and a clash review experience that's noticeably faster.
 
 ---
 
-**Subject:** What's new in ClashControl v4.14
+## Email
+
+---
 
 Hi [first name],
 
-ClashControl v4.14 is out — and it's a big one.
+v4.14 is the update I've wanted to ship for a long time.
 
-Here's what's new:
-
----
-
-**Walk mode**
-
-Navigate through your IFC model at eye height. Useful for visualising clearance clashes in mechanical rooms, corridors, and tight coordination zones. Unit-aware speed, configurable eye height, smooth first-person controls.
+There are two features in this release that close gaps people have been asking about since the beginning. Let me start there.
 
 ---
 
-**Sheets — annotated floor plans with DXF export**
+**Walk through your model.**
 
-Generate a floor plan cut at any height. Annotate elements directly on the cut. Export as DXF for site teams, contractors, or coordinators who live in 2D CAD tools.
+Walk mode drops you into first-person navigation at eye height. Move through rooms, corridors, mechanical floors. See clearance clashes the way the people on site are going to see them — from the ground, looking up at that duct that's 40mm too close to the beam.
 
-Settings: cut height, view depth, paper size, plot scale.
-
----
-
-**IDS import/export**
-
-ClashControl now supports the buildingSMART **Information Delivery Specification (IDS)** format for Data Quality checks. Import IDS files to validate models against project requirements. Export your checks as IDS for sharing with consultants or archiving.
+Orbit view is great for an overview. Walk mode is for the moments when you need to understand whether a clash is actually a problem.
 
 ---
 
-**Smarter soft clash markers**
+**Print the floor plan. Send it to site.**
 
-Soft clash markers now sit at the actual closest point between the two elements — weighted toward the smaller element. No more markers floating in the middle of a long beam.
+Sheets generates annotated 2D floor plan cuts from your 3D model. Set the cut height. Label the elements. Choose paper size and plot scale. Export as DXF.
 
----
-
-**Discipline-colored outlines**
-
-When you select or inspect a clash, element outlines now match the model category:
-- Structural → blue
-- MEP → red
-- Architectural → purple
-- Civil → green
-
-Makes multi-model clash reviews significantly faster to parse.
+For every site team, contractor, and coordinator who has AutoCAD open and isn't loading a 3D model just to locate a clash — this is for you.
 
 ---
 
-**AI improvements**
+Now the rest of v4.14.
 
-- Detection status now shows as a live animated bar in the chat panel while detection is running
-- Multi-model scoping in NL commands ("check MEP vs structure only")
-- Shaded ghost rendering for non-highlighted elements
+**IDS import/export.** Data Quality checks now support the buildingSMART Information Delivery Specification format. Import an IDS file to validate a model against project requirements. Export your checks as IDS to share with consultants or archive alongside the model.
 
----
+**Discipline-colored outlines.** When you inspect a clash, element outlines now match their category: structural blue, MEP red, architectural purple, civil green. Faster to parse at a glance, especially in dense federated models.
 
-**What else is in v4.14**
+**Smarter soft clash markers.** Soft clash indicators now sit at the actual closest point between the two elements — weighted toward the smaller one. No more markers floating in the middle of a 20-metre beam when the relevant gap is at one end.
 
-Clearance and Tolerance tooltips on hover, cleaner clash cards (penetration depth removed from hard clash cards), and a dozen smaller fixes.
-
-Full changelog: [CHANGELOG.md on GitHub](#)
+**AI in the chat panel.** While detection is running, the chat input shows a live animated status bar. Multi-model scoping now works in natural language commands: "check MEP vs structure only" does exactly what you'd expect.
 
 ---
 
-**Try it now**
+That's v4.14. Full changelog on GitHub if you want every detail.
 
 → [Open ClashControl](https://www.clashcontrol.io)
 
-It's free. No account. No install. If it's saving your team money, consider [sponsoring the project](https://github.com/sponsors/clashcontrol-io) — every contribution helps keep development going.
-
----
-
-Thanks for using ClashControl,
+Still free. Still no account. If this is saving your team money on licensing, consider [sponsoring the project](https://github.com/sponsors/clashcontrol-io) — it keeps development moving.
 
 — The ClashControl team
 
 ---
 
-*You're receiving this because you signed up for ClashControl updates. [Unsubscribe](#)*
-
----
-
-## Design notes for email layout
-
-- **Header:** ClashControl logo / wordmark on dark background (#0f172a)
-- **Section dividers:** Thin horizontal rule, same dark background
-- **Feature headers:** Cyan accent (#06b6d4) for section titles
-- **CTA button:** "Open ClashControl" — white text on cyan (#06b6d4) background
-- **Footer:** Dark, small text, unsubscribe link
-- **Image placements:** One screenshot per major feature (Walk Mode, Sheets, discipline outlines)
-- **Mobile:** Single column, 600px max width
-
----
-
-## Tracking
-
-- UTM parameters on all links: `?utm_source=email&utm_medium=newsletter&utm_campaign=v414-release`
-- Track: open rate (target >40%), click rate on "Open ClashControl" CTA (target >8%)
+*You're receiving this because you opted in to ClashControl updates. [Unsubscribe](#)*
