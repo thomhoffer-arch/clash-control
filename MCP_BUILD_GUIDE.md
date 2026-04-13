@@ -1,5 +1,36 @@
 # Building the ClashControl MCP Server
 
+## Quick start — standalone server (no build required)
+
+`mcp-server.js` in the repo root is a zero-dependency Node.js MCP server with all 51 tools.
+It requires **Node 18+** and no `npm install`. Use it instead of (or alongside) the SmartBridge
+binary's built-in MCP server when you need the full tool set.
+
+### Claude Desktop config (`claude_desktop_config.json`)
+
+```json
+{
+  "mcpServers": {
+    "clashcontrol": {
+      "command": "node",
+      "args": ["/absolute/path/to/ClashControl/mcp-server.js"]
+    }
+  }
+}
+```
+
+The SmartBridge binary must still be running in the background (ClashControl open in browser,
+Smart Bridge addon enabled) — `mcp-server.js` forwards all calls to its REST API at
+`http://127.0.0.1:19803`.
+
+Why this exists: the SmartBridge binary ships with a hardcoded set of MCP tools compiled at build
+time. `mcp-server.js` always reflects the current handler set in `addons/smart-bridge.js` without
+requiring a binary rebuild.
+
+---
+
+## Full TypeScript build (for .mcpb packaging)
+
 Drop this file into the SmartBridge repo. It contains everything needed to add MCP server support that wraps the existing SmartBridge REST API, packaged as a `.mcpb` Desktop Extension.
 
 ---

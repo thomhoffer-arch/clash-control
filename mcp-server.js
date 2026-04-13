@@ -1,0 +1,843 @@
+#!/usr/bin/env node
+'use strict';
+/**
+ * ClashControl MCP Server — standalone, zero npm dependencies.
+ * Node 18+ required (uses built-in fetch).
+ *
+ * This server implements the MCP stdio transport and exposes all 51 ClashControl
+ * tools. It forwards every tool call to the SmartBridge REST API at
+ * http://127.0.0.1:19803/call/{toolName}.
+ *
+ * The SmartBridge binary must be running separately (ClashControl open in
+ * browser with the Smart Bridge addon enabled).
+ *
+ * Configure in claude_desktop_config.json:
+ *   "mcpServers": {
+ *     "clashcontrol": {
+ *       "command": "node",
+ *       "args": ["/absolute/path/to/ClashControl/mcp-server.js"]
+ *     }
+ *   }
+ */
+
+const PORT = process.env.CLASHCONTROL_PORT || '19803';
+const BASE = `http://127.0.0.1:${PORT}`;
+
+// ── Tool definitions ──────────────────────────────────────────────────────────
+
+const TOOLS = [
+  {
+    name: 'get_status',
+    description:
+      'Returns a snapshot of the current ClashControl session: loaded IFC models with discipline ' +
+      'and element counts, total clash and issue counts, active detection rules (gap tolerance, ' +
+      'hard/soft mode), current UI tab, walk mode state, and theme. Use this first to understand ' +
+      'what the user is working with.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'get_clashes',
+    description:
+      'Retrieves detected clash pairs between IFC elements. Each clash includes its index, title, ' +
+      'status (open/resolved), priority, building storey, element types and names for both sides, ' +
+      'distance in mm, AI-assigned severity, and category. Filter by status and limit results.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['all', 'open', 'resolved', 'approved'],
+          description: "Filter clashes by status. Omit or 'all' for everything.",
+        },
+        limit: {
+          type: 'number',
+          description: 'Max clashes to return. Default 50.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'get_issues',
+    description:
+      'Retrieves coordination issues (manually created or promoted from clashes). Each issue ' +
+      'includes index, title, status, priority, assignee, and description.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: {
+          type: 'string',
+          enum: ['all', 'open', 'in_progress', 'resolved', 'closed'],
+          description: "Filter issues by status. Omit or 'all' for everything.",
+        },
+        limit: {
+          type: 'number',
+          description: 'Max issues to return. Default 50.',
+        },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'run_detection',
+    description:
+      'Starts clash detection between loaded IFC models. Optionally set which models to compare, ' +
+      'gap tolerance in mm, and whether to detect only hard clashes (physical intersections). ' +
+      'Results appear in get_clashes after detection completes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        modelA: { type: 'string', description: "Name of first model to test. 'all' or omit for all models." },
+        modelB: { type: 'string', description: "Name of second model to test against. 'all' or omit for all models." },
+        maxGap: { type: 'number', description: 'Gap tolerance in mm. Elements within this distance count as clashing. Default 10mm.' },
+        hard: { type: 'boolean', description: 'True = detect only hard clashes (physical intersections).' },
+        excludeSelf: { type: 'boolean', description: 'True = skip clashes within the same model.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'set_detection_rules',
+    description:
+      'Updates clash detection parameters without running detection. Configures gap tolerance, ' +
+      'hard/soft mode, self-clash exclusion, and duplicate handling for subsequent detection runs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        maxGap: { type: 'number', description: 'Gap tolerance in mm.' },
+        hard: { type: 'boolean', description: 'True = hard clashes only.' },
+        excludeSelf: { type: 'boolean', description: 'True = skip intra-model clashes.' },
+        duplicates: { type: 'boolean', description: 'True = include duplicate/overlapping element clashes.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'update_clash',
+    description:
+      'Updates a single clash by its index (0-based, from get_clashes). Change status, priority, ' +
+      'assignee, or title.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clashIndex: { type: 'number', description: '0-based index of the clash from get_clashes results.' },
+        status: { type: 'string', enum: ['open', 'resolved', 'approved'], description: 'New status for the clash.' },
+        priority: { type: 'string', enum: ['low', 'normal', 'high', 'critical'], description: 'New priority level.' },
+        assignee: { type: 'string', description: 'Person or team to assign this clash to.' },
+        title: { type: 'string', description: 'Override the clash title.' },
+      },
+      required: ['clashIndex'],
+    },
+  },
+  {
+    name: 'batch_update_clashes',
+    description:
+      'Applies a batch action to multiple clashes matching a natural-language filter. ' +
+      "Example: action='resolve', filter='all duct clashes on level 2'.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        action: { type: 'string', description: "The action to apply: 'resolve', 'approve', 'set priority high', etc." },
+        filter: { type: 'string', description: "Natural language filter: 'all MEP clashes', 'clashes on storey 3', etc." },
+      },
+      required: ['action', 'filter'],
+    },
+  },
+  {
+    name: 'filter_clashes',
+    description: 'Applies status and/or priority filters to the clash list in the UI.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        status: { type: 'string', enum: ['all', 'open', 'resolved', 'approved'], description: 'Show only clashes with this status.' },
+        priority: { type: 'string', enum: ['all', 'low', 'normal', 'high', 'critical'], description: 'Show only clashes with this priority.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'sort_clashes',
+    description: "Sorts the clash list in the UI by a given field.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sortBy: { type: 'string', description: "Field to sort by: 'status', 'priority', 'storey', 'typeA', 'typeB', 'distance', 'severity'." },
+      },
+      required: ['sortBy'],
+    },
+  },
+  {
+    name: 'group_clashes',
+    description: "Groups the clash list by a field or removes grouping with 'none'.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        groupBy: { type: 'string', description: "Field to group by: 'storey', 'typeA', 'typeB', 'aiSeverity', 'aiCategory', or 'none' to ungroup." },
+      },
+      required: ['groupBy'],
+    },
+  },
+  {
+    name: 'fly_to_clash',
+    description:
+      'Animates the 3D camera to focus on a specific clash by its index. Selects the clash ' +
+      'in the UI panel and highlights the two conflicting elements.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        clashIndex: { type: 'number', description: '0-based index of the clash to navigate to (from get_clashes).' },
+      },
+      required: ['clashIndex'],
+    },
+  },
+  {
+    name: 'set_view',
+    description:
+      'Changes the 3D camera to a standard view. Use when the user asks to see the model from ' +
+      'a specific angle or wants to reset the camera position.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        view: {
+          type: 'string',
+          enum: ['top', 'front', 'back', 'left', 'right', 'isometric', 'reset'],
+          description: 'The camera view to set.',
+        },
+      },
+      required: ['view'],
+    },
+  },
+  {
+    name: 'set_render_style',
+    description: 'Changes how the 3D model is rendered. Affects visual appearance without modifying model data.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        style: {
+          type: 'string',
+          enum: ['standard', 'shaded', 'rendered', 'wireframe'],
+          description: 'Render style.',
+        },
+      },
+      required: ['style'],
+    },
+  },
+  {
+    name: 'set_section',
+    description:
+      'Creates a section cutting plane along an axis to reveal interior geometry, or removes it. ' +
+      'Optionally place the cut at an absolute world-space position along the chosen axis.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        axis: {
+          type: 'string',
+          enum: ['x', 'y', 'z', 'none'],
+          description: "Cutting axis. 'none' removes the section plane.",
+        },
+        position: {
+          type: 'number',
+          description: 'Absolute world-space coordinate (metres) along the axis where the cut is placed. Omit to cut at the model centre.',
+        },
+      },
+      required: ['axis'],
+    },
+  },
+  {
+    name: 'set_section_at',
+    description:
+      'Places a section plane at an absolute world-space position on the given axis. ' +
+      'More precise than set_section when you know the exact coordinate.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        axis: { type: 'string', enum: ['x', 'y', 'z'], description: 'Cutting axis.' },
+        position: { type: 'number', description: 'Absolute world-space coordinate in metres.' },
+        cutHeight: { type: 'number', description: 'Optional height for horizontal cuts (alias for position on Y axis).' },
+      },
+      required: ['axis', 'position'],
+    },
+  },
+  {
+    name: 'color_by',
+    description:
+      "Colors all elements in the 3D view by a classification field. 'none' resets to original materials.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        by: { type: 'string', description: "Color scheme: 'discipline', 'type', 'storey', 'model', 'status', or 'none' to reset." },
+      },
+      required: ['by'],
+    },
+  },
+  {
+    name: 'set_theme',
+    description: 'Switches the ClashControl interface between dark and light themes.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        theme: { type: 'string', enum: ['dark', 'light'], description: 'Theme to apply.' },
+      },
+      required: ['theme'],
+    },
+  },
+  {
+    name: 'set_visibility',
+    description: 'Toggles visibility of UI overlays in the 3D view: the reference grid, coordinate axes, or clash markers.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        option: { type: 'string', enum: ['grid', 'axes', 'markers'], description: 'Which overlay to toggle.' },
+        visible: { type: 'boolean', description: 'True to show, false to hide.' },
+      },
+      required: ['option', 'visible'],
+    },
+  },
+  {
+    name: 'restore_visibility',
+    description: 'Unhides all ghosted/hidden IFC elements, restoring full model visibility.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'isolate_elements',
+    description:
+      'Ghosts or hides elements not matching a filter (ifcType, storey, discipline, material, expressIds). ' +
+      "mode: 'ghost' (transparent), 'hide' (invisible), 'show_all' (restore).",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: { type: 'string', enum: ['ghost', 'hide', 'show_all'], description: "Isolation mode. Default 'ghost'." },
+        ifcType: { type: 'string', description: "IFC element type to keep visible, e.g. 'IfcDuctSegment'." },
+        storey: { type: 'string', description: 'Storey name to keep visible.' },
+        discipline: { type: 'string', description: 'Discipline to keep visible.' },
+        material: { type: 'string', description: 'Material name to keep visible.' },
+        expressIds: { type: 'array', items: { type: 'number' }, description: 'Specific element express IDs to keep visible.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'navigate_tab',
+    description: "Switches the active panel tab in ClashControl's sidebar.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        tab: { type: 'string', description: "Tab name: 'clashes', 'issues', 'models', 'settings', 'addons'." },
+      },
+      required: ['tab'],
+    },
+  },
+  {
+    name: 'measure',
+    description:
+      "Controls the measurement tool in the 3D view. Start point-to-point or edge measurement, " +
+      "stop the active measurement, or clear all measurement annotations.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        mode: {
+          type: 'string',
+          enum: ['point', 'edge', 'stop', 'clear'],
+          description: "'point' = point-to-point distance, 'edge' = edge measurement, 'stop' = deactivate, 'clear' = remove all.",
+        },
+      },
+      required: ['mode'],
+    },
+  },
+  {
+    name: 'walk_mode',
+    description: 'Enables or disables first-person walk mode for navigating through the building model at eye level.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        enabled: { type: 'boolean', description: 'True to enter walk mode, false to exit.' },
+      },
+      required: ['enabled'],
+    },
+  },
+  {
+    name: 'get_model_bounds',
+    description: 'Returns the bounding box of all loaded models: min, max, center, size (in metres).',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'get_camera',
+    description: 'Returns current camera position, look-at target point, and orbit distance.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'pan_camera',
+    description: 'Pans the 3D camera by a world-space offset (metres).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        x: { type: 'number', description: 'X offset in metres.' },
+        y: { type: 'number', description: 'Y offset in metres.' },
+        z: { type: 'number', description: 'Z offset in metres.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'set_camera',
+    description: 'Flies the camera to a new position and look-at target.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        px: { type: 'number', description: 'Camera X position in metres.' },
+        py: { type: 'number', description: 'Camera Y position in metres.' },
+        pz: { type: 'number', description: 'Camera Z position in metres.' },
+        tx: { type: 'number', description: 'Look-at target X in metres.' },
+        ty: { type: 'number', description: 'Look-at target Y in metres.' },
+        tz: { type: 'number', description: 'Look-at target Z in metres.' },
+      },
+      required: ['px', 'py', 'pz', 'tx', 'ty', 'tz'],
+    },
+  },
+  {
+    name: 'zoom_to_bounds',
+    description: 'Fits the camera to show all model geometry.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        padding: { type: 'number', description: 'Extra padding factor (default 1.0).' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'send_nl_command',
+    description: 'Sends a natural-language command directly to the ClashControl NL engine for local processing.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        command: { type: 'string', description: "Natural language command, e.g. 'show all MEP clashes on level 2'." },
+      },
+      required: ['command'],
+    },
+  },
+  {
+    name: 'list_storeys',
+    description:
+      'Returns all building storeys (floors) found in the loaded IFC models, with their names and ' +
+      'elevations. Call before create_2d_sheet to discover available floor names and heights.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'create_2d_sheet',
+    description:
+      'Creates a persistent 2D floor plan sheet at a specified storey or elevation and switches ' +
+      'the viewer to 2D sheet mode. The sheet is added to the project sheet list. ' +
+      'Use list_storeys first to discover valid storey names. Returns the new sheet ID.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        floorName: { type: 'string', description: "Storey name, e.g. 'Ground Floor' or 'Level 2'. Fuzzy matched. Takes priority over height." },
+        height: { type: 'number', description: 'Cut elevation in metres above project origin. Used when floorName is not provided.' },
+        scale: { type: 'string', description: "Drawing scale as a ratio string, e.g. '1:100', '1:50'. Default '1:100'." },
+        format: { type: 'string', enum: ['png', 'pdf', 'dxf'], description: 'If provided, automatically exports the sheet in this format after creating it.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'list_2d_sheets',
+    description:
+      'Returns all 2D floor plan sheets in the current project with their IDs, names, storey ' +
+      'names, elevations, and annotation counts. Also returns the active sheet ID.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'export_sheet',
+    description:
+      'Exports a floor plan sheet as PNG, PDF, or DXF. If sheetId is omitted, exports the ' +
+      'currently active sheet.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sheetId: { type: 'string', description: 'ID of the sheet to export (from list_2d_sheets). Omit to use the active sheet.' },
+        format: { type: 'string', enum: ['png', 'pdf', 'dxf'], description: "Export format. Default 'png'." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'delete_sheet',
+    description: 'Permanently deletes a floor plan sheet and all its annotations. Use list_2d_sheets to get valid sheet IDs.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        sheetId: { type: 'string', description: 'ID of the sheet to delete (from list_2d_sheets).' },
+      },
+      required: ['sheetId'],
+    },
+  },
+  {
+    name: 'exit_floor_plan',
+    description: 'Returns the viewer from 2D floor plan mode back to the standard 3D perspective view.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'pan_2d_sheet',
+    description: 'Moves the 2D floor plan canvas by a pixel offset. Positive x pans right, positive y pans down.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        x: { type: 'number', description: 'Horizontal pan in pixels. Positive = right.' },
+        y: { type: 'number', description: 'Vertical pan in pixels. Positive = down.' },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'zoom_2d_sheet',
+    description: 'Sets the zoom level of the 2D floor plan canvas. 1.0 = 100%, 2.0 = 200%, 0.5 = 50%. Valid range 0.05–50.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        level: { type: 'number', description: 'Zoom multiplier. 1.0 = natural size, 2.0 = double, 0.5 = half.' },
+      },
+      required: ['level'],
+    },
+  },
+  {
+    name: 'fit_2d_bounds',
+    description: 'Auto-fits the 2D floor plan view to show all geometry. Resets pan and zoom so the full floor plan is centred.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
+  {
+    name: 'add_annotation',
+    description:
+      'Adds a markup annotation (text, pin, line, rect, arrow) to the active 2D floor plan sheet. ' +
+      'Coordinates are in world-space metres. Requires an active sheet — call create_2d_sheet first.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        type: { type: 'string', enum: ['text', 'pin', 'line', 'rect', 'arrow'], description: "Annotation type. Default 'text'." },
+        x: { type: 'number', description: 'World X coordinate of the annotation start point (metres).' },
+        y: { type: 'number', description: 'World Z coordinate of the annotation start point (metres).' },
+        x2: { type: 'number', description: 'World X of the end point (for line, rect, arrow).' },
+        y2: { type: 'number', description: 'World Z of the end point (for line, rect, arrow).' },
+        text: { type: 'string', description: 'Label text for text and pin annotations.' },
+        color: { type: 'string', description: "Hex color, e.g. '#f59e0b'. Default amber." },
+      },
+      required: ['x', 'y'],
+    },
+  },
+  {
+    name: 'measure_on_sheet',
+    description:
+      'Adds a dimension annotation between two world-space points on the active 2D sheet. ' +
+      'Calculates and labels the distance in mm or m.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        points: {
+          type: 'array',
+          items: { type: 'number' },
+          minItems: 4,
+          maxItems: 4,
+          description: 'Four world-space coordinates [x1, z1, x2, z2] in metres defining the two endpoints.',
+        },
+        color: { type: 'string', description: 'Hex color for the dimension line. Default light blue.' },
+      },
+      required: ['points'],
+    },
+  },
+  {
+    name: 'create_issue',
+    description: 'Creates a coordination issue in ClashControl.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: { type: 'string', description: 'Issue title.' },
+        description: { type: 'string', description: 'Detailed issue description.' },
+        status: { type: 'string', enum: ['open', 'in_progress', 'resolved', 'closed'], description: "Initial status. Default 'open'." },
+        priority: { type: 'string', enum: ['low', 'normal', 'high', 'critical'], description: "Priority. Default 'normal'." },
+        assignee: { type: 'string', description: 'Person or team responsible.' },
+        category: { type: 'string', description: "Issue category, e.g. 'coordination', 'design', 'rfi'." },
+      },
+      required: ['title'],
+    },
+  },
+  {
+    name: 'update_issue',
+    description: 'Updates a coordination issue by its 0-based index (from get_issues).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        issueIndex: { type: 'number', description: '0-based index of the issue to update.' },
+        status: { type: 'string', enum: ['open', 'in_progress', 'resolved', 'closed'], description: 'New status.' },
+        priority: { type: 'string', enum: ['low', 'normal', 'high', 'critical'], description: 'New priority.' },
+        assignee: { type: 'string', description: 'New assignee.' },
+        title: { type: 'string', description: 'New title.' },
+        description: { type: 'string', description: 'New description.' },
+      },
+      required: ['issueIndex'],
+    },
+  },
+  {
+    name: 'delete_issue',
+    description: 'Deletes a coordination issue by its 0-based index (from get_issues).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        issueIndex: { type: 'number', description: '0-based index of the issue to delete.' },
+      },
+      required: ['issueIndex'],
+    },
+  },
+  {
+    name: 'export_bcf',
+    description:
+      'Exports all clashes or issues as a BCF (BIM Collaboration Format) ZIP file. ' +
+      'BCF is the industry standard for sharing coordination issues between BIM tools.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        version: { type: 'string', enum: ['2.1', '3.0'], description: "BCF version. Default '2.1' for maximum compatibility." },
+      },
+      required: [],
+    },
+  },
+  {
+    name: 'create_project',
+    description: 'Creates a new project in ClashControl to organise clashes and issues.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: "Project name, e.g. 'MEP Coordination Phase 2'." },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'switch_project',
+    description: 'Switches to an existing project by name (fuzzy match). Loads that project\'s clashes, issues, and detection rules.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: "Project name or partial match, e.g. 'MEP' matches 'MEP Coordination'." },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'delete_model',
+    description: 'Removes a loaded IFC model from the current session by name.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Name of the model to remove (partial match supported).' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'rename_model',
+    description: 'Renames a loaded IFC model and optionally updates its discipline.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        oldName: { type: 'string', description: 'Current model name (partial match supported).' },
+        newName: { type: 'string', description: 'New display name for the model.' },
+        discipline: { type: 'string', description: "New discipline, e.g. 'Structural', 'MEP', 'Architectural'." },
+      },
+      required: ['oldName', 'newName'],
+    },
+  },
+  {
+    name: 'get_model_info',
+    description: 'Returns element list and metadata for a specific loaded IFC model: element count, storeys, stats, visibility.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Model name (partial match supported).' },
+      },
+      required: ['name'],
+    },
+  },
+  {
+    name: 'toggle_model',
+    description: 'Shows or hides a loaded IFC model by name.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        name: { type: 'string', description: 'Model name (partial match supported).' },
+        visible: { type: 'boolean', description: 'True to show, false to hide.' },
+      },
+      required: ['name', 'visible'],
+    },
+  },
+  {
+    name: 'run_data_quality',
+    description: 'Runs BIM/ILS data quality checks on all loaded models and returns structured results.',
+    inputSchema: { type: 'object', properties: {}, required: [] },
+  },
+];
+
+// ── HTTP bridge helper ────────────────────────────────────────────────────────
+
+async function callBridge(toolName, params) {
+  try {
+    const res = await fetch(`${BASE}/call/${toolName}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(params || {}),
+      signal: AbortSignal.timeout(30000),
+    });
+
+    if (!res.ok) {
+      const body = await res.text();
+      return {
+        content: [{ type: 'text', text: `SmartBridge error [${res.status}]: ${body}` }],
+        isError: true,
+      };
+    }
+
+    const data = await res.json();
+    return { content: [{ type: 'text', text: JSON.stringify(data, null, 2) }] };
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes('ECONNREFUSED') || msg.includes('ECONNRESET') || msg.includes('fetch failed')) {
+      return {
+        content: [{
+          type: 'text',
+          text: 'ClashControl SmartBridge is not running. Open ClashControl in your browser and enable the Smart Bridge addon.',
+        }],
+        isError: true,
+      };
+    }
+    if (msg.includes('AbortError') || msg.includes('timeout') || msg.includes('The operation was aborted')) {
+      return {
+        content: [{ type: 'text', text: 'Request timed out. The operation may be processing a large IFC model.' }],
+        isError: true,
+      };
+    }
+    return { content: [{ type: 'text', text: `Bridge error: ${msg}` }], isError: true };
+  }
+}
+
+// ── MCP stdio transport ───────────────────────────────────────────────────────
+// Protocol: each message is framed with "Content-Length: N\r\n\r\n" followed
+// by N bytes of UTF-8 JSON. Same format for both input (stdin) and output (stdout).
+// stdout is SACRED — only JSON-RPC messages go there. All logging uses stderr.
+
+let _inputBuf = Buffer.alloc(0);
+
+function send(msg) {
+  const json = JSON.stringify(msg);
+  const header = `Content-Length: ${Buffer.byteLength(json, 'utf8')}\r\n\r\n`;
+  process.stdout.write(header + json);
+}
+
+process.stdin.on('data', (chunk) => {
+  _inputBuf = Buffer.concat([_inputBuf, chunk]);
+  drain();
+});
+
+function drain() {
+  while (true) {
+    const str = _inputBuf.toString('utf8');
+    const sep = str.indexOf('\r\n\r\n');
+    if (sep === -1) break;
+
+    const headers = str.slice(0, sep);
+    const m = headers.match(/content-length:\s*(\d+)/i);
+    if (!m) {
+      // Malformed — skip past the separator
+      _inputBuf = _inputBuf.slice(Buffer.byteLength(str.slice(0, sep + 4), 'utf8'));
+      continue;
+    }
+
+    const bodyLen = parseInt(m[1], 10);
+    const bodyStart = Buffer.byteLength(str.slice(0, sep + 4), 'utf8');
+    if (_inputBuf.length < bodyStart + bodyLen) break; // wait for more data
+
+    const bodyStr = _inputBuf.slice(bodyStart, bodyStart + bodyLen).toString('utf8');
+    _inputBuf = _inputBuf.slice(bodyStart + bodyLen);
+
+    let msg;
+    try { msg = JSON.parse(bodyStr); }
+    catch (e) { console.error('[mcp] JSON parse error:', e.message); continue; }
+
+    handle(msg).catch((e) => console.error('[mcp] handle error:', e));
+  }
+}
+
+async function handle(msg) {
+  const { id, method, params } = msg;
+
+  if (method === 'initialize') {
+    send({
+      jsonrpc: '2.0',
+      id,
+      result: {
+        protocolVersion: '2024-11-05',
+        capabilities: { tools: {} },
+        serverInfo: { name: 'clashcontrol-mcp', version: '1.0.0' },
+        instructions:
+          'Connects to ClashControl, a local IFC clash detection application. ' +
+          'Use these tools when users ask about BIM clashes, IFC model analysis, element conflicts, ' +
+          'spatial coordination, clash resolution, or 2D floor plan generation. ' +
+          'The SmartBridge must be running (ClashControl open in browser, Smart Bridge addon enabled).',
+      },
+    });
+    return;
+  }
+
+  if (method === 'notifications/initialized') return; // no response needed
+
+  if (method === 'ping') {
+    send({ jsonrpc: '2.0', id, result: {} });
+    return;
+  }
+
+  if (method === 'tools/list') {
+    send({ jsonrpc: '2.0', id, result: { tools: TOOLS } });
+    return;
+  }
+
+  if (method === 'tools/call') {
+    const toolName = params && params.name;
+    const toolArgs = (params && params.arguments) || {};
+
+    if (!toolName) {
+      send({
+        jsonrpc: '2.0', id,
+        error: { code: -32602, message: 'Missing tool name' },
+      });
+      return;
+    }
+
+    const known = TOOLS.find((t) => t.name === toolName);
+    if (!known) {
+      send({
+        jsonrpc: '2.0', id,
+        result: {
+          content: [{ type: 'text', text: `Unknown tool: ${toolName}` }],
+          isError: true,
+        },
+      });
+      return;
+    }
+
+    const result = await callBridge(toolName, toolArgs);
+    send({ jsonrpc: '2.0', id, result });
+    return;
+  }
+
+  // Unknown method — return error only if it had an id (requests, not notifications)
+  if (id !== undefined && id !== null) {
+    send({
+      jsonrpc: '2.0', id,
+      error: { code: -32601, message: `Method not found: ${method}` },
+    });
+  }
+}
+
+process.stdin.on('end', () => process.exit(0));
+process.on('uncaughtException', (err) => { console.error('[mcp] Fatal:', err); process.exit(1); });
+process.on('unhandledRejection', (err) => { console.error('[mcp] Unhandled:', err); process.exit(1); });
+
+console.error('[mcp] ClashControl MCP server ready (51 tools). Waiting for Claude Desktop…');
