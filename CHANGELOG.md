@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.14.31 (2026-04-13)
+- feat: 2D sheet tools + section plane position + raycast clipping fix
+
 ## v4.14.30 (2026-04-13)
 - fix: set_view camera not moving + add 2D sheet MCP tools
 
