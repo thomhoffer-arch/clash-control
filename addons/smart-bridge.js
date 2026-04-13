@@ -929,6 +929,11 @@
     return { type: 'object', properties: props, required: req };
   }
 
+  // ── Claude Desktop auto-configure ────────────────────────────────
+  // Callback set by the "Configure Claude" button; fired when the binary
+  // responds with { type: 'mcp_config_installed', success, path }.
+  var _onMcpConfigInstalled = null;
+
   // ── WebSocket connection ──────────────────────────────────────────
 
   function _connectWs(d) {
@@ -973,6 +978,11 @@
         if (msg.type === 'update_installed') {
           console.log('%c[Smart Bridge] Update installed \u2014 reconnecting\u2026', 'color:#fbbf24;font-weight:bold');
           if (d) d({t:'UPD_SMART_BRIDGE', u:{bridgeUpdating: false, bridgeReconnecting: true}});
+          return;
+        }
+        // Binary wrote the Claude Desktop config file on request
+        if (msg.type === 'mcp_config_installed') {
+          if (typeof _onMcpConfigInstalled === 'function') { _onMcpConfigInstalled(msg); _onMcpConfigInstalled = null; }
           return;
         }
         // Tool call request
@@ -1125,20 +1135,42 @@
         }, null, 2);
         var _claudeConfig = '"mcpServers": ' + _claudeConfigBlock;
 
-        function _copyClaudeConfig() {
-          navigator.clipboard.writeText(_claudeConfig).then(function() {
-            // Brief visual feedback
-            var btn = document.getElementById('cc-sb-copy-btn');
-            if (btn) { var orig = btn.textContent; btn.textContent = 'Copied!'; setTimeout(function(){ btn.textContent = orig; }, 1500); }
+        function _copyToClipboard(text, btnId, label) {
+          var setLabel = function(t) { var b = document.getElementById(btnId); if (b) b.textContent = t; };
+          navigator.clipboard.writeText(text).then(function() {
+            setLabel(label); setTimeout(function(){ setLabel('Configure Claude'); }, 2200);
           }).catch(function() {
-            // Fallback: select a textarea
             var ta = document.createElement('textarea');
-            ta.value = _claudeConfig; ta.style.position = 'fixed'; ta.style.opacity = '0';
+            ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
             document.body.appendChild(ta); ta.select(); document.execCommand('copy');
             document.body.removeChild(ta);
-            var btn = document.getElementById('cc-sb-copy-btn');
-            if (btn) { var orig = btn.textContent; btn.textContent = 'Copied!'; setTimeout(function(){ btn.textContent = orig; }, 1500); }
+            setLabel(label); setTimeout(function(){ setLabel('Configure Claude'); }, 2200);
           });
+        }
+
+        function _autoConfigureClaude() {
+          var btn = document.getElementById('cc-sb-claude-btn');
+          if (btn) btn.textContent = 'Configuring\u2026';
+          var done = false;
+          var timer = setTimeout(function() {
+            if (done) return; done = true; _onMcpConfigInstalled = null;
+            // Binary didn't respond — fall back to clipboard copy
+            _copyToClipboard(_claudeConfig, 'cc-sb-claude-btn', 'Config copied \u2014 paste into file');
+          }, 3000);
+          _onMcpConfigInstalled = function(msg) {
+            if (done) return; done = true; clearTimeout(timer);
+            var btn2 = document.getElementById('cc-sb-claude-btn');
+            if (btn2) {
+              btn2.textContent = msg.success ? 'Done \u2014 restart Claude' : 'Failed \u2014 config copied';
+              if (!msg.success) _copyToClipboard(_claudeConfig, 'cc-sb-claude-btn', 'Failed \u2014 config copied');
+              setTimeout(function(){ var b = document.getElementById('cc-sb-claude-btn'); if (b) b.textContent = 'Configure Claude'; }, 3000);
+            }
+          };
+          // Ask binary to write the config file via WebSocket
+          if (_ws && _ws.readyState === 1) {
+            try { _ws.send(JSON.stringify({ type: 'install_mcp_config' })); }
+            catch (e) { /* timeout will fire fallback */ }
+          }
         }
 
         // Updating (self-update in progress)
@@ -1195,11 +1227,18 @@
             ${!sb.llmConnected && html`<div style=${{background:'var(--bg-secondary)',borderRadius:6,padding:'.45rem .5rem',display:'flex',flexDirection:'column',gap:'.35rem'}}>
               <div style=${{display:'flex',alignItems:'center',gap:'.4rem'}}>
                 <span style=${{fontSize:'0.69rem',fontWeight:600,color:'#c084fc',flex:1}}>Claude Desktop / Claude Code</span>
-                <button id="cc-sb-copy-btn" onClick=${_copyClaudeConfig}
-                  style=${{..._btnSmall,background:'#7c3aed',color:'#fff',flexShrink:0}}>Copy config</button>
+                <button id="cc-sb-claude-btn" onClick=${_autoConfigureClaude}
+                  style=${{..._btnSmall,background:'#7c3aed',color:'#fff',flexShrink:0}}>Configure Claude</button>
               </div>
               <div style=${{fontSize:'0.58rem',color:'var(--text-faint)',lineHeight:1.4}}>
-                Add this block inside the <code style=${{fontSize:'0.58rem',background:'var(--bg-tertiary)',padding:'1px 3px',borderRadius:2}}>${'{'}</code> in <code style=${{fontSize:'0.58rem',background:'var(--bg-tertiary)',padding:'1px 3px',borderRadius:2}}>${os === 'win' ? 'claude_desktop_config.json' : '~/.claude/claude_desktop_config.json'}</code>, then restart Claude.
+                ${os === 'win'
+                  ? html`Auto-configures <code style=${{fontSize:'0.58rem',background:'var(--bg-tertiary)',padding:'1px 3px',borderRadius:2}}>%APPDATA%\\Claude\\claude_desktop_config.json</code> and restarts Claude.`
+                  : os === 'mac'
+                    ? html`Auto-configures <code style=${{fontSize:'0.58rem',background:'var(--bg-tertiary)',padding:'1px 3px',borderRadius:2}}>~/Library/Application\u00a0Support/Claude/claude_desktop_config.json</code> and restarts Claude.`
+                    : html`Auto-configures <code style=${{fontSize:'0.58rem',background:'var(--bg-tertiary)',padding:'1px 3px',borderRadius:2}}>~/.config/claude-desktop/claude_desktop_config.json</code> and restarts Claude.`}
+                ${' Or run '}
+                <code style=${{fontSize:'0.58rem',background:'var(--bg-tertiary)',padding:'1px 3px',borderRadius:2}}>node mcp-server.js --install</code>
+                ${' in the ClashControl folder for all 51 tools.'}
               </div>
               <details>
                 <summary style=${{fontSize:'0.58rem',color:'var(--text-faint)',cursor:'pointer',userSelect:'none'}}>Show block to add</summary>

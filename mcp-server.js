@@ -1,27 +1,83 @@
 #!/usr/bin/env node
 'use strict';
 /**
- * ClashControl MCP Server — standalone, zero npm dependencies.
- * Node 18+ required (uses built-in fetch).
+ * ClashControl MCP Server — standalone, zero npm dependencies (Node 18+ required).
  *
- * This server implements the MCP stdio transport and exposes all 51 ClashControl
- * tools. It forwards every tool call to the SmartBridge REST API at
- * http://127.0.0.1:19803/call/{toolName}.
+ * ── One-time setup (auto-configures Claude Desktop and exits) ─────────────────
+ *   node mcp-server.js --install
  *
- * The SmartBridge binary must be running separately (ClashControl open in
- * browser with the Smart Bridge addon enabled).
+ * ── Manual config location ────────────────────────────────────────────────────
+ *   macOS:   ~/Library/Application Support/Claude/claude_desktop_config.json
+ *   Windows: %APPDATA%\Claude\claude_desktop_config.json
+ *   Linux:   ~/.config/claude-desktop/claude_desktop_config.json
  *
- * Configure in claude_desktop_config.json:
+ *   Add inside the root { }:
  *   "mcpServers": {
  *     "clashcontrol": {
  *       "command": "node",
  *       "args": ["/absolute/path/to/ClashControl/mcp-server.js"]
  *     }
  *   }
+ *
+ * ── Runtime requirement ───────────────────────────────────────────────────────
+ * The SmartBridge binary must be running. Open ClashControl in your browser
+ * and enable the Smart Bridge addon. The binary serves the REST API on port 19803.
  */
 
 const PORT = process.env.CLASHCONTROL_PORT || '19803';
 const BASE = `http://127.0.0.1:${PORT}`;
+
+// ── One-time install mode ─────────────────────────────────────────────────────
+// Detects two scenarios:
+//  1. Explicit flag: node mcp-server.js --install
+//  2. Run directly in a terminal (stdin is a TTY — Claude Desktop always pipes stdin)
+if (process.argv.includes('--install') || process.stdin.isTTY) {
+  (function install() {
+    const os   = require('os');
+    const fs   = require('fs');
+    const path = require('path');
+
+    let cfgPath;
+    if (process.platform === 'win32') {
+      cfgPath = path.join(
+        process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+        'Claude', 'claude_desktop_config.json'
+      );
+    } else if (process.platform === 'darwin') {
+      cfgPath = path.join(
+        os.homedir(), 'Library', 'Application Support', 'Claude',
+        'claude_desktop_config.json'
+      );
+    } else {
+      cfgPath = path.join(
+        os.homedir(), '.config', 'claude-desktop',
+        'claude_desktop_config.json'
+      );
+    }
+
+    let cfg = {};
+    try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch (_) { /* new file */ }
+
+    if (!cfg.mcpServers) cfg.mcpServers = {};
+    cfg.mcpServers.clashcontrol = {
+      command: process.execPath,  // absolute path to the node binary
+      args: [__filename]          // absolute path to this script
+    };
+
+    try {
+      fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+      fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
+      console.log('\u2713 ClashControl MCP server configured!');
+      console.log('  Config written to: ' + cfgPath);
+      console.log('  Restart Claude Desktop to apply.');
+    } catch (err) {
+      console.error('\u2717 Could not write config: ' + err.message);
+      console.error('  Add manually to ' + cfgPath + ':');
+      console.error('  "mcpServers": { "clashcontrol": { "command": "node", "args": ["' + __filename.replace(/\\/g, '\\\\') + '"] } }');
+    }
+    process.exit(0);
+  })();
+}
 
 // ── Tool definitions ──────────────────────────────────────────────────────────
 

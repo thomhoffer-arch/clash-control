@@ -27,6 +27,99 @@ Why this exists: the SmartBridge binary ships with a hardcoded set of MCP tools 
 time. `mcp-server.js` always reflects the current handler set in `addons/smart-bridge.js` without
 requiring a binary rebuild.
 
+### Auto-install
+
+Run once to write the config automatically:
+
+```bash
+node mcp-server.js --install
+```
+
+Detects the OS, writes the correct `claude_desktop_config.json` entry, and exits. Works on macOS, Windows, and Linux.
+
+---
+
+## Binary auto-configuration (`install_mcp_config`)
+
+When the user clicks **"Configure Claude"** in the Smart Bridge addon panel, the browser sends a WebSocket message asking the binary to write `claude_desktop_config.json` itself:
+
+```json
+{ "type": "install_mcp_config" }
+```
+
+The binary must handle this and reply:
+
+```json
+{ "type": "mcp_config_installed", "success": true, "path": "/abs/path/to/config.json" }
+```
+
+or on failure:
+
+```json
+{ "type": "mcp_config_installed", "success": false, "error": "Permission denied" }
+```
+
+### Implementation for the binary (Node.js)
+
+Add this inside the WebSocket `onmessage` handler alongside the existing `tool_manifest` handler:
+
+```js
+if (msg.type === 'install_mcp_config') {
+  const os   = require('os');
+  const fs   = require('fs');
+  const path = require('path');
+
+  let cfgPath;
+  if (process.platform === 'win32') {
+    cfgPath = path.join(process.env.APPDATA || path.join(os.homedir(), 'AppData', 'Roaming'),
+      'Claude', 'claude_desktop_config.json');
+  } else if (process.platform === 'darwin') {
+    cfgPath = path.join(os.homedir(), 'Library', 'Application Support', 'Claude',
+      'claude_desktop_config.json');
+  } else {
+    cfgPath = path.join(os.homedir(), '.config', 'claude-desktop', 'claude_desktop_config.json');
+  }
+
+  try {
+    let cfg = {};
+    try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch (_) {}
+    if (!cfg.mcpServers) cfg.mcpServers = {};
+    // Point to the binary itself running in --mcp mode
+    cfg.mcpServers.clashcontrol = { command: process.execPath, args: ['--mcp'] };
+    fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
+    ws.send(JSON.stringify({ type: 'mcp_config_installed', success: true, path: cfgPath }));
+  } catch (err) {
+    ws.send(JSON.stringify({ type: 'mcp_config_installed', success: false, error: err.message }));
+  }
+  return;
+}
+```
+
+### Auto-configure on startup
+
+For zero-click setup, run this logic unconditionally when the binary starts (before entering the main event loop). This ensures the config is always current without the user needing to click anything.
+
+```js
+function ensureMcpConfig() {
+  // same cfgPath detection and file write as above
+  // Silently skip if config already has the correct entry
+  try {
+    let cfg = {};
+    try { cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch (_) {}
+    const entry = cfg.mcpServers && cfg.mcpServers.clashcontrol;
+    if (entry && entry.command === process.execPath) return; // already configured
+    // Write config (same as above)
+    if (!cfg.mcpServers) cfg.mcpServers = {};
+    cfg.mcpServers.clashcontrol = { command: process.execPath, args: ['--mcp'] };
+    fs.mkdirSync(path.dirname(cfgPath), { recursive: true });
+    fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2) + '\n');
+    console.log('[SmartBridge] Claude Desktop configured. Restart Claude to apply.');
+  } catch (_) { /* non-fatal */ }
+}
+ensureMcpConfig();
+```
+
 ---
 
 ## Full TypeScript build (for .mcpb packaging)
