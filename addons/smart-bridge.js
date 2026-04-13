@@ -550,6 +550,65 @@
     return 'Section plane on ' + axis.toUpperCase() + ' at ' + position + '.';
   };
 
+  // ── Model management handlers ───────────────────────────────────
+
+  handlers.delete_model = function(p) {
+    var s = _getState(); var models = s.models || [];
+    var match = models.find(function(m) { return m.name.toLowerCase() === (p.name || '').toLowerCase(); });
+    if (!match) {
+      match = models.find(function(m) { return m.name.toLowerCase().indexOf((p.name || '').toLowerCase()) >= 0; });
+    }
+    if (!match) return 'Model "' + p.name + '" not found. Loaded: ' + models.map(function(m) { return m.name; }).join(', ');
+    _dispatch({ t: 'DEL_MODEL', id: match.id });
+    return 'Removed model "' + match.name + '".';
+  };
+
+  handlers.rename_model = function(p) {
+    var s = _getState(); var models = s.models || [];
+    var match = models.find(function(m) { return m.name.toLowerCase() === (p.oldName || '').toLowerCase(); });
+    if (!match) {
+      match = models.find(function(m) { return m.name.toLowerCase().indexOf((p.oldName || '').toLowerCase()) >= 0; });
+    }
+    if (!match) return 'Model "' + p.oldName + '" not found.';
+    _dispatch({ t: 'UPD_MODEL', id: match.id, u: { name: p.newName } });
+    return 'Renamed "' + match.name + '" to "' + p.newName + '".';
+  };
+
+  handlers.get_model_info = function(p) {
+    var s = _getState(); var models = s.models || [];
+    var match = models.find(function(m) { return m.name.toLowerCase().indexOf((p.name || '').toLowerCase()) >= 0; });
+    if (!match && models.length === 1) match = models[0];
+    if (!match) return 'Model "' + (p.name || '') + '" not found.';
+    return {
+      name: match.name, discipline: match.discipline || 'Unknown',
+      elementCount: (match.elements || []).length,
+      meshCount: (match.meshes || []).length,
+      storeys: (match.storeyData || []).map(function(st) { return { name: st.name, elevation: st.elevation }; }),
+      visible: match.visible !== false,
+      stats: match.stats || {},
+      color: match.color || null
+    };
+  };
+
+  handlers.toggle_model = function(p) {
+    var s = _getState(); var models = s.models || [];
+    var match = models.find(function(m) { return m.name.toLowerCase().indexOf((p.name || '').toLowerCase()) >= 0; });
+    if (!match) return 'Model "' + p.name + '" not found.';
+    var newVis = p.visible != null ? !!p.visible : !(match.visible !== false);
+    _dispatch({ t: 'UPD_MODEL', id: match.id, u: { visible: newVis } });
+    return (newVis ? 'Showing' : 'Hiding') + ' model "' + match.name + '".';
+  };
+
+  // ── NL / AI handler ───────────────────────────────────────────
+
+  handlers.send_nl_command = function(p) {
+    if (window._ccProcessNLCommand) {
+      var result = window._ccProcessNLCommand(p.command || p.message || '');
+      return result || 'Command processed.';
+    }
+    return 'NL command processing not available.';
+  };
+
   // ── Camera control handlers ─────────────────────────────────────
 
   handlers.get_model_bounds = function() {
