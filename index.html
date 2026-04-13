@@ -16181,14 +16181,14 @@ function startApp() {
     if (viewMatch) {
       var vName = (viewMatch[1]||viewMatch[2]).replace(/^iso$/,'isometric');
       var S3 = window._ccState3d;
-      if (S3 && S3.orbit && S3.cam) {
+      if (S3 && S3.orbit && S3.camera) {
         var dir = viewDirs[vName];
         if (dir) {
           var box = new THREE.Box3(); S3.mg.children.forEach(function(g){if(g.visible)box.expandByObject(g);});
-          if(!box.isEmpty()){var c=new THREE.Vector3(),sz=new THREE.Vector3();box.getCenter(c);box.getSize(sz);var dist=Math.max(sz.x,sz.y,sz.z)*1.5;S3.cam.position.set(c.x+dir[0]*dist,c.y+dir[1]*dist,c.z+dir[2]*dist);S3.orbit.target.copy(c);S3.orbit.update();invalidate(5);}
+          if(!box.isEmpty()){var c=new THREE.Vector3(),sz=new THREE.Vector3();box.getCenter(c);box.getSize(sz);var dist=Math.max(sz.x,sz.y,sz.z)*1.5;S3.orbit.target.copy(c);S3.orbit.sph.theta=Math.atan2(dir[0],dir[2]);S3.orbit.sph.phi=Math.max(0.05,Math.min(Math.PI-0.05,Math.acos(dir[1])));S3.orbit.sph.r=dist;S3.orbit.apply();invalidate(5);}
         } else if (/iso/.test(vName)) {
           var box2=new THREE.Box3();S3.mg.children.forEach(function(g){if(g.visible)box2.expandByObject(g);});
-          if(!box2.isEmpty()){var c2=new THREE.Vector3(),sz2=new THREE.Vector3();box2.getCenter(c2);box2.getSize(sz2);var d2=Math.max(sz2.x,sz2.y,sz2.z)*1.5;S3.cam.position.set(c2.x+d2*0.7,c2.y+d2*0.7,c2.z+d2*0.7);S3.orbit.target.copy(c2);S3.orbit.update();invalidate(5);}
+          if(!box2.isEmpty()){var c2=new THREE.Vector3(),sz2=new THREE.Vector3();box2.getCenter(c2);box2.getSize(sz2);var d2=Math.max(sz2.x,sz2.y,sz2.z)*1.5;S3.orbit.target.copy(c2);S3.orbit.sph.theta=Math.PI/4;S3.orbit.sph.phi=Math.PI/4;S3.orbit.sph.r=d2;S3.orbit.apply();invalidate(5);}
         }
         return vName.charAt(0).toUpperCase()+vName.slice(1)+' view.';
       }

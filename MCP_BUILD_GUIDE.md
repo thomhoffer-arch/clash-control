@@ -191,9 +191,9 @@ Rules:
 
 ---
 
-## All 24 tools — complete definitions
+## All 27 tools — complete definitions
 
-These map 1:1 to the handler functions in the browser addon (`addons/smart-bridge.js` lines 259-377). The SmartBridge binary relays calls to the browser via WebSocket; the MCP server calls the binary via REST.
+These map 1:1 to the handler functions in the browser addon (`addons/smart-bridge.js`). The SmartBridge binary relays calls to the browser via WebSocket; the MCP server calls the binary via REST.
 
 ### Data query tools
 
@@ -489,6 +489,47 @@ server.registerTool("walk_mode", {
   },
   annotations: { destructiveHint: false, idempotentHint: true },
 }, async (params) => callBridge("walk_mode", params));
+```
+
+### 2D sheet / floor plan tools
+
+```ts
+server.registerTool("list_storeys", {
+  title: "List Building Storeys",
+  description:
+    "Returns all building storeys (floors) found in the loaded IFC models, with their names and " +
+    "elevations. Use this before create_2d_sheet to discover available floor names and heights.",
+  inputSchema: {},
+  annotations: { destructiveHint: false, idempotentHint: true },
+}, async () => callBridge("list_storeys"));
+
+server.registerTool("create_2d_sheet", {
+  title: "Create 2D Floor Plan Sheet",
+  description:
+    "Generates a 2D floor plan view at a specified storey or elevation. Switches the 3D viewer " +
+    "into top-down floor plan mode with a horizontal cut plane. Optionally exports the sheet as " +
+    "PNG, PDF, or DXF. Use list_storeys first to find valid storey names.",
+  inputSchema: {
+    floorName: z.string().optional()
+      .describe("Storey name to view, e.g. 'Ground Floor' or 'Level 2'. Fuzzy matched. Takes priority over height."),
+    height: z.number().optional()
+      .describe("Cut elevation in metres above project origin. Used when floorName is not provided."),
+    cutHeight: z.number().min(0).max(5).optional()
+      .describe("Height above the storey elevation where the cut plane is placed, in metres. Default 1.2m."),
+    exportFormat: z.enum(["png", "pdf", "dxf"]).optional()
+      .describe("If provided, automatically exports the sheet in this format after generating it."),
+  },
+  annotations: { destructiveHint: false, idempotentHint: true },
+}, async (params) => callBridge("create_2d_sheet", params));
+
+server.registerTool("exit_floor_plan", {
+  title: "Exit Floor Plan View",
+  description:
+    "Returns the viewer from 2D floor plan mode back to the standard 3D perspective view. " +
+    "Use after inspecting a floor plan or when the user wants to return to 3D navigation.",
+  inputSchema: {},
+  annotations: { destructiveHint: false, idempotentHint: true },
+}, async () => callBridge("exit_floor_plan"));
 ```
 
 ### Export and project tools
