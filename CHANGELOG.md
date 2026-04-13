@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.14.29 (2026-04-13)
+- refactor: consolidate camera globals into single _ccViewport object
+
 ## v4.14.28 (2026-04-13)
 - Fix set_view 'not available' when LLM calls before any chat interaction
 
