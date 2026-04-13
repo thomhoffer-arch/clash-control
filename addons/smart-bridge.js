@@ -376,6 +376,120 @@
     } else { if (window._ccWalkExit) window._ccWalkExit(); _dispatch({ t: 'WALK_MODE', v: false }); return 'Walk mode deactivated.'; }
   };
 
+  // ── 2D sheet / floor plan handlers ──────────────────────────────
+
+  handlers.create_2d_sheet = function(p) {
+    var s = _getState();
+    if (!s.models || !s.models.length) return 'No models loaded.';
+    var storeys = (typeof _ccCollectStoreys === 'function') ? _ccCollectStoreys(s.models) : [];
+    var elevation = null, storeyName = null;
+
+    if (p.floorName) {
+      // Match by storey name (fuzzy)
+      var match = storeys.find(function(st) { return st.name.toLowerCase().indexOf(p.floorName.toLowerCase()) >= 0; });
+      if (match) { elevation = match.elevation; storeyName = match.name; }
+      else return 'Storey "' + p.floorName + '" not found. Available: ' + storeys.map(function(st) { return st.name; }).join(', ');
+    } else if (p.height != null) {
+      elevation = p.height;
+      storeyName = 'Cut at ' + p.height;
+    } else if (storeys.length) {
+      elevation = storeys[0].elevation;
+      storeyName = storeys[0].name;
+    } else {
+      return 'No storey data and no height specified.';
+    }
+
+    var gf = (typeof _ccStoreyToGeoFactor === 'function') ? _ccStoreyToGeoFactor(s.models) : 1;
+    var geoElev = elevation * gf;
+    _dispatch({ t: 'FLOOR_PLAN', v: { storeyName: storeyName, elevation: geoElev, cutHeight: (p.cutHeight || 1.2) * gf } });
+
+    // Trigger export if format specified
+    if (p.exportFormat) {
+      var fmt = (p.exportFormat || '').toLowerCase();
+      setTimeout(function() {
+        if (fmt === 'dxf' && window._ccDoExportDXF) window._ccDoExportDXF();
+        else if (fmt === 'png' && window._ccDoExportPNG) window._ccDoExportPNG();
+        else if (fmt === 'pdf' && window._ccDoExportPDF) window._ccDoExportPDF();
+      }, 500); // slight delay to let floor plan render
+    }
+
+    return 'Floor plan "' + storeyName + '" at elevation ' + elevation + '.' + (p.exportFormat ? ' Exporting as ' + p.exportFormat.toUpperCase() + '.' : '');
+  };
+
+  handlers.list_storeys = function() {
+    var s = _getState();
+    var storeys = (typeof _ccCollectStoreys === 'function') ? _ccCollectStoreys(s.models || []) : [];
+    if (!storeys.length) return { storeys: [], note: 'No storey data found. IFC files need IfcBuildingStorey entities.' };
+    return { storeys: storeys.map(function(st) { return { name: st.name, elevation: st.elevation }; }) };
+  };
+
+  handlers.exit_floor_plan = function() {
+    _dispatch({ t: 'FLOOR_PLAN', v: null });
+    return 'Floor plan view exited.';
+  };
+
+  // ── Issue management handlers ─────────────────────────────────
+
+  handlers.create_issue = function(p) {
+    var id = (window._ccUid) ? window._ccUid() : 'i_' + Date.now();
+    _dispatch({ t: 'ADD_ISSUE', v: {
+      id: id, title: p.title || 'New Issue', description: p.description || '',
+      status: p.status || 'open', priority: p.priority || 'normal',
+      assignee: p.assignee || '', category: p.category || 'coordination',
+      createdAt: new Date().toISOString()
+    }});
+    return 'Issue "' + (p.title || 'New Issue') + '" created.';
+  };
+
+  handlers.update_issue = function(p) {
+    var s = _getState(); var issues = s.issues || [];
+    if (p.issueIndex < 0 || p.issueIndex >= issues.length) return 'Invalid issue index.';
+    var u = {};
+    if (p.status) u.status = p.status;
+    if (p.priority) u.priority = p.priority;
+    if (p.assignee != null) u.assignee = p.assignee;
+    if (p.title) u.title = p.title;
+    if (p.description != null) u.description = p.description;
+    _dispatch({ t: 'UPD_ISSUE', id: issues[p.issueIndex].id, u: u });
+    return 'Updated issue ' + (p.issueIndex + 1) + '.';
+  };
+
+  handlers.delete_issue = function(p) {
+    var s = _getState(); var issues = s.issues || [];
+    if (p.issueIndex < 0 || p.issueIndex >= issues.length) return 'Invalid issue index.';
+    _dispatch({ t: 'DEL_ISSUE', id: issues[p.issueIndex].id });
+    return 'Deleted issue ' + (p.issueIndex + 1) + '.';
+  };
+
+  // ── Data quality handler ──────────────────────────────────────
+
+  handlers.run_data_quality = function() {
+    var s = _getState();
+    if (!s.models || !s.models.length) return 'No models loaded.';
+    var allElements = [];
+    s.models.forEach(function(m) { (m.elements || []).forEach(function(el) { allElements.push(el); }); });
+    var results = {};
+    if (window._ccRunDataQualityChecks) results.general = window._ccRunDataQualityChecks(allElements);
+    if (window._ccRunBIMModelChecks) results.bim = window._ccRunBIMModelChecks(allElements);
+    return results;
+  };
+
+  // ── Section with position parameter ───────────────────────────
+
+  handlers.set_section_at = function(p) {
+    var axis = p.axis || 'y';
+    var position = p.position;
+    if (position == null) return 'Position required.';
+    // Use floor plan for horizontal cuts (Y axis)
+    if (axis === 'y') {
+      _dispatch({ t: 'FLOOR_PLAN', v: { storeyName: 'Section at ' + position, elevation: position, cutHeight: p.cutHeight || 1.2 } });
+      return 'Horizontal section at Y=' + position + '.';
+    }
+    // For X/Z, use standard section with custom plane
+    _dispatch({ t: 'SECTION', axis: axis, position: position });
+    return 'Section plane on ' + axis.toUpperCase() + ' at ' + position + '.';
+  };
+
   // ── Camera control handlers ─────────────────────────────────────
 
   handlers.get_model_bounds = function() {
