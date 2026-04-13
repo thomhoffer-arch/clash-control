@@ -177,14 +177,16 @@
       --color-danger:#dc2626;--color-danger-fg:#b91c1c;--color-danger-bg:#fee2e2;--color-danger-border:rgba(220,38,38,.4);
       --color-info:#2563eb;--color-info-fg:#1d4ed8;--color-info-bg:#dbeafe;--color-info-border:rgba(37,99,235,.35);
     }
-    .cc-left-panel,.cc-side-panel{overflow-x:hidden!important}
-    .cc-left-panel>*,.cc-side-panel>*{min-width:0;overflow-x:hidden}
+    .cc-left-panel{overflow-x:hidden!important}
+    .cc-left-panel>*{min-width:0;overflow-x:hidden}
+    .cc-side-panel{overflow-x:hidden}
+    .cc-side-panel>*{min-width:0}
     body{background:var(--bg-primary);color:var(--text-primary);font-family:var(--font-body);overflow:hidden;-webkit-font-smoothing:antialiased;-moz-osx-font-smoothing:grayscale}
     .cc-display{font-family:var(--font-display);letter-spacing:-.01em}
     .cc-mono{font-family:var(--font-mono)}
     code,kbd,pre,samp{font-family:var(--font-mono)}
     input[type=range]{accent-color:var(--accent)}input[type=checkbox]{accent-color:var(--accent)}
-    ::-webkit-scrollbar{width:7px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--text-faint);border-radius:4px}::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}
+    ::-webkit-scrollbar{width:7px;height:7px}::-webkit-scrollbar-track{background:transparent}::-webkit-scrollbar-thumb{background:var(--text-faint);border-radius:4px}::-webkit-scrollbar-thumb:hover{background:var(--text-muted)}
     select,select option{background:var(--bg-tertiary);color:var(--text-primary);border:1px solid var(--border)}
     .spin{animation:sp 1s linear infinite;display:inline-block}@keyframes sp{to{transform:rotate(360deg)}}
     @keyframes nlDots{0%,20%{opacity:.2}50%{opacity:1}80%,100%{opacity:.2}}
@@ -214,6 +216,7 @@
     .cc-tv__content{display:flex;align-items:center;gap:var(--space-2);padding:var(--cc-tv-row-pad-y) var(--cc-tv-row-pad-x);cursor:pointer;color:var(--text-primary);border:none;background:none;width:100%;text-align:left;font:inherit;line-height:var(--leading-base);transition:background var(--duration-fast) var(--ease-standard),color var(--duration-fast) var(--ease-standard);border-radius:var(--radius-xs);min-height:28px}
     .cc-tv__content:hover{background:var(--bg-secondary)}
     .cc-tv__content.cc-tv-current{background:var(--accent-bg);color:var(--text-primary);font-weight:var(--weight-medium)}
+    .cc-tv__content.cc-tv-multi-sel{background:rgba(96,165,250,.12);color:var(--text-primary)}
     .cc-tv__content.cc-tv-current::before{content:'';position:absolute;left:0;top:4px;bottom:4px;width:3px;background:var(--accent);border-radius:0 var(--radius-xs) var(--radius-xs) 0}
     .cc-tv__content:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
     .cc-tv__toggle{flex-shrink:0;width:var(--cc-tv-toggle-size);height:var(--cc-tv-toggle-size);display:inline-flex;align-items:center;justify-content:center;color:var(--text-muted);background:none;border:none;padding:0;cursor:pointer;border-radius:var(--radius-xs);transition:transform var(--duration-base) var(--ease-standard),color var(--duration-fast) var(--ease-standard);font-size:9px;line-height:1}
@@ -299,7 +302,7 @@
 <body>
 
 <div id="boot" style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:100vh;text-align:center">
-  <div style="width:48px;height:48px;background:linear-gradient(135deg,#00e5ff 0%,#7c3aed 100%);border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:1rem;box-shadow:0 8px 24px rgba(124,58,237,.35)"><span style="display:inline-flex;align-items:center;color:#fff;font-weight:800;font-size:14px;font-family:'Syne',system-ui,sans-serif;line-height:1"><span>C</span><span style="display:inline-block;transform:scaleX(-1);margin-left:-1px">C</span></span></div>
+  <div style="width:48px;height:48px;background:var(--logo-gradient);border-radius:12px;display:flex;align-items:center;justify-content:center;margin-bottom:1rem;box-shadow:0 8px 24px rgba(124,58,237,.35)"><span style="display:inline-flex;align-items:center;color:#fff;font-weight:800;font-size:14px;font-family:'Syne',system-ui,sans-serif;line-height:1"><span>C</span><span style="display:inline-block;transform:scaleX(-1);margin-left:-1px">C</span></span></div>
   <div style="font-size:1.4rem;font-weight:800;margin-bottom:.4rem;font-family:'Syne',system-ui,sans-serif;letter-spacing:-.01em">ClashControl</div>
   <div id="boot-msg" style="color:#64748b;font-size:0.92rem;font-family:'DM Sans',system-ui,sans-serif">Loading…</div>
 </div>
@@ -4171,7 +4174,7 @@ function startApp() {
   var _walkEyeHeight = 1.7;  // meters (scaled to model units at enter)
   var _walkSavedCam = null;  // {pos, target, sph} to restore on exit
   var _walkLastTime = 0;     // for delta-time in tick
-  var _walkCollision = true; // raycast collision with walls
+  var _walkCollision = false; // no-clip: allow walking through objects
   var _walkUnitScale = 1;    // model unit scale (1=m, 1000=mm)
   var _walkPointerLocked = false; // track whether we got pointer lock
 
@@ -4183,7 +4186,7 @@ function startApp() {
     var _storeyUs = (typeof _ccDetectUnitScale === 'function') ? _ccDetectUnitScale(models) : 1;
     var _geoF = (typeof _ccStoreyToGeoFactor === 'function') ? _ccStoreyToGeoFactor(models) : 1;
     _walkUnitScale = _storeyUs * _geoF;
-    _walkSpeed = 2.0 * _walkUnitScale;
+    _walkSpeed = 5.0 * _walkUnitScale;
     _walkEyeHeight = 1.7 * _walkUnitScale;
     _walkSavedCam = {
       pos: S.camera.position.clone(),
@@ -4251,17 +4254,17 @@ function startApp() {
     _walkLastTime = now;
     if (dt <= 0) return;
 
-    var speed = _walkSpeed * (_walkKeys['ShiftLeft'] || _walkKeys['ShiftRight'] ? 3 : 1);
+    var speed = _walkSpeed * (_walkKeys['ShiftLeft'] || _walkKeys['ShiftRight'] ? 4 : 1);
     var fx = Math.sin(_walkYaw), fz = Math.cos(_walkYaw);
-    var rx = Math.cos(_walkYaw), rz = -Math.sin(_walkYaw);
+    var rx = -Math.cos(_walkYaw), rz = Math.sin(_walkYaw);
 
     var mx = 0, mz = 0, my = 0;
     if (_walkKeys['KeyW'] || _walkKeys['ArrowUp'])    { mx += fx; mz += fz; }
     if (_walkKeys['KeyS'] || _walkKeys['ArrowDown'])  { mx -= fx; mz -= fz; }
     if (_walkKeys['KeyA'] || _walkKeys['ArrowLeft'])   { mx -= rx; mz -= rz; }
     if (_walkKeys['KeyD'] || _walkKeys['ArrowRight'])  { mx += rx; mz += rz; }
-    if (_walkKeys['Space'] || _walkKeys['KeyE'])   my += 1;
-    if (_walkKeys['KeyC'] || _walkKeys['KeyQ'])    my -= 1;
+    if (_walkKeys['Space'] || _walkKeys['KeyQ'])   my += 1;
+    if (_walkKeys['KeyC'] || _walkKeys['KeyE'])    my -= 1;
 
     var len = Math.sqrt(mx * mx + mz * mz);
     if (len > 0) { mx /= len; mz /= len; }
@@ -4531,7 +4534,7 @@ function startApp() {
           _walkExit(S);
           if (window._ccDispatch) window._ccDispatch({ t: 'WALK_MODE', v: false });
         }
-        if (/^(Key[WASDCEQ]|Arrow|Space)/.test(e.code)) e.preventDefault();
+        if (/^(Key[WASDCEQ]|Arrow|Space|Shift)/.test(e.code)) e.preventDefault();
         invalidate(3);
       });
       _wlAdd('keyup', function(e) {
@@ -4555,7 +4558,7 @@ function startApp() {
         if (!_walkActive) return;
         e.preventDefault();
         var minSpeed = 0.5 * _walkUnitScale;
-        var maxSpeed = 20 * _walkUnitScale;
+        var maxSpeed = 40 * _walkUnitScale;
         _walkSpeed = Math.max(minSpeed, Math.min(maxSpeed, _walkSpeed * (1 - e.deltaY * 0.001)));
       }, { passive: false });
       _wlAdd('pointerlockchange', function() {
@@ -5743,7 +5746,7 @@ function startApp() {
           if(!obj.isMesh) return;
           if(obj.userData._isLodProxy) return;
           if(obj.userData.expressId==null) return;
-          if(obj.userData._storeyHidden) { if(obj.userData._lodProxy) obj.userData._lodProxy.visible = false; return; }
+          if(obj.userData._storeyHidden || obj.userData._classHidden) { if(obj.userData._lodProxy) obj.userData._lodProxy.visible = false; return; }
           if(!obj.geometry.boundingSphere) obj.geometry.computeBoundingSphere();
           var bs = obj.geometry.boundingSphere;
           tmpSphere.copy(bs).applyMatrix4(obj.matrixWorld);
@@ -5788,7 +5791,7 @@ function startApp() {
         }
         if (_walkActive) {
           _walkTick(S);
-          if (Object.keys(_walkKeys).length > 0) invalidate(3);
+          if (Object.keys(_walkKeys).length > 0 || _walkPointerLocked) invalidate(3);
         }
         if(_needsRender <= 0) return;
         _needsRender--;
@@ -6221,10 +6224,12 @@ function startApp() {
       if(!cls||!hiddenKeys.length){
         S.mg.traverse(function(obj){
           if(obj.isMesh){
+            obj.userData._classHidden = false;
             var modelHidden = obj.parent && obj.parent.userData.modelId && !obj.parent.visible;
             if(!modelHidden && !obj.userData._storeyHidden) obj.visible=true;
           }
         });
+        invalidate();
         return;
       }
       var hiddenIds = new Set();
@@ -6239,7 +6244,9 @@ function startApp() {
         var modelId=obj.parent?obj.parent.userData.modelId:null;
         var modelHidden = obj.parent && obj.parent.userData.modelId && !obj.parent.visible;
         if(modelHidden){ obj.visible=false; return; }
-        obj.visible = !(modelId&&hiddenIds.has(modelId+'_'+eid));
+        var isClassHidden = !!(modelId&&hiddenIds.has(modelId+'_'+eid));
+        obj.userData._classHidden = isClassHidden;
+        obj.visible = !isClassHidden;
       });
       invalidate();
     }, [s.hiddenClasses, s.classifications]);
@@ -6252,7 +6259,10 @@ function startApp() {
       if(!s.colorByClass){
         if(origColorsRef.current){
           origColorsRef.current.forEach(function(entry){
-            if(entry.mesh&&entry.mesh.material)entry.mesh.material.color.copy(entry.color);
+            if(!entry.mesh) return;
+            if(entry.origMat) entry.mesh.material = entry.origMat;
+            else if(entry.mesh.material) entry.mesh.material.color.copy(entry.color);
+            entry.mesh.visible = entry.wasVisible;
           });
           origColorsRef.current=null;
           invalidate();
@@ -6278,10 +6288,18 @@ function startApp() {
         var parent=obj.parent;
         var modelId=parent?parent.userData.modelId:null;
         if(eid==null||!modelId) return;
-        saved.push({mesh:obj, color:obj.material.color.clone()});
         var ci=colorMap[modelId+'_'+eid];
         if(ci!=null){
+          saved.push({mesh:obj, color:obj.material.color.clone(), wasVisible:obj.visible});
           obj.material.color.set(CLASS_COLORS[ci%CLASS_COLORS.length]);
+          obj.visible = true;
+        } else {
+          var origMat = obj.material;
+          if(!_isGhostMat(origMat)){
+            saved.push({mesh:obj, origMat:origMat, wasVisible:obj.visible});
+            obj.material = _makeGhostClone(origMat);
+            obj.visible = true;
+          }
         }
       });
       origColorsRef.current=saved;
@@ -6553,7 +6571,7 @@ function startApp() {
           <span style=${{opacity:.4}}>|</span>
           <span><b>Click</b> to look</span>
           <span style=${{opacity:.4}}>|</span>
-          <span><b>E/Q</b> up/down</span>
+          <span><b>Q/E</b> up/down</span>
           <span style=${{opacity:.4}}>|</span>
           <span><b>Shift</b> sprint</span>
           <span style=${{opacity:.4}}>|</span>
@@ -8453,9 +8471,10 @@ function startApp() {
         if (pairedBases[base]) return;
         if (ext === 'glb' || ext === 'gltf') return;
         if (ext === 'ifcmeta' || ext === 'ifcprops') {
-          var _existingModel = s.models.find(function(m){ return m.name === base; });
+          var _liveModels = (window._ccLatestState && window._ccLatestState.models) || s.models;
+          var _existingModel = _liveModels.find(function(m){ return m.name === base; });
           if (!_existingModel) {
-            errors.push(f.name + ': No matching model found. Load ' + base + '.glb first, or drop all files (' + base + '.glb + ' + f.name + ') together.');
+            errors.push(f.name + ': No matching model found. Load ' + base + '.glb or .ifc first, or drop all files together.');
             return;
           }
           chain = chain.then(function() {
@@ -9058,7 +9077,30 @@ function startApp() {
     var VIEWS=[{id:'spatial',label:'Spatial'},{id:'tree',label:'Tree'},{id:'byType',label:'IFC Type'},{id:'byStorey',label:'Storey'},{id:'byDiscipline',label:'Discipline'},{id:'byMaterial',label:'Material'}];
     var _selProp = useState(null), selectedElProps=_selProp[0], setSelectedElProps=_selProp[1];
     var _ef = useState(null), explorerFocus=_ef[0], setExplorerFocus=_ef[1];
+    var _ms = useState([]), multiSel=_ms[0], setMultiSel=_ms[1];
     var explorerScrollRef = useRef(null);
+    function _elClick(e, el, p, eKey) {
+      if (e && e.shiftKey) {
+        var ref = {expressId: el.expressId, modelId: el.modelId || null};
+        var exists = multiSel.findIndex(function(r){return r.expressId===ref.expressId;});
+        var next;
+        if (exists >= 0) {
+          next = multiSel.filter(function(_,i){return i!==exists;});
+        } else {
+          next = multiSel.concat([ref]);
+        }
+        setMultiSel(next);
+        setExplorerFocus(eKey);
+        setSelectedElProps(p);
+        if (next.length > 0 && _highlightRefs) _highlightRefs(next, true);
+        else if (_unghostAll) _unghostAll();
+      } else {
+        setMultiSel([]);
+        if (_highlightById) _highlightById(el.expressId, false);
+        setExplorerFocus(eKey);
+        setSelectedElProps(p);
+      }
+    }
     useEffect(function(){
       function onKey(e){
         if(s.tab!=='navigator') return;
@@ -9146,7 +9188,7 @@ function startApp() {
       var selected = !!opts.selected;
       return html`<li role="treeitem" aria-level=${opts.level||1} aria-expanded=${hasChildren?String(expanded):undefined} class="cc-tv__item">
         <div tabindex="0" data-tree-key=${opts.key}
-          class=${'cc-tv__content'+(selected?' cc-tv-current':'')}
+          class=${'cc-tv__content'+(selected?' cc-tv-current':'')+(opts.multiSelected?' cc-tv-multi-sel':'')}
           style=${opts.italic?{fontStyle:'italic'}:null}
           onClick=${opts.onClick}
           onDblClick=${opts.onDblClick}
@@ -9193,7 +9235,7 @@ function startApp() {
         </div>`}
         ${classView && hiddenCount>0 && html`<div style=${{fontSize:'var(--text-2xs)',color:'var(--color-warning-fg)'}}>${hiddenCount} group${hiddenCount>1?'s':''} hidden</div>`}
       </div>
-      <div ref=${explorerScrollRef} role=${(viewMode==='spatial'||viewMode==='tree')?'tree':null} aria-label=${viewMode==='spatial'?'Spatial structure':viewMode==='tree'?'Model tree':null} class="cc-tv" style=${{flex:1,overflowY:'auto',padding:'var(--space-1) 0'}}>
+      <div ref=${explorerScrollRef} role=${(viewMode==='spatial'||viewMode==='tree')?'tree':null} aria-label=${viewMode==='spatial'?'Spatial structure':viewMode==='tree'?'Model tree':null} class="cc-tv" style=${{flex:1,overflowY:'auto',overflowX:'auto',padding:'var(--space-1) 0'}}>
         ${s.models.length===0 && html`<div class="cc-tv__empty">Load models to explore</div>`}
         ${viewMode==='spatial' && html`<ul role="group" class="cc-tv__list">${s.models.filter(function(m){return m.visible!==false}).map(function(model){
           var sh = model.spatialHierarchy||{};
@@ -9212,7 +9254,8 @@ function startApp() {
               secondary:p.ifcType||'Element',
               hasChildren:false,
               selected:explorerFocus===eKey,
-              onClick:function(){if(_highlightById)_highlightById(el.expressId,false);setExplorerFocus(eKey);setSelectedElProps(p);},
+              multiSelected:multiSel.some(function(r){return r.expressId===el.expressId;}),
+              onClick:function(e){_elClick(e,el,p,eKey);},
               onDblClick:function(e){e.stopPropagation();if(_fitToElement){var isFloor=(p.ifcType||'').match(/slab|floor/i);_fitToElement(el.expressId,isFloor?{normal:[0,1,0]}:null);}if(_highlightById)_highlightById(el.expressId);}
             });
           }
@@ -9311,7 +9354,8 @@ function startApp() {
               count:hasChildren?elChildren.length:undefined,
               hasChildren:hasChildren, expanded:!!expanded[cKey],
               selected:explorerFocus===eKey,
-              onClick:function(){if(_highlightById)_highlightById(el.expressId,false);setExplorerFocus(eKey);setSelectedElProps(p);},
+              multiSelected:multiSel.some(function(r){return r.expressId===el.expressId;}),
+              onClick:function(e){_elClick(e,el,p,eKey);},
               onDblClick:function(e){e.stopPropagation();if(_fitToElement){var isFloor=(p.ifcType||'').match(/slab|floor/i);_fitToElement(el.expressId,isFloor?{normal:[0,1,0]}:null);}if(_highlightById)_highlightById(el.expressId);},
               onToggle:function(){toggle(cKey);setExplorerFocus(eKey);},
               children:elChildren.map(function(child){
@@ -9324,7 +9368,8 @@ function startApp() {
                   secondary:cp.ifcType||'El',
                   hasChildren:false,
                   selected:explorerFocus===ceKey,
-                  onClick:function(){if(_highlightById)_highlightById(child.expressId,false);setExplorerFocus(ceKey);setSelectedElProps(cp);},
+                  multiSelected:multiSel.some(function(r){return r.expressId===child.expressId;}),
+                  onClick:function(e){_elClick(e,child,cp,ceKey);},
                   onDblClick:function(e){e.stopPropagation();if(_fitToElement){var isFloor=(cp.ifcType||'').match(/slab|floor/i);_fitToElement(child.expressId,isFloor?{normal:[0,1,0]}:null);}if(_highlightById)_highlightById(child.expressId);}
                 });
               })
@@ -13228,7 +13273,7 @@ function startApp() {
       if(this.state.hasError){
         var self=this;
         return h('div',{style:{padding:'2rem',textAlign:'center',color:'var(--text-primary)',background:'var(--bg-primary)',height:'100vh',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center'}},
-          h('div',{style:{width:48,height:48,background:'linear-gradient(135deg,#00e5ff 0%,#7c3aed 100%)',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:'1rem',boxShadow:'0 8px 24px rgba(124,58,237,.35)'}},
+          h('div',{style:{width:48,height:48,background:'var(--logo-gradient)',borderRadius:12,display:'flex',alignItems:'center',justifyContent:'center',marginBottom:'1rem',boxShadow:'0 8px 24px rgba(124,58,237,.35)'}},
             h('span',{style:{display:'inline-flex',alignItems:'center',color:'#fff',fontWeight:800,fontSize:14,fontFamily:'Syne,system-ui,sans-serif',lineHeight:1}},
             h('span',null,'C'),
             h('span',{style:{display:'inline-block',transform:'scaleX(-1)',marginLeft:'-1px'}},'C'))),
