@@ -1,87 +1,85 @@
 # Press Release — ClashControl v4.14
 
-**FOR IMMEDIATE RELEASE**
+**FOR IMMEDIATE RELEASE — April 13, 2026**
 
 ---
 
-## ClashControl v4.14 Brings Walk Mode, Annotated Floor Plans, and IDS Support to Free Browser-Based IFC Clash Detection
+## ClashControl v4.14 Adds Walk Mode and Annotated Floor Plans to Free, Browser-Based BIM Clash Detection
 
-*Open-source BIM coordination tool adds first-person navigation, DXF-exportable sheets, and buildingSMART IDS import/export — all at no cost*
-
----
-
-**[CITY], April 13, 2026** — ClashControl, the free, open-source IFC clash detection application that runs entirely in a web browser, today released version 4.14, adding walk-through navigation, annotated floor plan generation with DXF export, and full support for the buildingSMART Information Delivery Specification (IDS) standard.
-
-ClashControl enables architects, engineers, and BIM coordinators to load IFC building models, detect geometric clashes between elements, manage issues, and export results to the BCF 2.1 standard — all without installing software or purchasing a license. The tool runs in Chrome, Edge, or Firefox and is available at clashcontrol.io and as a downloadable single-file application on GitHub.
+*Open-source tool now lets coordinators navigate IFC models in first-person and export annotated DXF floor plans — still with no install, no license, and no cost*
 
 ---
 
-### Walk Mode and Sheets
+ClashControl, the free open-source IFC clash detection tool used by BIM coordinators at architecture and engineering firms who need results without per-seat licensing, today released version 4.14 — its most significant update since launch.
 
-Version 4.14 introduces **walk mode**, a first-person navigation mode that allows users to move through a loaded IFC model at eye height. The feature is designed for reviewing clearance clashes in mechanical rooms, service corridors, and other dense coordination zones where top-down or orbit-based viewing is insufficient.
-
-The release also adds **Sheets**, a floor plan generation feature that cuts the IFC model at a configurable height and produces annotated 2D views. Plans can be exported as DXF files for integration with CAD-based workflows, addressing coordination workflows that still rely on 2D documentation.
+The release adds two capabilities that previously required separate commercial tools: first-person walk-mode navigation through loaded IFC models, and a Sheets feature that generates annotated 2D floor plan cuts exportable as DXF files. Both features are included at no cost in the existing single-file web application available at clashcontrol.io.
 
 ---
 
-### IDS Import/Export
+### Walk Mode
 
-ClashControl v4.14 adds support for the **Information Delivery Specification (IDS)** format developed by buildingSMART International. BIM coordinators can import IDS files to validate IFC models against project-specific requirements, and export their Data Quality checks as IDS files for sharing with project teams or archiving alongside the model.
-
----
-
-### AI and Interface Improvements
-
-The release includes several improvements to ClashControl's AI-assisted features, including a live detection status indicator in the natural language command panel and support for multi-model scoping in NL queries. Discipline-colored element outlines — structural (blue), MEP (red), architectural (purple), civil (green) — have been added to the 3D viewer for faster visual triage. Soft clash markers now accurately reflect the closest point between element pairs rather than a midpoint approximation.
+Walk mode allows coordinators to navigate through a federated IFC model at eye height using keyboard and mouse controls. The feature is designed for reviewing clearance clashes in context — mechanical rooms, service corridors, and plenum spaces where orbital viewing obscures whether a detected conflict represents a real site problem or a modeling artifact. Navigation speed is unit-aware and eye height is configurable.
 
 ---
 
-### Pricing and Availability
+### Sheets
 
-ClashControl is free and open source under the MIT license. The application is available at [clashcontrol.io](https://www.clashcontrol.io) and as a downloadable single-file application at [github.com/clashcontrol-io/clashcontrol](https://github.com/clashcontrol-io/clashcontrol). No registration, installation, or subscription is required.
+Sheets cuts the loaded model at a user-defined height and generates a 2D floor plan annotated with element labels. Coordinators set cut height, view depth, paper size, and plot scale, then export as DXF. The feature addresses coordination workflows that still depend on 2D deliverables — providing a direct path from a 3D IFC model to a document the site team can open in AutoCAD.
+
+---
+
+### IDS Support and AI Improvements
+
+Version 4.14 also adds support for the buildingSMART Information Delivery Specification (IDS) format in the Data Quality panel. BIM coordinators can import IDS files to validate models against project-defined requirements and export completed checks as IDS for sharing with project stakeholders or archiving.
+
+AI improvements include a live detection status indicator in the natural language command panel, multi-model scoping in NL queries, and discipline-colored element outlines — structural in blue, MEP in red, architectural in purple, civil in green — that make clash review faster to parse in dense federated models.
+
+Soft clash markers have been repositioned to the actual closest point between element pairs, weighted toward the smaller element, eliminating a common source of confusion in structural coordination reviews.
+
+---
+
+### Availability
+
+ClashControl v4.14.26 is available now at [clashcontrol.io](https://www.clashcontrol.io) and as a downloadable single HTML file at [github.com/clashcontrol-io/clashcontrol](https://github.com/clashcontrol-io/clashcontrol). No registration, installation, or subscription is required. The application is licensed under MIT and runs in Chrome, Edge, and Firefox, including offline.
+
+ClashControl accepts community support through GitHub Sponsors.
 
 ---
 
 ### About ClashControl
 
-ClashControl is a free, open-source BIM coordination tool designed for architects, engineers, and BIM coordinators who need clash detection without the overhead of enterprise licensing. The application runs as a single HTML file in any modern web browser and supports IFC 2x3/4 input, BCF 2.1 export, AI-assisted triage, and natural language commands. ClashControl is maintained as an open-source project and accepts community support through GitHub Sponsors.
+ClashControl is a free, open-source BIM coordination tool for architects, engineers, and BIM coordinators. It loads IFC 2x3/4 models, detects hard and soft geometric clashes using OBB-based collision detection, provides AI-assisted triage with natural language commands, and exports to BCF 2.1 for interoperability with Revit, Navisworks, Solibri, BIMcollab, and other platforms. The entire application ships as a single HTML file.
 
 ---
 
 ### Media Contact
 
-**[Name]**
+[Name]
 ClashControl
 [email@clashcontrol.io]
 clashcontrol.io
 
 ---
 
-### Assets
+### Press Assets
 
-- **Screenshot — 3D viewer with discipline-colored clash highlights:** [link]
-- **Screenshot — Walk mode in a mechanical floor:** [link]
-- **Screenshot — Sheets floor plan with DXF export:** [link]
-- **Animated demo (30 seconds):** [link]
-- **GitHub repository:** github.com/clashcontrol-io/clashcontrol
-
----
-
-*###*
+- Screenshot — 3D clash viewer with discipline-colored outlines: [link]
+- Screenshot — Walk mode in a mechanical floor: [link]
+- Screenshot — Sheets floor plan with DXF export panel: [link]
+- 30-second demo (MP4): [link]
+- GitHub: github.com/clashcontrol-io/clashcontrol
 
 ---
 
-## Distribution targets
+### Distribution targets
 
-| Outlet | Type | Contact / Submission |
-|--------|------|---------------------|
-| BIMcorner | Newsletter + blog | editor@bimcorner.com or submission form |
-| AEC Tech | Newsletter | tips@aec.tech |
-| BIM After Dark | Newsletter | Contact via LinkedIn |
-| The B1M | YouTube / social | Via LinkedIn or press@theb1m.com |
-| Architizer | Architecture media | press@architizer.com |
-| ArchDaily | Architecture media | Via press portal |
-| ENR (Engineering News-Record) | Trade press | Via press portal |
-| Autodesk Community Blog | Community | community.autodesk.com (via guest post) |
-| buildingSMART International | Standards org | Via LinkedIn or press contact |
-| ProductHunt | Launch platform | Schedule for Week 4 of campaign |
+| Outlet | Angle | Submission |
+|--------|-------|-----------|
+| BIMcorner | Free alternative to enterprise clash tools | editor@bimcorner.com |
+| AEC Tech newsletter | Open-source BIM tooling | tips@aec.tech |
+| BIM After Dark | IFC / open BIM audience | Via LinkedIn DM |
+| The B1M | AEC technology coverage | press@theb1m.com |
+| ArchDaily | Architecture technology | Via press portal |
+| ENR | Engineering trade press | Via press portal |
+| buildingSMART community | IDS support announcement | Community forums + LinkedIn |
+| ProductHunt | General tech launch | Schedule Week 4 of campaign |
