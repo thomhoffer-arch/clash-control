@@ -717,3 +717,100 @@ Free at clashcontrol.io
 
 #BIM #BIMCoordination #DXF #AECTech
 
+
+---
+
+## PHASE 3 — WEEKS 9–12: AUTHORITY + CONVERSION
+
+---
+
+### LI-33 — Long / Big Topic — W9 Monday
+*Visual: none*
+
+**Is AEC software pricing broken? I think it is.**
+
+I want to make an argument that might be unpopular with some people in this industry.
+
+The pricing model for professional AEC software is not correlated with the value it delivers. It is correlated with what the market will bear — and the market bears a lot because switching costs are high and procurement decisions are made by people who aren't paying out of their own pockets.
+
+Let me be specific.
+
+Navisworks Manage: $6,600/year. What does that buy you? Clash detection, model aggregation, timeline simulation, rendering. Core functionality that hasn't changed substantially in a decade.
+
+Revit: $2,900/year per seat. AutoCAD: $2,200/year. The Autodesk AEC Collection: $4,300/year. These are not priced based on development cost or value delivered. They are priced based on the dependency the industry has built on them over 20 years.
+
+The argument for these prices is usually: "the software saves far more than it costs in project efficiency." This is true. It is also true of software that costs 80% less. The efficiency argument doesn't justify the price — it justifies using software. Any software.
+
+What concerns me more than the headline prices is the access gap. A large firm with 200 employees absorbs these costs easily. A five-person architecture studio doing BIM coordination on three residential projects does not. They either pay the licence fee and absorb the overhead, use the tools improperly (sharing seats), or don't do BIM coordination at all.
+
+The industry then wonders why BIM adoption is uneven across firm sizes.
+
+ClashControl is one data point in a counter-argument: capable BIM tooling does not have to cost thousands per seat per year. The technology is not the constraint. The business model is.
+
+I'm not naive about this — there are real costs in developing and maintaining complex software. But there is a very large gap between "covers development and support costs" and "what the market will bear."
+
+That gap is where open source lives.
+
+→ clashcontrol.io
+
+#BIM #AECTech #OpenSource #OpenBIM #Architecture
+
+---
+
+### LI-34 — Simple — W9 Tuesday
+*Update with real star count*
+
+ClashControl just hit [X] GitHub stars.
+
+That's [X] teams who found a free alternative to paying thousands for clash detection.
+
+Thank you. If you haven't tried it yet: clashcontrol.io
+
+#BIM #OpenSource #OpenBIM
+
+---
+
+### LI-35 — Medium — W9 Thursday
+*Visual: none*
+
+The question I get asked most often: "Is ClashControl good enough to replace Navisworks?"
+
+Honest answer: for most coordination workflows, yes. For some, no.
+
+What ClashControl does as well as Navisworks:
+— Hard and soft clash detection on IFC models
+— BCF 2.1 export with viewpoints, status, assignees
+— 3D review with section planes, measurement, model explorer
+— AI-assisted triage and natural language queries
+
+What Navisworks does that ClashControl doesn't (yet):
+— Timeliner / 4D simulation
+— Photorealistic rendering
+— Quantification and takeoff
+— Deep integration with Autodesk Construction Cloud
+
+If you're doing pure BIM coordination — load IFC, detect clashes, manage issues, export BCF — ClashControl covers it and costs nothing.
+
+If you need 4D scheduling or Autodesk ecosystem integration, Navisworks is still the tool.
+
+The answer for most small and mid-size projects: ClashControl is enough, and the licence cost savings are real.
+
+→ clashcontrol.io
+
+#BIM #BIMCoordination #Navisworks #AECTech
+
+---
+
+### LI-36 — Simple — W9 Friday
+*Visual: Screenshot showing offline PWA indicator*
+
+ClashControl works offline.
+
+Once loaded, it runs entirely in your browser with no internet connection required. No data leaves your machine. Your IFC files stay on your device.
+
+Useful on site. Useful on a train. Useful in any environment where cloud tools are restricted.
+
+Free at clashcontrol.io
+
+#BIM #PWA #OpenBIM #Privacy
+
