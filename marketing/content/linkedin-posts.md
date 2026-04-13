@@ -521,3 +521,112 @@ Open standard. Free tool.
 
 #BIM #IDS #OpenBIM #BuildingSMART
 
+
+---
+
+### LI-25 — Medium — W7 Monday
+*Visual: Walk mode screenshot from inside a mechanical room*
+
+Walk mode is the feature I didn't expect to matter this much.
+
+When you detect a clearance clash between a duct and a structural member, the clash card tells you the gap is 38mm. The project spec requires 50mm. So it's a clash.
+
+But is it actually a problem?
+
+In some cases, yes — the duct needs rerouting. In others, the tolerance is achievable with a minor site adjustment. In others still, the model is slightly off and the as-built won't have the clash at all.
+
+Orbit view doesn't help you make that judgement. Walking through the space at eye height does.
+
+You can see whether the clash is in an accessible area or buried behind other services. You can see whether there's room to manoeuvre. You can see what the maintenance access situation looks like.
+
+This is the context that turns a clash count into a decision.
+
+→ clashcontrol.io — walk mode included, free
+
+#BIM #BIMCoordination #MEP #AECTech
+
+---
+
+### LI-26 — Simple — W7 Tuesday
+
+ClashControl vs $5,000/year:
+
+ClashControl:
+✓ Hard + soft clash detection
+✓ BCF 2.1 export
+✓ AI clash titles
+✓ Natural language commands
+✓ Walk mode
+✓ DXF floor plans
+✓ Works offline
+✓ Open source
+
+$5,000/year licence:
+✓ The same things
+✓ A bigger invoice
+
+clashcontrol.io
+
+#BIM #OpenBIM #AECTech
+
+---
+
+### LI-27 — Long / Big Topic — W7 Thursday
+*Visual: none*
+
+**MEP coordination — where most clashes actually come from, and why**
+
+Ask any BIM coordinator which discipline pair generates the most clashes and the answer is almost always the same: MEP versus structure.
+
+Understanding why helps you run better coordination.
+
+**Why MEP vs structure produces so many clashes**
+
+MEP systems — mechanical, electrical, plumbing — are complex three-dimensional networks that need to thread through a building without interrupting the structural system. The structural system was designed independently, often by a different firm, often before the MEP design was fully developed.
+
+The result: MEP routes that conflict with beams, columns, slabs, and cores that the structural engineer had no reason to move.
+
+This isn't negligence. It's the sequencing of design. Structure is typically detailed before MEP because you can't design MEP without knowing where the structural elements are, but the structural engineer doesn't design around MEP routes because they don't exist yet when the structure is being detailed.
+
+**Where the real problems concentrate**
+
+Ceiling plenums. Every building has zones where structure, MEP, and architecture all compete for the same vertical space. Ceiling height, structural depth, duct sizing, pipe runs, and cable management all need to coexist in a zone that is typically 300-600mm deep.
+
+Plant rooms. High density of services in a small area. Multiple trades intersecting. Maintenance access requirements that aren't modelled.
+
+Cores and risers. Vertical coordination is harder than horizontal. Pipe and duct penetrations through slabs need openings that the structural engineer has to accommodate.
+
+**What this means for your coordination runs**
+
+Run MEP vs structure as your first and most detailed check. Set soft clash clearances that reflect your project's maintenance access requirements, not just physical clearance.
+
+Review plant rooms and ceiling plenums manually even after the automated run — these are the zones where automated detection misses context.
+
+And coordinate early. MEP vs structure clashes found in design development are minor adjustments. The same clashes found in technical design or on site are expensive problems.
+
+→ clashcontrol.io — free MEP clash detection, browser-native
+
+#BIM #MEP #BIMCoordination #AECTech #Coordination
+
+---
+
+### LI-28 — Medium — W7 Friday
+*Visual: Screenshot of clash viewer with discipline-colored outlines*
+
+Small change in ClashControl v4.14 that makes clash review noticeably faster:
+
+Element outlines now use discipline colors.
+
+Structural elements → blue
+MEP elements → red
+Architectural elements → purple
+Civil elements → green
+
+When you fly to a clash, you immediately know which discipline each element belongs to without reading property labels. In a dense model with 20 overlapping services, this matters.
+
+Color by discipline has been in the model explorer for a while. Bringing it into the clash review viewport was the obvious next step.
+
+Free at clashcontrol.io
+
+#BIM #BIMCoordination #UX #AECTech
+
