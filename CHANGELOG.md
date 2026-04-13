@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.14.25 (2026-04-13)
+- feat: shift+click multi-select in navigator tree
+
 ## v4.14.24 (2026-04-10)
 - fix: add api.github.com to CSP connect-src for release tag fetching
 
