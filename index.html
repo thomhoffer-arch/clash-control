@@ -278,8 +278,8 @@
       .cc-header{padding:.35rem .5rem!important}
       .cc-header-actions{gap:.25rem!important}
       .cc-header-actions .cc-hide-mobile{display:none!important}
-      .cc-viewcube-wrap{width:100px!important;height:100px!important}
-      .cc-viewcube-wrap canvas{width:80px!important;height:80px!important;top:10px!important;left:10px!important}
+      .cc-viewcube-wrap{width:70px!important;height:70px!important}
+      .cc-viewcube-wrap canvas{width:56px!important;height:56px!important;top:7px!important;left:7px!important}
       .cc-nlpanel{width:calc(100vw - 1rem)!important;bottom:calc(4.5rem + env(safe-area-inset-bottom, 0px))!important}
       .cc-nlpanel-closed{bottom:calc(4rem + env(safe-area-inset-bottom, 0px))!important;left:50%!important;transform:translateX(-50%)!important}
       .cc-overlay-top{flex-wrap:wrap!important;max-width:calc(100vw - 6rem)!important}
@@ -294,8 +294,8 @@
       .cc-header-project{max-width:120px!important}
       .cc-header-project span{font-size:0.69rem!important}
       .cc-overlay-info{font-size:0.69rem!important;gap:.3rem!important}
-      .cc-viewcube-wrap{width:80px!important;height:80px!important;top:.25rem!important;right:.25rem!important}
-      .cc-viewcube-wrap canvas{width:64px!important;height:64px!important;top:8px!important;left:8px!important}
+      .cc-viewcube-wrap{width:56px!important;height:56px!important;top:.25rem!important;right:.25rem!important}
+      .cc-viewcube-wrap canvas{width:45px!important;height:45px!important;top:6px!important;left:6px!important}
     }
     .cc-header{display:none!important}
     @media(max-width:768px){.cc-header{display:flex!important}}
@@ -4406,14 +4406,14 @@ function startApp() {
         var cs = window._ccCurrentSection;
         if(cs && cs.axis){
           e.preventDefault();
-          var delta2 = e.deltaY > 0 ? -0.008 : 0.008;
+          var delta2 = -(e.deltaMode === 1 ? e.deltaY * 30 : e.deltaY) * 0.00015;
           var newPos = Math.max(0.01, Math.min(0.99, cs.pos + delta2));
           window._ccDispatch({t:A.SECTION,axis:cs.axis,pos:newPos});
           return;
         }
         if(cs && cs.custom){
           e.preventDefault();
-          var delta3 = e.deltaY > 0 ? -0.008 : 0.008;
+          var delta3 = -(e.deltaMode === 1 ? e.deltaY * 30 : e.deltaY) * 0.00015;
           var newPos2 = Math.max(0.01, Math.min(0.99, cs.pos + delta3));
           window._ccDispatch({t:A.SECTION_CUSTOM,v:cs.custom,pos:newPos2});
           return;
@@ -5706,9 +5706,9 @@ function startApp() {
             var mdx =  dx / el.clientWidth  * 2;
             var mdy = -dy / el.clientHeight * 2;
             var dot = mdx * sx + mdy * sy;
-            newPos = Math.max(0, Math.min(1, _secDrag.startPos + dot * 0.5));
+            newPos = Math.max(0, Math.min(1, _secDrag.startPos + dot * 1.0));
           } else {
-            newPos = Math.max(0, Math.min(1, _secDrag.startPos - dy * 0.0015));
+            newPos = Math.max(0, Math.min(1, _secDrag.startPos - dy * 0.003));
           }
           if (cs && cs.axis && window._ccDispatch) window._ccDispatch({t:A.SECTION, axis:cs.axis, pos:newPos});
           else if (cs && cs.custom && window._ccDispatch) window._ccDispatch({t:A.SECTION_CUSTOM, v:cs.custom, pos:newPos});
@@ -5995,6 +5995,7 @@ function startApp() {
         S._sectionPlaneVis.traverse(function(o){if(o.geometry)o.geometry.dispose();if(o.material)o.material.dispose();});
         S.scene.remove(S._sectionPlaneVis); S._sectionPlaneVis = null;
       }
+      if (S._sectionCutLines) { S.scene.remove(S._sectionCutLines); if(S._sectionCutLines.geometry)S._sectionCutLines.geometry.dispose(); if(S._sectionCutLines.material)S._sectionCutLines.material.dispose(); S._sectionCutLines=null; }
       function _makeSectionVis(halfW, halfH, position, quaternion) {
         var grp = new THREE.Group();
         // No fill plane or border — only the drag-handle arrows are shown
@@ -6069,6 +6070,24 @@ function startApp() {
         S._sectionPlaneVis = vis2;
       }
       S.renderer.clippingPlanes=planes;
+      // Debounced section cut highlight lines
+      clearTimeout(S._sectionCutLinesTimer);
+      if(s.sectionAxis && S.mg.children.length>0){
+        S._sectionCutLinesTimer=setTimeout(function(){
+          var _S=state3d.current; if(!_S||!_S.mg) return;
+          var _st=window._ccLatestState||{};
+          var _box=new THREE.Box3().setFromObject(_S.mg);
+          var _axIdx={x:0,y:1,z:2}[s.sectionAxis];
+          var _min=_axIdx===0?_box.min.x:_axIdx===1?_box.min.y:_box.min.z;
+          var _max=_axIdx===0?_box.max.x:_axIdx===1?_box.max.y:_box.max.z;
+          var _cut=_min+s.sectionPos*(_max-_min);
+          _buildSectionCutLines(_S, _st.models||[], _axIdx, _cut);
+          invalidate();
+        },150);
+      } else {
+        var _S2=state3d.current;
+        if(_S2&&_S2._sectionCutLines){ _S2.scene.remove(_S2._sectionCutLines); _S2._sectionCutLines=null; }
+      }
       invalidate();
     }, [s.sectionAxis, s.sectionPos, s.sectionCustom]);
 
@@ -6164,9 +6183,11 @@ function startApp() {
       var cornerSigns=[[-1,-1,-1],[-1,-1,1],[-1,1,-1],[-1,1,1],[1,-1,-1],[1,-1,1],[1,1,-1],[1,1,1]];
       cornerSigns.forEach(function(sg){
         var pos=ctr.clone().addScaledVector(axX,sg[0]*hx).addScaledVector(axY,sg[1]*hy).addScaledVector(axZ,sg[2]*hz);
+        var outDir=new THREE.Vector3(sg[0],sg[1],sg[2]).normalize();
         var mat=new THREE.MeshBasicMaterial({color:0xffffff,transparent:true,opacity:0.9,depthTest:false});
+        mat.clippingPlanes=[];
         var mesh=new THREE.Mesh(handleGeo,mat);
-        mesh.position.copy(pos);
+        mesh.position.copy(pos).addScaledVector(outDir,handleSize);
         mesh.userData._sboxHandle=true;
         mesh.userData._handleSigns=sg;
         mesh.userData._handleAxX=axX.clone();
@@ -6184,6 +6205,7 @@ function startApp() {
       var ringFloatHeight=Math.max(hy*0.3,0.5); // float above box
       var ringGeo=new THREE.TorusGeometry(ringRadius,ringTubeRadius,8,48);
       var ringMat=new THREE.MeshBasicMaterial({color:0xf59e0b,transparent:true,opacity:0.7,depthTest:false});
+      ringMat.clippingPlanes=[];
       var ring=new THREE.Mesh(ringGeo,ringMat);
       var ringY=hy+ringFloatHeight;
       ring.position.copy(ctr).addScaledVector(axY,ringY);
@@ -6198,6 +6220,7 @@ function startApp() {
         ctr.clone().addScaledVector(axY,ringY)
       ]);
       var lineMat2=new THREE.LineBasicMaterial({color:0xf59e0b,transparent:true,opacity:0.35});
+      lineMat2.clippingPlanes=[];
       var connLine=new THREE.Line(lineGeo,lineMat2);
       connLine.userData._sboxPart=true;
       connLine.renderOrder=999;
@@ -6609,12 +6632,12 @@ function startApp() {
         </div>`}
       </div>`}
       ${html`<${ViewCube} state3d=${state3d} theme=${s.prefs.theme||'dark'} />`}
-      ${(s.sectionAxis||s.sectionCustom) && html`<div style=${{...P,top:'7.5rem',right:'.75rem',background:'rgba(30,58,138,.9)',color:'#93c5fd',pointerEvents:'auto',cursor:'pointer',display:'flex',alignItems:'center',gap:'.4rem'}}
+      ${(s.sectionAxis||s.sectionCustom) && html`<div style=${{...P,top:'9.75rem',right:'.5rem',background:'rgba(30,58,138,.9)',color:'#93c5fd',pointerEvents:'auto',cursor:'pointer',display:'flex',alignItems:'center',gap:'.4rem'}}
         onClick=${function(){d({t:A.SECTION,axis:null})}}>
         <span>Section ${s.sectionAxis?(s.sectionAxis==='y'?'Z':s.sectionAxis==='z'?'Y':s.sectionAxis.toUpperCase()):'Surface'}</span>
         <span style=${{fontSize:'0.69rem',opacity:.7}} title="Clear section" aria-label="Clear section view">✕</span>
       </div>`}
-      ${s.floorPlan && html`<div style=${{...P,top:'7.5rem',right:'.75rem',background:'rgba(91,33,182,.9)',color:'#c084fc',pointerEvents:'auto',cursor:'pointer',display:'flex',alignItems:'center',gap:'.4rem'}}
+      ${s.floorPlan && html`<div style=${{...P,top:'9.75rem',right:'.5rem',background:'rgba(91,33,182,.9)',color:'#c084fc',pointerEvents:'auto',cursor:'pointer',display:'flex',alignItems:'center',gap:'.4rem'}}
         onClick=${function(){d({t:A.FLOOR_PLAN,v:null})}}>
         <span>3D Section: ${s.floorPlan.storeyName} · ${_ccFormatElev(s.floorPlan.elevation+(s.floorPlan.cutHeight||1.2))}</span>
         <span style=${{fontSize:'0.69rem',opacity:.7}} title="Exit 3D section" aria-label="Exit floor plan view">✕</span>
@@ -7230,8 +7253,8 @@ function startApp() {
       if(vc.edgeLines) vc.edgeLines.material.color.setHex(light ? 0x64748b : 0x94a3b8);
     }, [theme]);
 
-    return html`<div class="cc-viewcube-wrap" style=${{position:'absolute',top:'3rem',right:'.5rem',pointerEvents:'auto',width:140,height:140}}>
-      <canvas ref=${canvasRef} width="120" height="120" style=${{cursor:'pointer',position:'absolute',top:10,left:10,width:120,height:120}} />
+    return html`<div class="cc-viewcube-wrap" style=${{position:'absolute',top:'3rem',right:'.5rem',pointerEvents:'auto',width:98,height:98}}>
+      <canvas ref=${canvasRef} width="84" height="84" style=${{cursor:'pointer',position:'absolute',top:7,left:7,width:84,height:84}} />
     </div>`;
   }
 
@@ -8898,7 +8921,13 @@ function startApp() {
                 onClick=${function(e){
                   e.preventDefault();e.stopPropagation();
                   if(isSectionActive){d({t:A.SECTION,axis:null});}
-                  else{var pos=window._ccElevToSectionPos?window._ccElevToSectionPos(elev+0.6):0.5;d({t:A.SECTION,axis:'y',pos:pos,storeyName:st});}
+                  else{
+                    var _us=typeof _ccDetectUnitScale==='function'?_ccDetectUnitScale(s.models):1;
+                    var _gf=typeof _ccStoreyToGeoFactor==='function'?_ccStoreyToGeoFactor(s.models):1;
+                    var _cutGeo=(elev+0.6*_us)*_gf;
+                    var pos=window._ccElevToSectionPos?window._ccElevToSectionPos(_cutGeo):0.5;
+                    d({t:A.SECTION,axis:'y',pos:pos,storeyName:st});
+                  }
                 }}
                 style=${{...S_BTN,fontSize:'0.57rem',padding:'.05rem .22rem',background:isSectionActive?'#7c3aed':'var(--bg-secondary)',color:isSectionActive?'#e9d5ff':'var(--text-muted)',flexShrink:0,lineHeight:1.4}}>
                 ${isSectionActive?'✕':'Show'}
@@ -14364,6 +14393,51 @@ function startApp() {
     </div>`;
   }
 
+  // ── Section Cut Line Highlight ───────────────────────────────────
+  function _buildSectionCutLines(S, models, axisIdx, cutPos) {
+    if(S._sectionCutLines){ S.scene.remove(S._sectionCutLines); S._sectionCutLines=null; }
+    if(!models||!models.length) return;
+    var positions=[];
+    var va=new THREE.Vector3(),vb=new THREE.Vector3(),vc=new THREE.Vector3();
+    var eps=1e-6;
+    function axV(v){ return axisIdx===0?v.x:axisIdx===1?v.y:v.z; }
+    models.forEach(function(m){
+      if(m.visible===false) return;
+      (m.elements||[]).forEach(function(el){
+        (el.meshes||[]).forEach(function(mesh){
+          var geo=mesh.geometry; if(!geo||!geo.attributes||!geo.attributes.position) return;
+          mesh.updateWorldMatrix(true,false);
+          var wm=mesh.matrixWorld;
+          var pos=geo.attributes.position;
+          var idx=geo.index;
+          var count=idx?idx.count:pos.count;
+          for(var i=0;i<count;i+=3){
+            var ia=idx?idx.getX(i):i, ib=idx?idx.getX(i+1):i+1, ic=idx?idx.getX(i+2):i+2;
+            va.set(pos.getX(ia),pos.getY(ia),pos.getZ(ia)).applyMatrix4(wm);
+            vb.set(pos.getX(ib),pos.getY(ib),pos.getZ(ib)).applyMatrix4(wm);
+            vc.set(pos.getX(ic),pos.getY(ic),pos.getZ(ic)).applyMatrix4(wm);
+            var da=axV(va)-cutPos, db=axV(vb)-cutPos, dc=axV(vc)-cutPos;
+            if(Math.abs(da)<eps) da=eps; if(Math.abs(db)<eps) db=eps; if(Math.abs(dc)<eps) dc=eps;
+            var segPts=[];
+            if(da*db<0){var t=da/(da-db);segPts.push(va.x+t*(vb.x-va.x),va.y+t*(vb.y-va.y),va.z+t*(vb.z-va.z));}
+            if(db*dc<0){var t=db/(db-dc);segPts.push(vb.x+t*(vc.x-vb.x),vb.y+t*(vc.y-vb.y),vb.z+t*(vc.z-vb.z));}
+            if(dc*da<0){var t=dc/(dc-da);segPts.push(vc.x+t*(va.x-vc.x),vc.y+t*(va.y-vc.y),vc.z+t*(va.z-vc.z));}
+            if(segPts.length===6){positions.push(segPts[0],segPts[1],segPts[2],segPts[3],segPts[4],segPts[5]);}
+          }
+        });
+      });
+    });
+    if(!positions.length) return;
+    var geo=new THREE.BufferGeometry();
+    geo.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+    var mat=new THREE.LineBasicMaterial({color:0xf97316,depthTest:false,transparent:true,opacity:0.9});
+    mat.clippingPlanes=[];
+    var lines=new THREE.LineSegments(geo,mat);
+    lines.renderOrder=998;
+    S.scene.add(lines);
+    S._sectionCutLines=lines;
+  }
+
   // ── 2D Generation & Export ──────────────────────────────────────
   function _ccFloorPlanLayerCode(ifcType) {
     if (!ifcType) return 'wall';
@@ -19445,7 +19519,8 @@ function startApp() {
           if(s.showSettings){ d({t:A.SETTINGS,v:false}); return; }
           if(s.showModal){ d({t:A.MODAL,v:false}); return; }
           if(s.showRevitBridge){ d({t:A.REVIT_BRIDGE,v:false}); return; }
-          if(s.sectionAxis||s.sectionCustom){ d({t:A.SECTION,axis:null}); d({t:A.SECTION_BOX,v:null}); return; }
+          if(s.sectionBox){ d({t:A.SECTION_BOX,v:null}); return; }
+          if(s.sectionAxis||s.sectionCustom){ d({t:A.SECTION,axis:null}); return; }
         }
 
         if(inInput) return;
