@@ -14657,35 +14657,137 @@ function startApp() {
     return 'wall';
   }
 
-  // ── True mesh-cut: slice element triangles at a horizontal plane ──
+  // ── Polygon-face section cut ─────────────────────────────────────
+  // For each mesh: detects face boundary loops via crease/boundary edges,
+  // clips each loop against the horizontal cut plane, and returns one segment
+  // per face edge that crosses the plane — far fewer than the triangle approach.
   function _cutElementAtPlane(el, cutY) {
     var segs = [];
-    var va = new THREE.Vector3(), vb = new THREE.Vector3(), vc = new THREE.Vector3();
-    var eps = 1e-6;
     (el.meshes || []).forEach(function(mesh) {
       var geo = mesh.geometry;
       var pos = geo && geo.attributes && geo.attributes.position;
       if (!pos) return;
+
       mesh.updateWorldMatrix(true, false);
-      var mat = mesh.matrixWorld;
+      var me = mesh.matrixWorld.elements;
       var idx = geo.index;
-      var count = idx ? idx.count : pos.count;
-      for (var i = 0; i < count; i += 3) {
-        var ia = idx ? idx.getX(i) : i;
-        var ib = idx ? idx.getX(i + 1) : i + 1;
-        var ic = idx ? idx.getX(i + 2) : i + 2;
-        va.set(pos.getX(ia), pos.getY(ia), pos.getZ(ia)).applyMatrix4(mat);
-        vb.set(pos.getX(ib), pos.getY(ib), pos.getZ(ib)).applyMatrix4(mat);
-        vc.set(pos.getX(ic), pos.getY(ic), pos.getZ(ic)).applyMatrix4(mat);
-        var da = va.y - cutY, db = vb.y - cutY, dc = vc.y - cutY;
-        if (Math.abs(da) < eps) da = eps;
-        if (Math.abs(db) < eps) db = eps;
-        if (Math.abs(dc) < eps) dc = eps;
-        var pts = [];
-        if (da * db < 0) { var t = da / (da - db); pts.push(va.x + t * (vb.x - va.x), va.z + t * (vb.z - va.z)); }
-        if (db * dc < 0) { var t = db / (db - dc); pts.push(vb.x + t * (vc.x - vb.x), vb.z + t * (vc.z - vb.z)); }
-        if (dc * da < 0) { var t = dc / (dc - da); pts.push(vc.x + t * (va.x - vc.x), vc.z + t * (va.z - vc.z)); }
-        if (pts.length >= 4) segs.push([pts[0], pts[1], pts[2], pts[3]]);
+      var nV = pos.count;
+      var nT = idx ? idx.count / 3 : pos.count / 3;
+
+      // ── 1. World-space vertices ──────────────────────────────────
+      var wx = new Float64Array(nV), wy = new Float64Array(nV), wz = new Float64Array(nV);
+      for (var i = 0; i < nV; i++) {
+        var lx = pos.getX(i), ly = pos.getY(i), lz = pos.getZ(i);
+        wx[i] = me[0]*lx + me[4]*ly + me[8]*lz + me[12];
+        wy[i] = me[1]*lx + me[5]*ly + me[9]*lz + me[13];
+        wz[i] = me[2]*lx + me[6]*ly + me[10]*lz + me[14];
+      }
+
+      // Quick Y-range reject
+      var minY = Infinity, maxY = -Infinity;
+      for (var i = 0; i < nV; i++) { if (wy[i] < minY) minY = wy[i]; if (wy[i] > maxY) maxY = wy[i]; }
+      if (minY >= cutY - 1e-6 || maxY <= cutY + 1e-6) return;
+
+      // ── 2. Flat triangle normals ─────────────────────────────────
+      var tnx = new Float32Array(nT), tny = new Float32Array(nT), tnz = new Float32Array(nT);
+      for (var t = 0; t < nT; t++) {
+        var ia = idx ? idx.getX(t*3) : t*3,  ib = idx ? idx.getX(t*3+1) : t*3+1,  ic = idx ? idx.getX(t*3+2) : t*3+2;
+        var ax=wx[ib]-wx[ia], ay=wy[ib]-wy[ia], az=wz[ib]-wz[ia];
+        var bx=wx[ic]-wx[ia], by=wy[ic]-wy[ia], bz=wz[ic]-wz[ia];
+        var nx=ay*bz-az*by, ny=az*bx-ax*bz, nz=ax*by-ay*bx;
+        var len=Math.sqrt(nx*nx+ny*ny+nz*nz);
+        if (len > 1e-10) { tnx[t]=nx/len; tny[t]=ny/len; tnz[t]=nz/len; }
+      }
+
+      // ── 3. Edge → triangle adjacency ────────────────────────────
+      // Canonical undirected key: smaller_idx + '|' + larger_idx
+      var edgeMap = {}; // key → {a, b, tris:[...]}
+      for (var t = 0; t < nT; t++) {
+        var ia = idx ? idx.getX(t*3) : t*3,  ib = idx ? idx.getX(t*3+1) : t*3+1,  ic = idx ? idx.getX(t*3+2) : t*3+2;
+        var ev = [[ia,ib],[ib,ic],[ic,ia]];
+        for (var e = 0; e < 3; e++) {
+          var a=ev[e][0], b=ev[e][1];
+          var k = a < b ? a+'|'+b : b+'|'+a;
+          if (!edgeMap[k]) edgeMap[k] = {a:a, b:b, tris:[]};
+          edgeMap[k].tris.push(t);
+        }
+      }
+
+      // ── 4. Classify crease / boundary edges ──────────────────────
+      // Crease: adjacent triangles whose normals diverge by > ~10°  (dot < 0.985)
+      // Boundary: edge belongs to only one triangle (open mesh)
+      // These edges form the face boundary polygon loops.
+      var CREASE_DOT = 0.985;
+      var creaseEdges = [];
+      var creaseAdj = {}; // vertIdx → [neighbour vertIdx, ...]
+      var edgeKeys = Object.keys(edgeMap);
+      for (var ei = 0; ei < edgeKeys.length; ei++) {
+        var e = edgeMap[edgeKeys[ei]];
+        var crease = e.tris.length === 1; // boundary edge
+        if (!crease && e.tris.length >= 2) {
+          var t1=e.tris[0], t2=e.tris[1];
+          crease = (tnx[t1]*tnx[t2] + tny[t1]*tny[t2] + tnz[t1]*tnz[t2]) < CREASE_DOT;
+        }
+        if (crease) {
+          creaseEdges.push(e);
+          if (!creaseAdj[e.a]) creaseAdj[e.a] = [];
+          if (!creaseAdj[e.b]) creaseAdj[e.b] = [];
+          creaseAdj[e.a].push(e.b);
+          creaseAdj[e.b].push(e.a);
+        }
+      }
+
+      // ── 5. Walk closed loops in the crease-edge graph ────────────
+      // Each loop is a planar face boundary polygon. Clip it against cutY.
+      var edgeUsed = {}; // undirected canonical key → 1
+      for (var ci = 0; ci < creaseEdges.length; ci++) {
+        var se = creaseEdges[ci];
+        var sk = se.a < se.b ? se.a+'|'+se.b : se.b+'|'+se.a;
+        if (edgeUsed[sk]) continue;
+        edgeUsed[sk] = 1;
+
+        // Walk: start at se.a, go to se.b, follow unvisited crease edges until we return
+        var loop = [se.a, se.b];
+        var prev = se.a, curr = se.b;
+        var maxLen = creaseEdges.length + 2;
+        while (loop.length < maxLen) {
+          var nb = creaseAdj[curr] || [];
+          var next = -1;
+          for (var ni = 0; ni < nb.length; ni++) {
+            var c = nb[ni];
+            if (c === prev) continue;
+            var nk = c < curr ? c+'|'+curr : curr+'|'+c;
+            if (edgeUsed[nk]) continue;
+            next = c; break;
+          }
+          if (next < 0) break; // open / malformed chain
+          var nk2 = next < curr ? next+'|'+curr : curr+'|'+next;
+          edgeUsed[nk2] = 1;
+          if (next === se.a) break; // loop closed
+          loop.push(next);
+          prev = curr; curr = next;
+        }
+        if (loop.length < 3) continue;
+
+        // ── 6. Clip loop against Y = cutY ───────────────────────────
+        // Walk vertices in order; each straddle edge gives one intersection point.
+        // Consecutive pairs of intersection points form section segments
+        // (Jordan curve theorem: a planar polygon enters/exits the cut plane alternately).
+        var xings = [];
+        var n = loop.length;
+        for (var li = 0; li < n; li++) {
+          var va = loop[li], vb = loop[(li+1) % n];
+          var ya = wy[va], yb = wy[vb];
+          var da = ya - cutY, db = yb - cutY;
+          if (da * db < 0) { // straddles
+            var tt = da / (da - db);
+            xings.push({ x: wx[va]+tt*(wx[vb]-wx[va]), z: wz[va]+tt*(wz[vb]-wz[va]) });
+          }
+        }
+        // Pair up consecutive intersection points → segments
+        for (var xi = 0; xi + 1 < xings.length; xi += 2) {
+          segs.push([xings[xi].x, xings[xi].z, xings[xi+1].x, xings[xi+1].z]);
+        }
       }
     });
     return segs;
