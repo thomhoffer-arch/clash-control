@@ -13947,11 +13947,11 @@ function startApp() {
     var activeUl = s.underlays.find(function(u) { return u.id === s.activeUnderlay; });
 
     var LAYER_STYLES = {
-      wall:      { color: '#e2e8f0', width: 3.0, dash: null },
-      structure: { color: '#94a3b8', width: 2.4, dash: [6, 4] },
-      opening:   { color: '#60a5fa', width: 1.4, dash: null },
-      mep:       { color: '#f97316', width: 1.6, dash: [2, 3] },
-      furniture: { color: '#64748b', width: 1.0, dash: null }
+      wall:      { color: '#000000', width: 3.0, dash: null },
+      structure: { color: '#1e293b', width: 2.4, dash: [6, 4] },
+      opening:   { color: '#000000', width: 1.4, dash: null },
+      mep:       { color: '#1e293b', width: 1.6, dash: [2, 3] },
+      furniture: { color: '#334155', width: 1.0, dash: null }
     };
 
     function getActiveSheet() {
@@ -14020,8 +14020,8 @@ function startApp() {
         // Drop shadow
         ctx.fillStyle = 'rgba(0,0,0,0.28)';
         ctx.fillRect(_pl + 4 / viewScale, _pt + 4 / viewScale, _pw, _ph);
-        // White paper background
-        ctx.fillStyle = '#f8fafc';
+        // Paper background (semi-transparent so grid shows through)
+        ctx.fillStyle = 'rgba(248,250,252,0.82)';
         ctx.fillRect(_pl, _pt, _pw, _ph);
         // Inner margin lines (5mm equivalent)
         var _mg = 5 * 10 / pxm; // 5mm in world units
@@ -14064,11 +14064,11 @@ function startApp() {
         if (chains && chains.length) {
           // Layer fill colours for closed polygons (e.g. wall cross-sections)
           var LAYER_FILL = {
-            wall:      'rgba(100,116,139,0.25)',
-            structure: 'rgba(71,85,105,0.35)',
-            opening:   'rgba(96,165,250,0.12)',
-            mep:       'rgba(249,115,22,0.1)',
-            furniture: 'rgba(100,116,139,0.08)'
+            wall:      'rgba(0,0,0,0.45)',
+            structure: 'rgba(0,0,0,0.30)',
+            opening:   'rgba(0,0,0,0.06)',
+            mep:       'rgba(0,0,0,0.06)',
+            furniture: 'rgba(0,0,0,0.04)'
           };
           ctx.lineCap = 'round'; ctx.lineJoin = 'round';
           chains.forEach(function(chain) {
@@ -14926,8 +14926,19 @@ function startApp() {
         }
       });
     });
-    console.log('[2D Outlines] RESULT: ' + outlines.length + ' segments | ' + JSON.stringify(_dbg));
-    return outlines;
+    // Deduplicate near-identical segments (reduces noise from complex families like windows)
+    var deduped = [], seen = {}, dg = 0.005; // 5mm snap grid
+    for (var di = 0; di < outlines.length; di++) {
+      var ds = outlines[di];
+      var dx1 = Math.round(ds[0]/dg), dz1 = Math.round(ds[1]/dg);
+      var dx2 = Math.round(ds[2]/dg), dz2 = Math.round(ds[3]/dg);
+      if (dx1===dx2 && dz1===dz2) continue; // zero-length
+      if (dx1>dx2 || (dx1===dx2 && dz1>dz2)) { var t=dx1;dx1=dx2;dx2=t; t=dz1;dz1=dz2;dz2=t; }
+      var dk = dx1+','+dz1+','+dx2+','+dz2;
+      if (!seen[dk]) { seen[dk]=1; deduped.push(ds); }
+    }
+    console.log('[2D Outlines] RESULT: ' + deduped.length + ' segments (deduped from ' + outlines.length + ') | ' + JSON.stringify(_dbg));
+    return deduped;
   }
 
   function _ccBuildSnapIndex(outlines) {
