@@ -294,7 +294,7 @@
       .cc-header-project{max-width:120px!important}
       .cc-header-project span{font-size:0.69rem!important}
       .cc-overlay-info{font-size:0.69rem!important;gap:.3rem!important}
-      .cc-viewcube-wrap{width:56px!important;height:56px!important;top:.25rem!important;right:.25rem!important}
+      .cc-viewcube-wrap{width:56px!important;height:56px!important;top:.25rem!important;right:.5rem!important}
       .cc-viewcube-wrap canvas{width:45px!important;height:45px!important;top:6px!important;left:6px!important}
     }
     .cc-header{display:none!important}
@@ -4261,6 +4261,7 @@ function startApp() {
       S.orbit.apply();
       _walkSavedCam = null;
     }
+    S.camera.fov = 55; // restore default FOV
     S.camera.near = 0.1;
     S.camera.far = 10000;
     S.camera.updateProjectionMatrix();
@@ -4368,8 +4369,8 @@ function startApp() {
 
     el.addEventListener('mousedown', function(e) {
       if(_sboxDragging || _walkActive) return; // don't orbit while dragging section box handles or in walk mode
-      if (e.button===0) dragging=true;
-      if (e.button===1) { panning=true; e.preventDefault(); el.style.cursor='move'; }
+      if (e.button===0) { dragging=true; var _s3d=window._ccState3d; if(_s3d&&_s3d._sectionCutLines) _s3d._sectionCutLines.visible=false; }
+      if (e.button===1) { panning=true; e.preventDefault(); el.style.cursor='move'; var _s3d2=window._ccState3d; if(_s3d2&&_s3d2._sectionCutLines) _s3d2._sectionCutLines.visible=false; }
       if (e.button===2) return; // reserved for context menu
       lx=e.clientX; ly=e.clientY; e.preventDefault();
     });
@@ -4389,7 +4390,11 @@ function startApp() {
         orbit.apply(); invalidate();
       }
     });
-    _wlAdd('mouseup', function(){dragging=false;if(panning){panning=false;el.style.cursor='';}});
+    _wlAdd('mouseup', function(){
+      var wasActive=dragging||panning;
+      dragging=false;if(panning){panning=false;el.style.cursor='';}
+      if(wasActive){var _s3d=window._ccState3d;if(_s3d&&_s3d._sectionCutLines){_s3d._sectionCutLines.visible=true;invalidate();}}
+    });
     el.addEventListener('wheel', function(e){
       if (_walkActive) return; // Don't orbit-zoom in walk mode — wheel handled by walk speed adjuster
       if (panning) return; // don't zoom while middle-button panning
@@ -4434,6 +4439,7 @@ function startApp() {
     el.addEventListener('touchstart', function(e) {
       if(_sboxDragging || _walkActive) return;
       e.preventDefault();
+      var _s3d=window._ccState3d; if(_s3d&&_s3d._sectionCutLines) _s3d._sectionCutLines.visible=false;
       var t = e.touches;
       if(t.length===1) {
         touchState.type='rotate'; touchState.lx=t[0].clientX; touchState.ly=t[0].clientY;
@@ -4473,7 +4479,7 @@ function startApp() {
       }
     },{passive:false});
     el.addEventListener('touchend', function(e) {
-      if(e.touches.length===0) touchState.type=null;
+      if(e.touches.length===0) { touchState.type=null; var _s3d=window._ccState3d; if(_s3d&&_s3d._sectionCutLines){_s3d._sectionCutLines.visible=true;invalidate();} }
       else if(e.touches.length===1) {
         touchState.type='rotate'; touchState.lx=e.touches[0].clientX; touchState.ly=e.touches[0].clientY;
       }
@@ -4600,9 +4606,11 @@ function startApp() {
       renderer.domElement.addEventListener('wheel', function(e) {
         if (!_walkActive) return;
         e.preventDefault();
-        var minSpeed = 0.5 * _walkUnitScale;
-        var maxSpeed = 40 * _walkUnitScale;
-        _walkSpeed = Math.max(minSpeed, Math.min(maxSpeed, _walkSpeed * (1 - e.deltaY * 0.001)));
+        // Scroll changes FOV (field of vision)
+        var fovDelta = e.deltaY * 0.05;
+        S.camera.fov = Math.max(30, Math.min(110, S.camera.fov + fovDelta));
+        S.camera.updateProjectionMatrix();
+        invalidate(3);
       }, { passive: false });
       _wlAdd('pointerlockchange', function() {
         _walkPointerLocked = (document.pointerLockElement === renderer.domElement);
@@ -5681,6 +5689,7 @@ function startApp() {
           var dx = e.clientX - _secDrag.startX;
           if (Math.abs(dx) < 3 && !_secDrag.didDrag) return;
           _secDrag.didDrag = true;
+          window._ccSectionDragging = true;
           var angle = dx * 0.005;
           var nx = _secDrag.startNormal[0], nz = _secDrag.startNormal[2];
           var cosA = Math.cos(angle), sinA = Math.sin(angle);
@@ -5692,6 +5701,7 @@ function startApp() {
           var dy = e.clientY - _secDrag.startY;
           if (Math.abs(dx) < 3 && Math.abs(dy) < 3 && !_secDrag.didDrag) return;
           _secDrag.didDrag = true;
+          window._ccSectionDragging = true;
           var cs = window._ccCurrentSection;
           var S2 = state3d.current;
           var newPos;
@@ -5721,6 +5731,7 @@ function startApp() {
         if (e.button !== _secDrag.button) return;
         if (_secDrag.button === 0) { var S2 = state3d.current; if (S2.orbit) S2.orbit.enabled = true; }
         _secDrag = null;
+        window._ccSectionDragging = false;
         renderer.domElement.style.cursor = '';
       });
       renderer.domElement.addEventListener('contextmenu', function(e) {
@@ -5832,6 +5843,8 @@ function startApp() {
           if(!obj.geometry.boundingSphere) obj.geometry.computeBoundingSphere();
           var bs = obj.geometry.boundingSphere;
           tmpSphere.copy(bs).applyMatrix4(obj.matrixWorld);
+          // In walk mode, inflate sphere so objects just outside the viewport stay loaded
+          if(_walkActive) tmpSphere.radius *= 2.5;
           if(!frustum.intersectsSphere(tmpSphere)){
             obj.visible = false;
             obj.userData._frustumCulled = true;
@@ -6075,6 +6088,7 @@ function startApp() {
       clearTimeout(S._sectionCutLinesTimer);
       if(s.sectionAxis && S.mg.children.length>0){
         S._sectionCutLinesTimer=setTimeout(function(){
+          if(window._ccSectionDragging) return;
           var _S=state3d.current; if(!_S||!_S.mg) return;
           var _st=window._ccLatestState||{};
           var _box=new THREE.Box3().setFromObject(_S.mg);
@@ -6084,7 +6098,7 @@ function startApp() {
           var _cut=_min+s.sectionPos*(_max-_min);
           _buildSectionCutLines(_S, _st.models||[], _axIdx, _cut);
           invalidate();
-        },150);
+        },300);
       } else {
         var _S2=state3d.current;
         if(_S2&&_S2._sectionCutLines){ _S2.scene.remove(_S2._sectionCutLines); _S2._sectionCutLines=null; }
@@ -7258,7 +7272,7 @@ function startApp() {
       if(vc.edgeLines) vc.edgeLines.material.color.setHex(light ? 0x64748b : 0x94a3b8);
     }, [theme]);
 
-    return html`<div class="cc-viewcube-wrap" style=${{position:'absolute',top:'3rem',right:'.5rem',pointerEvents:'auto',width:98,height:98}}>
+    return html`<div class="cc-viewcube-wrap" style=${{position:'absolute',top:'3rem',right:'1rem',pointerEvents:'auto',width:98,height:98}}>
       <canvas ref=${canvasRef} width="84" height="84" style=${{cursor:'pointer',position:'absolute',top:7,left:7,width:84,height:84}} />
     </div>`;
   }
@@ -13938,11 +13952,11 @@ function startApp() {
     var activeUl = s.underlays.find(function(u) { return u.id === s.activeUnderlay; });
 
     var LAYER_STYLES = {
-      wall:      { color: '#e2e8f0', width: 3.0, dash: null },
-      structure: { color: '#94a3b8', width: 2.4, dash: [6, 4] },
-      opening:   { color: '#60a5fa', width: 1.4, dash: null },
-      mep:       { color: '#f97316', width: 1.6, dash: [2, 3] },
-      furniture: { color: '#64748b', width: 1.0, dash: null }
+      wall:      { color: '#000000', width: 3.0, dash: null },
+      structure: { color: '#1e293b', width: 2.4, dash: [6, 4] },
+      opening:   { color: '#000000', width: 1.4, dash: null },
+      mep:       { color: '#1e293b', width: 1.6, dash: [2, 3] },
+      furniture: { color: '#334155', width: 1.0, dash: null }
     };
 
     function getActiveSheet() {
@@ -14011,8 +14025,8 @@ function startApp() {
         // Drop shadow
         ctx.fillStyle = 'rgba(0,0,0,0.28)';
         ctx.fillRect(_pl + 4 / viewScale, _pt + 4 / viewScale, _pw, _ph);
-        // White paper background
-        ctx.fillStyle = '#f8fafc';
+        // Paper background (semi-transparent so grid shows through)
+        ctx.fillStyle = 'rgba(248,250,252,0.82)';
         ctx.fillRect(_pl, _pt, _pw, _ph);
         // Inner margin lines (5mm equivalent)
         var _mg = 5 * 10 / pxm; // 5mm in world units
@@ -14055,11 +14069,11 @@ function startApp() {
         if (chains && chains.length) {
           // Layer fill colours for closed polygons (e.g. wall cross-sections)
           var LAYER_FILL = {
-            wall:      'rgba(100,116,139,0.25)',
-            structure: 'rgba(71,85,105,0.35)',
-            opening:   'rgba(96,165,250,0.12)',
-            mep:       'rgba(249,115,22,0.1)',
-            furniture: 'rgba(100,116,139,0.08)'
+            wall:      'rgba(0,0,0,0.45)',
+            structure: 'rgba(0,0,0,0.30)',
+            opening:   'rgba(0,0,0,0.06)',
+            mep:       'rgba(0,0,0,0.06)',
+            furniture: 'rgba(0,0,0,0.04)'
           };
           ctx.lineCap = 'round'; ctx.lineJoin = 'round';
           chains.forEach(function(chain) {
@@ -14405,13 +14419,15 @@ function startApp() {
       var viewScale = pan.zoom * pxm;
       var px = e.clientX - rect.left - rect.width / 2 - pan.x;
       var py = e.clientY - rect.top - rect.height / 2 - pan.y;
-      var wx = -px / viewScale, wy = py / viewScale; // negate X to match mirrored rendering
+      var wx = -px / viewScale, wy = py / viewScale;
+      // Return canvas coordinates (canvasX = -worldX) so markup drawing is consistent
+      var cx = -wx; // canvas X = px / viewScale
       if (applySnap && sheet && window._cc2DSnapIndex) {
         var threshold = 12 / viewScale; // screen 12px
-        var hit = window._cc2DSnapIndex.query(-wx, wy, threshold);
+        var hit = window._cc2DSnapIndex.query(-cx, wy, threshold);
         if (hit) return [-hit[0], hit[1], true];
       }
-      return [wx, wy, false];
+      return [cx, wy, false];
     }
 
     function onDown(e) {
@@ -14605,6 +14621,7 @@ function startApp() {
 
     // Collect geometry data into plain typed arrays (copies, not transfers — originals stay in Three.js)
     var meshData=[], transferList=[];
+    var _tmpBox = new THREE.Box3();
     models.forEach(function(m){
       if(m.visible===false) return;
       (m.elements||[]).forEach(function(el){
@@ -14612,6 +14629,12 @@ function startApp() {
           var geo=mesh.geometry;
           if(!geo||!geo.attributes||!geo.attributes.position) return;
           mesh.updateWorldMatrix(true,false);
+          // AABB pre-filter: skip meshes entirely on one side of the cut plane
+          if(!geo.boundingBox) geo.computeBoundingBox();
+          _tmpBox.copy(geo.boundingBox).applyMatrix4(mesh.matrixWorld);
+          var bbMin=axisIdx===0?_tmpBox.min.x:axisIdx===1?_tmpBox.min.y:_tmpBox.min.z;
+          var bbMax=axisIdx===0?_tmpBox.max.x:axisIdx===1?_tmpBox.max.y:_tmpBox.max.z;
+          if(bbMax<cutPos||bbMin>cutPos) return;
           var srcPos=geo.attributes.position.array;
           var posCopy=new Float32Array(srcPos.length); posCopy.set(srcPos);
           var idxCopy=null;
@@ -14910,8 +14933,19 @@ function startApp() {
         }
       });
     });
-    console.log('[2D Outlines] RESULT: ' + outlines.length + ' segments | ' + JSON.stringify(_dbg));
-    return outlines;
+    // Deduplicate near-identical segments (reduces noise from complex families like windows)
+    var deduped = [], seen = {}, dg = 0.005; // 5mm snap grid
+    for (var di = 0; di < outlines.length; di++) {
+      var ds = outlines[di];
+      var dx1 = Math.round(ds[0]/dg), dz1 = Math.round(ds[1]/dg);
+      var dx2 = Math.round(ds[2]/dg), dz2 = Math.round(ds[3]/dg);
+      if (dx1===dx2 && dz1===dz2) continue; // zero-length
+      if (dx1>dx2 || (dx1===dx2 && dz1>dz2)) { var t=dx1;dx1=dx2;dx2=t; t=dz1;dz1=dz2;dz2=t; }
+      var dk = dx1+','+dz1+','+dx2+','+dz2;
+      if (!seen[dk]) { seen[dk]=1; deduped.push(ds); }
+    }
+    console.log('[2D Outlines] RESULT: ' + deduped.length + ' segments (deduped from ' + outlines.length + ') | ' + JSON.stringify(_dbg));
+    return deduped;
   }
 
   function _ccBuildSnapIndex(outlines) {
@@ -20098,10 +20132,10 @@ function startApp() {
 
         // ── Single-key shortcuts (non-chord keys) ──
         if(!ctrl && !e.altKey && !e.shiftKey){
-          if(e.key==='1'){ d({t:A.TAB,v:'clashes'}); return; }
-          if(e.key==='2'){ d({t:A.TAB,v:'issues'}); return; }
-          if(e.key==='3'){ d({t:A.TAB,v:'navigator'}); return; }
-          if(e.key==='4'){ d({t:A.TAB,v:'standards'}); return; }
+          if(e.key==='1'){ d({t:A.UPD_PREFS,u:{renderStyle:'standard'}}); return; }
+          if(e.key==='2'){ d({t:A.UPD_PREFS,u:{renderStyle:'shaded'}}); return; }
+          if(e.key==='3'){ d({t:A.UPD_PREFS,u:{renderStyle:'rendered'}}); return; }
+          if(e.key==='4'){ d({t:A.UPD_PREFS,u:{renderStyle:'wireframe'}}); return; }
         }
 
         if(e.key==='m'&&!ctrl){ d({t:A.MEASURE_MODE,v:s.measureMode?null:'length'}); return; }
