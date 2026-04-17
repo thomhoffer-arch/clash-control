@@ -1,5 +1,16 @@
 # CLAUDE.md — Project Guide for AI Assistants
 
+## Session start — read this first
+
+**Before doing any work, read `MEMORY.md`.** It contains the live project state,
+recent session history, active work in progress, and architecture decisions that
+are not in this file. It is updated automatically every 24 hours by
+`.github/workflows/daily-sync.yml` and should be updated by you at the end of
+each session (Active Work and Project State sections).
+
+After reading, update the `Active Work` section in `MEMORY.md` with what you
+are about to do. When you finish, mark completed items with ~~strikethrough~~ + date.
+
 ## What is this?
 ClashControl is a free, open-source IFC clash detection web app. It lets users load IFC building models, detect geometric clashes between elements, create/manage issues, and export to BCF format.
 
