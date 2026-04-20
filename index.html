@@ -733,11 +733,17 @@ function startApp() {
     if (item._groupedElems) item._groupedElems.forEach(function(eid){ refs.push({modelId: null, expressId: eid, role: 'grouped'}); });
     return refs;
   }
+  function _clearElCaches(model) {
+    if (model && model.elements) model.elements.forEach(function(el) {
+      delete el._wvCache; delete el._triCache; delete el._bvhCache;
+    });
+  }
+
   function reducer(s,a) {
     switch(a.t) {
       case A.ADD_MODEL:   var _am=a.v; if(s.modelMeta){var _mm=s.modelMeta.find(function(m){return m.id===_am.id});if(_mm){if(_mm.visible===false)_am=Object.assign({},_am,{visible:false});if(_mm.discipline)_am=Object.assign({},_am,{discipline:_mm.discipline});if(_mm.color)_am=Object.assign({},_am,{color:_mm.color});if(_mm.tag)_am=Object.assign({},_am,{tag:_mm.tag});}} return Object.assign({},s,{models:s.models.concat([_am])});
-      case A.DEL_MODEL:   return Object.assign({},s,{models:s.models.filter(function(m){return m.id!==a.id})});
-      case A.REPLACE_MODEL: return Object.assign({},s,{models:s.models.map(function(m){return m.id===a.id?a.v:m})});
+      case A.DEL_MODEL:   _clearElCaches(s.models.find(function(m){return m.id===a.id})); return Object.assign({},s,{models:s.models.filter(function(m){return m.id!==a.id})});
+      case A.REPLACE_MODEL: _clearElCaches(s.models.find(function(m){return m.id===a.id})); return Object.assign({},s,{models:s.models.map(function(m){return m.id===a.id?a.v:m})});
       case A.UPD_MODEL:   return Object.assign({},s,{models:s.models.map(function(m){return m.id===a.id?Object.assign({},m,a.u):m})});
       case A.TOGGLE_STOREY: return Object.assign({},s,{models:s.models.map(function(m){if(m.id!==a.id)return m;var hs=Object.assign({},m.hiddenStoreys||{});if(hs[a.storey])delete hs[a.storey];else hs[a.storey]=true;return Object.assign({},m,{hiddenStoreys:hs});})});
       case A.TOGGLE_ALL_STOREYS: return Object.assign({},s,{models:s.models.map(function(m){if(m.id!==a.id)return m;return Object.assign({},m,{hiddenStoreys:a.hide?a.storeys.reduce(function(o,st){o[st]=true;return o;},{}):{}}); })});
@@ -1298,6 +1304,10 @@ function startApp() {
   var _lodBoxGeo = typeof THREE !== 'undefined' ? new THREE.BoxBufferGeometry(1, 1, 1) : null;
   var _lodProxyMat = typeof THREE !== 'undefined' ? new THREE.MeshBasicMaterial({color:0x667788, transparent:true, opacity:0.25, depthWrite:false}) : null;
 
+  // GPU instancing constants
+  var INST_THRESHOLD = 4; // min identical placements before collapsing to InstancedMesh
+  var _INST_HIDE_MX = typeof THREE !== 'undefined' ? new THREE.Matrix4().makeScale(0,0,0) : null; // hides one instance from its InstancedMesh
+
   // ── Bake static mesh transforms for rendering perf ──────────── INTERNALS.md §7
   function _ccBakeMesh(mesh) {
     mesh.updateMatrix();            // one-time compose from pos/quat/scale
@@ -1840,6 +1850,52 @@ function startApp() {
 
   var _ccLoadGeneration = 0; // incremented each load to cancel stale in-progress loads
 
+  // ── GPU Instancing: collapse repeated placements into THREE.InstancedMesh ──
+  // elements[] and meshes[] are mutated in-place. Returns {meshes, groups, instanced}.
+  // Individual proxy meshes remain in element.meshes for clash detection (geometry + baked matrixWorld).
+  function _buildInstancedMeshes(elements, meshes) {
+    if (!THREE.InstancedMesh) return {meshes:meshes, groups:0, instanced:0};
+    var candidates = {}; // instKey → {geo, mat, entries:[{mesh, expressId}]}
+    elements.forEach(function(el) {
+      (el.meshes || []).forEach(function(m) {
+        var ik = m.userData._instKey;
+        if (!ik) return;
+        if (!candidates[ik]) candidates[ik] = {geo:m.geometry, mat:m.material, entries:[]};
+        candidates[ik].entries.push({mesh:m, expressId:el.expressId});
+      });
+    });
+    var removedSet = {};
+    var newMeshes = [];
+    var nGroups = 0, nInstanced = 0;
+    var white = new THREE.Color(1,1,1);
+    Object.keys(candidates).forEach(function(ik) {
+      var grp = candidates[ik];
+      if (grp.entries.length < INST_THRESHOLD) return;
+      var N = grp.entries.length;
+      var iMesh = new THREE.InstancedMesh(grp.geo, grp.mat, N);
+      iMesh.frustumCulled = false;
+      iMesh.userData.instanceExprIds = [];
+      grp.entries.forEach(function(entry, i) {
+        iMesh.setMatrixAt(i, entry.mesh.matrix);
+        iMesh.setColorAt(i, white);
+        iMesh.userData.instanceExprIds.push(entry.expressId);
+        entry.mesh.userData._instanceRef = {iMesh:iMesh, instanceIndex:i};
+        removedSet[entry.mesh.uuid] = true;
+      });
+      iMesh.instanceMatrix.needsUpdate = true;
+      iMesh.instanceColor.needsUpdate = true;
+      newMeshes.push(iMesh);
+      nGroups++;
+      nInstanced += N;
+    });
+    if (nInstanced === 0) return {meshes:meshes, groups:0, instanced:0};
+    // Keep non-instanced meshes; add InstancedMeshes
+    var filtered = meshes.filter(function(m) { return !removedSet[m.uuid]; });
+    newMeshes.forEach(function(im) { filtered.push(im); });
+    if (nGroups > 0) console.log('%c[IFC Instancing] ' + nGroups + ' InstancedMesh groups · ' + nInstanced + ' elements instanced · ' + filtered.length + ' total draw objects', 'color:#a78bfa;font-weight:bold');
+    return {meshes:filtered, groups:nGroups, instanced:nInstanced};
+  }
+
   function loadIFC(buffer, fallbackColor, onProgress, _parentGen) {
     var loadStart = performance.now();
     var _lp = { t0: loadStart, phases: {} };
@@ -1927,6 +1983,7 @@ function startApp() {
             mesh.userData.expressId = expressID;
             elBox.expandByObject(mesh);
             _ccBakeMesh(mesh);
+            mesh.userData._instKey = geoExpId + ':' + matKey;
             elMeshes.push(mesh); meshes.push(mesh);
           } catch(e) { console.warn('Skipped element geometry #'+expressID+': '+(e.message||e)); }
           finally { if (gd) try { gd.delete(); } catch(e2) {} }
@@ -1997,9 +2054,11 @@ function startApp() {
             setTimeout(function(){ processChunk(end); }, 0);
           } else {
             _lmark('Element processing');
+            var _instResult = _buildInstancedMeshes(elements, meshes);
+            meshes = _instResult.meshes;
             var loadTime = Math.round(performance.now() - loadStart);
             var _geoUnique = Object.keys(geoCache).length;
-            var stats = {loadTime:loadTime, fileSize:buffer.byteLength, elementCount:elements.length, meshCount:meshes.length, geoUnique:_geoUnique, geoReused:_geoReused, phases:_lp.phases, loadType:'IFC'};
+            var stats = {loadTime:loadTime, fileSize:buffer.byteLength, elementCount:elements.length, meshCount:meshes.length, geoUnique:_geoUnique, geoReused:_geoReused, instancedGroups:_instResult.groups, instancedElements:_instResult.instanced, phases:_lp.phases, loadType:'IFC'};
             (function() {
               var ph = _lp.phases, prev = 0;
               var rows = [];
@@ -2361,6 +2420,7 @@ function startApp() {
               mesh.applyMatrix4(new THREE.Matrix4().fromArray(gData.tf));
               mesh.userData.expressId = raw.expressId;
               _ccBakeMesh(mesh);
+              mesh.userData._instKey = geoId + ':' + matKey;
               _tMesh += performance.now() - _tM;
               var _tB = performance.now();
               elBox.expandByObject(mesh);
@@ -2386,6 +2446,9 @@ function startApp() {
             }
           }
 
+          var _instResult = _buildInstancedMeshes(elements, meshes);
+          meshes = _instResult.meshes;
+
           var loadTime = Math.round(performance.now() - loadStart);
           var phases = msg.phases || {};
           phases['Scene build'] = performance.now() - loadStart;
@@ -2397,7 +2460,7 @@ function startApp() {
           };
           var streamSub = msg.streamSub || null;
           var _gu = msg.geoUnique || Object.keys(geoCache).length, _gr = msg.geoReused || 0;
-          var stats = {loadTime:loadTime, fileSize:msg.fileSize, elementCount:elements.length, meshCount:meshes.length, geoUnique:_gu, geoReused:_gr, phases:phases, streamSub:streamSub, sceneSub:sceneSub, loadType:'IFC'};
+          var stats = {loadTime:loadTime, fileSize:msg.fileSize, elementCount:elements.length, meshCount:meshes.length, geoUnique:_gu, geoReused:_gr, instancedGroups:_instResult.groups, instancedElements:_instResult.instanced, phases:phases, streamSub:streamSub, sceneSub:sceneSub, loadType:'IFC'};
 
           (function() {
             var ph = phases, prev = 0;
@@ -2965,6 +3028,7 @@ function startApp() {
         var nodes = gltf.json.nodes || [];
         var meshes = gltf.json.meshes || [];
         var modelResult = {};
+        var localMeshCache = {}; // mesh index → [{pos, idx}] local-space primitive data
 
         nodes.forEach(function(node, nodeIdx) {
           if (node.mesh == null) return;
@@ -2975,12 +3039,22 @@ function startApp() {
           var wt = worldTransforms[nodeIdx];
           var allVerts = [], allTris = [];
 
-          (mesh.primitives || []).forEach(function(prim) {
-            if (prim.attributes == null || prim.attributes.POSITION == null) return;
-            var pos = readAccessor(gltf, prim.attributes.POSITION, gltf.bin);
-            var idx = prim.indices != null ? readAccessor(gltf, prim.indices, gltf.bin) : null;
-            var wPos = transformPositions(pos, wt);
-            var tris = buildTris(wPos, idx);
+          var localPrims = localMeshCache[node.mesh];
+          if (!localPrims) {
+            localPrims = [];
+            (mesh.primitives || []).forEach(function(prim) {
+              if (prim.attributes == null || prim.attributes.POSITION == null) return;
+              localPrims.push({
+                pos: readAccessor(gltf, prim.attributes.POSITION, gltf.bin),
+                idx: prim.indices != null ? readAccessor(gltf, prim.indices, gltf.bin) : null
+              });
+            });
+            localMeshCache[node.mesh] = localPrims;
+          }
+
+          localPrims.forEach(function(prim) {
+            var wPos = transformPositions(prim.pos, wt);
+            var tris = buildTris(wPos, prim.idx);
             for (var i = 0; i < wPos.length; i++) allVerts.push(wPos[i]);
             for (var i = 0; i < tris.length; i++) allTris.push(tris[i]);
           });
@@ -3600,8 +3674,6 @@ function startApp() {
         var _sc=candidates[si];
         _getBVH(_sc.eA); _getBVH(_sc.eB);
         _processCandidate(_sc);
-        delete _sc.eA._wvCache; delete _sc.eA._triCache; delete _sc.eA._bvhCache;
-        delete _sc.eB._wvCache; delete _sc.eB._triCache; delete _sc.eB._bvhCache;
       }
       return _finalize();
     }
@@ -3621,10 +3693,6 @@ function startApp() {
       }
       _prof._nElements += Object.keys(_chunkEls).length;
       for (var i=chunkIdx; i<end; i++) { try { _processCandidate(candidates[i]); } catch(e) { /* skip bad candidate */ } }
-      Object.keys(_chunkEls).forEach(function(k) {
-        var el = _chunkEls[k];
-        delete el._wvCache; delete el._triCache; delete el._bvhCache;
-      });
       chunkIdx = end;
       if (onProgress) onProgress(chunkIdx, totalCandidates);
       if (chunkIdx < totalCandidates) {
@@ -4775,9 +4843,38 @@ function startApp() {
         S.mg.traverse(function(obj){
           if(!obj.isMesh||!obj.material||obj.userData._isLodProxy) return;
           if(_isGhostMat(obj.material)) return; // already ghosted
+          var meshModelId = obj.parent && obj.parent.userData && obj.parent.userData.modelId;
+
+          if(obj.isInstancedMesh) {
+            var exprIds = obj.userData.instanceExprIds || [];
+            var ghostMat = _makeGhostClone(obj.material);
+            var splitOuts = [];
+            var needsHide = false;
+            for(var ii=0; ii<exprIds.length; ii++){
+              var ieid = exprIds[ii];
+              var keep = keepAny[ieid] || (keepScoped[ieid] && meshModelId && keepScoped[ieid][meshModelId]);
+              if(keep){
+                var _kMx = new THREE.Matrix4();
+                obj.getMatrixAt(ii, _kMx);
+                var _kMesh = new THREE.Mesh(obj.geometry, obj.material);
+                _kMesh.applyMatrix4(_kMx);
+                _ccBakeMesh(_kMesh);
+                _kMesh.userData.expressId = ieid;
+                _kMesh.userData._splitOut = true;
+                obj.parent.add(_kMesh);
+                obj.setMatrixAt(ii, _INST_HIDE_MX);
+                splitOuts.push(_kMesh);
+                needsHide = true;
+              }
+            }
+            if(needsHide) obj.instanceMatrix.needsUpdate = true;
+            _ghostedMeshes.push({mesh:null, iMesh:obj, origMaterial:obj.material, splitOuts:splitOuts});
+            obj.material = ghostMat;
+            return;
+          }
+
           var eid = obj.userData.expressId;
           if(eid==null) return;
-          var meshModelId = obj.parent && obj.parent.userData && obj.parent.userData.modelId;
           var keep = keepAny[eid] || (keepScoped[eid] && meshModelId && keepScoped[eid][meshModelId]);
           if (!keep) {
             _ghostedMeshes.push({mesh:obj, origMaterial:obj.material});
@@ -4788,7 +4885,26 @@ function startApp() {
       }
       function unghostAll(){
         _ghostedMeshes.forEach(function(g){
-          if(g.mesh.parent) g.mesh.material = g.origMaterial;
+          if(g.iMesh){
+            g.iMesh.material = g.origMaterial;
+            if(g.splitOuts && g.splitOuts.length){
+              var exprIds = g.iMesh.userData.instanceExprIds || [];
+              g.splitOuts.forEach(function(sm){
+                var ieid = sm.userData.expressId;
+                var idx = exprIds.indexOf(ieid);
+                if(idx !== -1){
+                  var _origMx = new THREE.Matrix4();
+                  _origMx.copy(sm.matrixWorld); // matrixWorld = baked instance transform
+                  g.iMesh.setMatrixAt(idx, _origMx);
+                }
+                if(sm.parent) sm.parent.remove(sm);
+                if(sm.material) sm.material.dispose();
+              });
+              g.iMesh.instanceMatrix.needsUpdate = true;
+            }
+          } else {
+            if(g.mesh && g.mesh.parent) g.mesh.material = g.origMaterial;
+          }
         });
         _ghostedMeshes = [];
         if(lastHoveredMesh && lastHoverOriginals){
@@ -5274,25 +5390,40 @@ function startApp() {
         hoverMouse.y = -((e.clientY-rect.top)/rect.height)*2+1;
         hoverRaycaster.setFromCamera(hoverMouse, S.camera);
         var hits = hoverRaycaster.intersectObjects(S.mg.children, true);
-        var hitMesh = null;
-        if(hits.length>0 && hits[0].object.isMesh) hitMesh = hits[0].object;
+        var hitMesh = null, hitInstanceId = -1;
+        if(hits.length>0 && hits[0].object.isMesh) { hitMesh = hits[0].object; hitInstanceId = hits[0].instanceId != null ? hits[0].instanceId : -1; }
         if(hitMesh && _isGhostMat(hitMesh.material)) hitMesh = null;
-        if(hitMesh && !hitMesh.visible) hitMesh = null;
+        if(hitMesh && !hitMesh.isInstancedMesh && !hitMesh.visible) hitMesh = null;
         if(hitMesh && hitMesh.parent && hitMesh.parent.userData.modelId && !hitMesh.parent.visible) hitMesh = null;
-        if(hitMesh===lastHoveredMesh) return;
-        if(lastHoveredMesh && lastHoverOriginals && lastHoveredMesh.material && !_isGhostMat(lastHoveredMesh.material)){
-          if(lastHoveredMesh.material.emissive) lastHoveredMesh.material.emissive.copy(lastHoverOriginals.emissive);
-          lastHoveredMesh.material.opacity = lastHoverOriginals.opacity;
-          lastHoveredMesh.material.needsUpdate = true;
+        var sameHit = hitMesh === lastHoveredMesh && hitInstanceId === (lastHoverOriginals && lastHoverOriginals._instanceId != null ? lastHoverOriginals._instanceId : -1);
+        if(sameHit) return;
+        // restore previous hover
+        if(lastHoveredMesh && lastHoverOriginals){
+          if(lastHoveredMesh.isInstancedMesh && lastHoverOriginals._instanceId != null){
+            lastHoveredMesh.setColorAt(lastHoverOriginals._instanceId, lastHoverOriginals._origColor);
+            lastHoveredMesh.instanceColor.needsUpdate = true;
+          } else if(lastHoveredMesh.material && !_isGhostMat(lastHoveredMesh.material)){
+            if(lastHoveredMesh.material.emissive) lastHoveredMesh.material.emissive.copy(lastHoverOriginals.emissive);
+            lastHoveredMesh.material.opacity = lastHoverOriginals.opacity;
+            lastHoveredMesh.material.needsUpdate = true;
+          }
         }
         if(hoverRef.current){scene.remove(hoverRef.current);if(hoverRef.current.geometry)hoverRef.current.geometry.dispose();if(hoverRef.current.material)hoverRef.current.material.dispose();hoverRef.current=null;}
         if(hitMesh){
-          lastHoverOriginals = {
-            emissive: hitMesh.material.emissive ? hitMesh.material.emissive.clone() : new THREE.Color(0),
-            opacity: hitMesh.material.opacity
-          };
-          if(hitMesh.material.emissive) hitMesh.material.emissive.set(0x1e3a5f);
-          hitMesh.material.needsUpdate = true;
+          if(hitMesh.isInstancedMesh && hitInstanceId >= 0 && hitMesh.instanceColor){
+            var _hOrigColor = new THREE.Color();
+            hitMesh.getColorAt(hitInstanceId, _hOrigColor);
+            lastHoverOriginals = {_instanceId:hitInstanceId, _origColor:_hOrigColor};
+            hitMesh.setColorAt(hitInstanceId, new THREE.Color(0x1e3a5f));
+            hitMesh.instanceColor.needsUpdate = true;
+          } else {
+            lastHoverOriginals = {
+              emissive: hitMesh.material.emissive ? hitMesh.material.emissive.clone() : new THREE.Color(0),
+              opacity: hitMesh.material.opacity
+            };
+            if(hitMesh.material.emissive) hitMesh.material.emissive.set(0x1e3a5f);
+            hitMesh.material.needsUpdate = true;
+          }
           renderer.domElement.style.cursor = 'pointer';
         } else {
           lastHoverOriginals = null;
@@ -5541,7 +5672,10 @@ function startApp() {
 
         if(hits.length>0) {
           var hit = hits[0].object;
+          var _hitInstId = hits[0].instanceId != null ? hits[0].instanceId : -1;
           var eid = hit.userData.expressId;
+          if(eid==null && hit.isInstancedMesh && _hitInstId >= 0)
+            eid = (hit.userData.instanceExprIds || [])[_hitInstId];
           if(eid!=null) {
             try {
             var found = null;
@@ -5561,6 +5695,12 @@ function startApp() {
               var dObj2 = DISC.find(function(x){return x.id===found.model.discipline;});
               if(dObj2) clickDiscColor = new THREE.Color(dObj2.c).getHex();
             }
+            // For InstancedMesh hits, get the per-instance world matrix for edge outline and bbox
+            var _hitWorldMx = hit.matrixWorld;
+            if(hit.isInstancedMesh && _hitInstId >= 0){
+              _hitWorldMx = new THREE.Matrix4();
+              hit.getMatrixAt(_hitInstId, _hitWorldMx);
+            }
             var hlGrp = new THREE.Group();
             try {
               var fc2 = hit.geometry.index ? hit.geometry.index.count/3 : (hit.geometry.attributes.position?hit.geometry.attributes.position.count/3:0);
@@ -5568,7 +5708,7 @@ function startApp() {
                 var edgeGeo2 = new THREE.EdgesGeometry(hit.geometry, 50);
                 var edgeMat2 = new THREE.LineBasicMaterial({color:clickDiscColor, transparent:true, opacity:0.4, depthTest:false});
                 var edgeLines2 = new THREE.LineSegments(edgeGeo2, edgeMat2);
-                edgeLines2.applyMatrix4(hit.matrixWorld);
+                edgeLines2.applyMatrix4(_hitWorldMx);
                 edgeLines2.renderOrder = 999;
                 hlGrp.add(edgeLines2);
               }
@@ -5576,13 +5716,19 @@ function startApp() {
             scene.add(hlGrp);
             hlRef.current = hlGrp;
 
-            var hitBox = new THREE.Box3().setFromObject(hit);
+            var hitBox;
+            if(hit.isInstancedMesh && _hitInstId >= 0){
+              hit.geometry.computeBoundingBox();
+              hitBox = hit.geometry.boundingBox.clone().applyMatrix4(_hitWorldMx);
+            } else {
+              hitBox = new THREE.Box3().setFromObject(hit);
+            }
             var hitCtr = hitBox.getCenter(new THREE.Vector3());
             var hitPt = [hitCtr.x, hitCtr.y, hitCtr.z];
             var hitNormal = null;
             if(hits[0].face && hits[0].face.normal) {
               var fn = hits[0].face.normal.clone();
-              fn.transformDirection(hit.matrixWorld);
+              fn.transformDirection(_hitWorldMx);
               hitNormal = [fn.x, fn.y, fn.z];
             }
             setSelectedEl(found ? {props:found.el.props||{}, modelName:found.model.name, expressId:eid, point:hitPt, box:hitBox, normal:hitNormal} : {props:{expressId:eid}, modelName:'Unknown', expressId:eid, point:hitPt, box:hitBox, normal:hitNormal});
@@ -7750,6 +7896,7 @@ function startApp() {
       if (onProgress) onProgress('Parsing GLB geometry…');
       loader.parse(buffer, '', function(gltf) {
         var meshes = [], meshByGid = {};
+        var matCache = {}, geoCache = {}; // dedup materials and geometries within this GLB
         gltf.scene.traverse(function(child) {
           if (!child.isMesh) return;
           var gid = child.name || '';
@@ -7763,19 +7910,30 @@ function startApp() {
             col = rawMat && rawMat.color ? rawMat.color.clone() : new THREE.Color(0.65, 0.65, 0.65);
             if (col.r < 0.05 && col.g < 0.05 && col.b < 0.05) col.set(0.65, 0.65, 0.65);
           }
-          var mat = new THREE.MeshPhongMaterial({
-            color: col,
-            vertexColors: hasVertexColors ? THREE.VertexColors : THREE.NoColors,
-            opacity: opacity,
-            transparent: opacity < 0.99,
-            side: THREE.DoubleSide // FrontSide once Ifc2Ifc winding fix is confirmed correct
-          });
+          var matKey = hasVertexColors ? 'vc:'+opacity.toFixed(3) : col.r.toFixed(3)+','+col.g.toFixed(3)+','+col.b.toFixed(3)+','+opacity.toFixed(3);
+          var mat = matCache[matKey];
+          if (!mat) {
+            mat = new THREE.MeshPhongMaterial({
+              color: col,
+              vertexColors: hasVertexColors ? THREE.VertexColors : THREE.NoColors,
+              opacity: opacity,
+              transparent: opacity < 0.99,
+              side: THREE.DoubleSide // FrontSide once Ifc2Ifc winding fix is confirmed correct
+            });
+            matCache[matKey] = mat;
+          }
           if (Array.isArray(child.material)) { child.material.forEach(function(m){if(m&&m.dispose)m.dispose();}); }
           else if (rawMat && rawMat.dispose) rawMat.dispose();
           child.material = mat;
           child.updateWorldMatrix(true, false);
-          var m = new THREE.Mesh(child.geometry.clone(), mat);
-          m.geometry.computeVertexNormals(); // recompute from face winding — GLB normals may be flipped
+          var geoUuid = child.geometry.uuid;
+          var geo = geoCache[geoUuid];
+          if (!geo) {
+            geo = child.geometry.clone();
+            geo.computeVertexNormals(); // recompute from face winding — GLB normals may be flipped
+            geoCache[geoUuid] = geo;
+          }
+          var m = new THREE.Mesh(geo, mat);
           m.applyMatrix4(child.matrixWorld);
           _ccBakeMesh(m);
           if (gid) {
