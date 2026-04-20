@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.16.0 (2026-04-20)
+- perf: replace persistent BVH cache with LRU-bounded cross-run cache
+
 ## v4.15.4 (2026-04-16)
 - Fix 2D annotation coordinate bug + render style hotkeys 1-4
 
