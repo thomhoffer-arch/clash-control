@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.16.1 (2026-04-21)
+- chore: update MEMORY.md active work log
+
 ## v4.16.0 (2026-04-20)
 - perf: replace persistent BVH cache with LRU-bounded cross-run cache
 
