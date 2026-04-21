@@ -2644,27 +2644,26 @@ function startApp() {
 
   // ── BVH LRU cache — bounded cross-run reuse ──────────────────────
   // Keeps the last _BVH_CACHE_MAX element BVHs alive between detection runs so
-  // re-runs on the same model don't rebuild. Evicts the oldest entry when full,
-  // bounding total memory to roughly _BVH_CACHE_MAX × avg-element-mesh-size.
+  // re-runs on the same model don't rebuild. A Map preserves insertion order,
+  // so delete+set gives O(1) move-to-end (LRU touch) and keys().next() gives
+  // O(1) eviction of the oldest entry.
   var _BVH_CACHE_MAX = 300;
-  var _bvhLRUList = []; // [oldest … newest] element references
+  var _bvhLRU = new Map(); // element → true, insertion-ordered
 
   function _bvhLRUTouch(el) {
-    var idx = _bvhLRUList.indexOf(el);
-    if (idx !== -1) _bvhLRUList.splice(idx, 1);
-    _bvhLRUList.push(el);
+    if (_bvhLRU.delete(el)) _bvhLRU.set(el, true);
   }
   function _bvhLRUEvict() {
-    while (_bvhLRUList.length >= _BVH_CACHE_MAX) {
-      var old = _bvhLRUList.shift();
+    while (_bvhLRU.size >= _BVH_CACHE_MAX) {
+      var old = _bvhLRU.keys().next().value;
+      _bvhLRU.delete(old);
       delete old._wvCache; delete old._triCache; delete old._bvhCache;
     }
   }
   function _bvhLRURemoveModel(model) {
     if (!model || !model.elements) return;
     model.elements.forEach(function(el) {
-      var idx = _bvhLRUList.indexOf(el);
-      if (idx !== -1) _bvhLRUList.splice(idx, 1);
+      _bvhLRU.delete(el);
       delete el._wvCache; delete el._triCache; delete el._bvhCache;
     });
   }
@@ -2709,7 +2708,7 @@ function startApp() {
     var indices = new Int32Array(n);
     for (var i=0; i<n; i++) indices[i]=i;
     el._bvhCache = { tris:tris, root:_buildBVHNode(tris, indices, 0, n) };
-    _bvhLRUList.push(el);
+    _bvhLRU.set(el, true);
     return el._bvhCache;
   }
 
@@ -4948,6 +4947,30 @@ function startApp() {
       }
       S._ghostOthers = ghostOthers;
       S._unghostAll = unghostAll;
+      // Called before disposing a model's meshes: drop ghost clones whose
+      // source material is about to die, so the Map doesn't accumulate
+      // orphan entries across session-long use.
+      S._pruneGhostCache = function(grp) {
+        if (!grp || !_ghostMatCache.size) return;
+        // If any of grp's meshes are mid-ghost, their current .material is
+        // the ghost clone (new uuid) — fall back to the stashed origMaterial.
+        var ghostOrig = null;
+        if (_ghostedMeshes.length) {
+          ghostOrig = new Map();
+          _ghostedMeshes.forEach(function(g){
+            if (g.mesh) ghostOrig.set(g.mesh, g.origMaterial);
+            if (g.iMesh) ghostOrig.set(g.iMesh, g.origMaterial);
+          });
+        }
+        function dropMat(m){ if (m && m.uuid) _ghostMatCache.delete(m.uuid); }
+        grp.traverse(function(obj){
+          if (!obj.isMesh) return;
+          var mat = (ghostOrig && ghostOrig.get(obj)) || obj.material;
+          if (!mat) return;
+          if (Array.isArray(mat)) mat.forEach(dropMat);
+          else dropMat(mat);
+        });
+      };
       _ghostOthers = ghostOthers;
       _unghostAll = unghostAll;
       window._ghostOthers = ghostOthers;
@@ -6107,6 +6130,7 @@ function startApp() {
       S._lastCullCamKey = '';
       Object.keys(S.map).forEach(function(id){
         if(ids.indexOf(id)===-1){
+          if(S._pruneGhostCache) S._pruneGhostCache(S.map[id]);
           S.map[id].traverse(function(obj){if(obj.isMesh){obj.geometry&&obj.geometry.dispose();obj.material&&obj.material.dispose();}});
           S.mg.remove(S.map[id]);delete S.map[id];
           if(S._elMapCache) delete S._elMapCache[id];
@@ -6118,6 +6142,7 @@ function startApp() {
           var existingGrp = S.map[model.id];
           var needsSwap = existingGrp && model.meshes[0] && existingGrp.children[0] !== model.meshes[0];
           if (needsSwap) {
+            if(S._pruneGhostCache) S._pruneGhostCache(existingGrp);
             existingGrp.traverse(function(obj){if(obj.isMesh && !obj.userData._isLodProxy){obj.geometry&&obj.geometry.dispose();obj.material&&obj.material.dispose();}});
             S.mg.remove(existingGrp); delete S.map[model.id];
             if(S._elMapCache) delete S._elMapCache[model.id];
