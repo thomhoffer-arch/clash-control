@@ -1,11 +1,16 @@
 // ClashControl — AI clash title generation via Gemma 4
 // Batch-generates human-readable titles from clash metadata
 
-var { cors } = require('./_lib');
+var { cors, llmGuard } = require('./_lib');
+
+// Hard cap so a malicious caller can't pass 10 000 clashes hoping the
+// .slice(0, 20) below silently truncates — fail fast instead.
+var MAX_CLASHES = 50;
 
 module.exports = async function handler(req, res) {
   if (cors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (llmGuard(req, res, { perMin: 10, maxBytes: 65536 })) return;
 
   var key = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_KEY;
   if (!key) return res.status(503).json({ error: 'AI not configured' });
@@ -13,6 +18,9 @@ module.exports = async function handler(req, res) {
   var body = req.body;
   if (!body || !Array.isArray(body.clashes) || body.clashes.length === 0) {
     return res.status(400).json({ error: 'Missing clashes array' });
+  }
+  if (body.clashes.length > MAX_CLASHES) {
+    return res.status(413).json({ error: 'too many clashes', maxClashes: MAX_CLASHES });
   }
 
   // Cap at 20 clashes per batch

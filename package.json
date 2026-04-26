@@ -2,5 +2,8 @@
   "private": true,
   "dependencies": {
     "@neondatabase/serverless": "^0.10"
+  },
+  "devDependencies": {
+    "ws": "^8.18.0"
   }
 }

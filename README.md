@@ -81,6 +81,10 @@ ClashControl shares **anonymous usage data by default** to help improve the AI c
 
 The collection endpoint is [`api/training.js`](api/training.js) — it's a thin Vercel function that writes to a Postgres table. Source is in this repo, audit anything you want.
 
+## Smart Bridge security
+
+The optional **Smart Bridge** binary opens a local server on `127.0.0.1:19802` (WebSocket) and `127.0.0.1:19803` (REST). Both sockets are bound to the loopback interface — they are **not** reachable from other machines on your network. The REST API responds with `Access-Control-Allow-Origin: *` so any locally-served page can call it; this is intentional and safe given the loopback bind. If you reverse-proxy the bridge to a public address, restrict CORS yourself.
+
 ## Tech
 
 Single-file app built with Preact, Three.js, and web-ifc. No build tools, no bundler — just open and go. See [CLAUDE.md](CLAUDE.md) for architecture details and [OPEN_SOURCE_COMPONENTS.md](OPEN_SOURCE_COMPONENTS.md) for all third-party libraries used.

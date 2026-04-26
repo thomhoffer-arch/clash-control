@@ -16,7 +16,18 @@
  *   POST /call/{tool}          — execute a single tool
  *   GET  /llm-config           — read stored Ollama/OpenAI config
  *   POST /llm-config           — save Ollama/OpenAI config to disk
+ *   GET  /llm/health           — pre-flight LLM liveness probe (3s timeout)
  *   POST /chat                 — agentic loop: LLM reasons over ClashControl tools
+ *
+ * Errors include a stable `code` field (browser_not_connected, tool_timeout,
+ * llm_unreachable, llm_timeout, llm_api_error, llm_invalid_url, etc.) so
+ * clients can branch without parsing free-form text.
+ *
+ * Env vars (all optional):
+ *   CLASHCONTROL_PORT         — REST port (default 19803)
+ *   CLASHCONTROL_WS_PORT      — WebSocket port (default 19802)
+ *   CLASHCONTROL_TOOL_TIMEOUT — per-tool browser call timeout, ms (default 30000)
+ *   CLASHCONTROL_LLM_TIMEOUT  — LLM request timeout, ms (default 120000)
  *
  * Both files are bundled into the same binary by pkg.
  * Requires: ws (npm)
@@ -39,6 +50,22 @@ const { WebSocketServer } = require('ws');
 const VERSION  = require('./bridge-version.json').version;
 const WS_PORT  = parseInt(process.env.CLASHCONTROL_WS_PORT || '19802', 10);
 const REST_PORT = parseInt(process.env.CLASHCONTROL_PORT   || '19803', 10);
+const TOOL_TIMEOUT_MS = parseInt(process.env.CLASHCONTROL_TOOL_TIMEOUT || '30000', 10);
+const LLM_TIMEOUT_MS  = parseInt(process.env.CLASHCONTROL_LLM_TIMEOUT  || '120000', 10);
+
+// Stable error codes — clients (UI, CI, integrations) can branch on `code`
+// instead of parsing free-form `error` text.
+const ERR = {
+  BROWSER_NOT_CONNECTED: 'browser_not_connected',
+  TOOL_TIMEOUT:          'tool_timeout',
+  INVALID_REQUEST:       'invalid_request',
+  LLM_UNREACHABLE:       'llm_unreachable',
+  LLM_TIMEOUT:           'llm_timeout',
+  LLM_INVALID_URL:       'llm_invalid_url',
+  LLM_BAD_RESPONSE:      'llm_bad_response',
+  LLM_API_ERROR:         'llm_api_error',
+  NOT_FOUND:             'not_found'
+};
 
 // ── LLM config persistence ─────────────────────────────────────────────────────
 const LLM_CONFIG_DIR  = path.join(os.homedir(), '.clashcontrol');
@@ -70,7 +97,11 @@ function callLlmApi(cfg, messages, tools) {
 
     let targetUrl;
     try { targetUrl = new URL('/v1/chat/completions', baseUrl); }
-    catch (e) { return reject(new Error('Invalid LLM base URL: ' + baseUrl)); }
+    catch (e) {
+      const err = new Error('Invalid LLM base URL: ' + baseUrl);
+      err.code = ERR.LLM_INVALID_URL;
+      return reject(err);
+    }
 
     const payload = { model, messages };
     if (tools && tools.length) { payload.tools = tools; payload.tool_choice = 'auto'; }
@@ -96,16 +127,71 @@ function callLlmApi(cfg, messages, tools) {
       res.on('end', () => {
         try {
           const j = JSON.parse(data);
-          if (j.error) reject(new Error((j.error.message || JSON.stringify(j.error))));
-          else resolve(j);
+          if (j.error) {
+            const apiErr = new Error(j.error.message || JSON.stringify(j.error));
+            apiErr.code = ERR.LLM_API_ERROR;
+            reject(apiErr);
+          } else resolve(j);
         } catch (e) {
-          reject(new Error('LLM returned non-JSON: ' + data.slice(0, 300)));
+          const parseErr = new Error('LLM returned non-JSON: ' + data.slice(0, 300));
+          parseErr.code = ERR.LLM_BAD_RESPONSE;
+          reject(parseErr);
         }
       });
     });
-    req.setTimeout(120000, () => { req.destroy(new Error('LLM request timed out after 120s')); });
-    req.on('error', reject);
+    req.setTimeout(LLM_TIMEOUT_MS, () => {
+      const toErr = new Error('LLM request timed out after ' + Math.round(LLM_TIMEOUT_MS/1000) + 's');
+      toErr.code = ERR.LLM_TIMEOUT;
+      req.destroy(toErr);
+    });
+    req.on('error', (e) => {
+      // ECONNREFUSED / ENOTFOUND / etc. typically mean the user hasn't started Ollama
+      // (or pointed baseUrl at something that isn't running). Tag distinctly so the
+      // UI can show "Start Ollama / check baseUrl" instead of a generic 503.
+      if (!e.code || /^E(CONNREFUSED|NOTFOUND|HOSTUNREACH|TIMEDOUT|CONNRESET)$/.test(e.code)) {
+        e.code = e.code === ERR.LLM_TIMEOUT ? ERR.LLM_TIMEOUT : ERR.LLM_UNREACHABLE;
+      }
+      reject(e);
+    });
     req.write(bodyBuf);
+    req.end();
+  });
+}
+
+// Lightweight liveness probe — hits the LLM's /v1/models endpoint with a short
+// timeout. Used by /llm/health so the UI can surface "Ollama not running" before
+// the user submits a /chat request and waits 120s for the agent loop to fail.
+function probeLlm(cfg) {
+  return new Promise((resolve) => {
+    const baseUrl = (cfg.baseUrl || 'http://localhost:11434').replace(/\/$/, '');
+    let targetUrl;
+    try { targetUrl = new URL('/v1/models', baseUrl); }
+    catch (_) { return resolve({ ok: false, code: ERR.LLM_INVALID_URL, error: 'Invalid baseUrl' }); }
+
+    const isHttps = targetUrl.protocol === 'https:';
+    const lib     = isHttps ? require('https') : require('http');
+    const apiKey  = cfg.apiKey || 'ollama';
+    const req = lib.request({
+      hostname: targetUrl.hostname,
+      port:     targetUrl.port || (isHttps ? 443 : 80),
+      path:     targetUrl.pathname,
+      method:   'GET',
+      headers:  { 'Authorization': 'Bearer ' + apiKey }
+    }, (res) => {
+      let data = '';
+      res.on('data', c => { data += c; });
+      res.on('end', () => {
+        if (res.statusCode >= 200 && res.statusCode < 300) {
+          let models = [];
+          try { var j = JSON.parse(data); if (Array.isArray(j.data)) models = j.data.map(m => m.id); } catch (_) {}
+          resolve({ ok: true, baseUrl, model: cfg.model, models });
+        } else {
+          resolve({ ok: false, code: ERR.LLM_API_ERROR, status: res.statusCode, error: data.slice(0, 200) });
+        }
+      });
+    });
+    req.setTimeout(3000, () => { req.destroy(); resolve({ ok: false, code: ERR.LLM_TIMEOUT, error: 'Probe timed out' }); });
+    req.on('error', (e) => resolve({ ok: false, code: ERR.LLM_UNREACHABLE, error: e.message }));
     req.end();
   });
 }
@@ -288,15 +374,17 @@ wss.on('error', (e) => console.error('[SmartBridge] WS server error:', e.message
 function callBrowser(action, params) {
   return new Promise((resolve, reject) => {
     if (!_browser || _browser.readyState !== 1) {
-      return reject(new Error(
-        'ClashControl is not connected. Open ClashControl in your browser and enable the Smart Bridge addon.'
-      ));
+      const err = new Error('ClashControl is not connected. Open ClashControl in your browser and enable the Smart Bridge addon.');
+      err.code = ERR.BROWSER_NOT_CONNECTED;
+      return reject(err);
     }
     const id = ++_seq;
     const timer = setTimeout(() => {
       delete _pending[id];
-      reject(new Error('ClashControl did not respond within 30 seconds.'));
-    }, 30000);
+      const err = new Error('ClashControl did not respond within ' + Math.round(TOOL_TIMEOUT_MS/1000) + ' seconds.');
+      err.code = ERR.TOOL_TIMEOUT;
+      reject(err);
+    }, TOOL_TIMEOUT_MS);
     _pending[id] = { resolve, reject, timer };
     try {
       _browser.send(JSON.stringify({ id, action, params: params || {} }));
@@ -373,6 +461,15 @@ const httpServer = http.createServer(async (req, res) => {
     return json(200, { provider: cfg.provider, model: cfg.model, baseUrl: cfg.baseUrl, hasKey: !!cfg.apiKey });
   }
 
+  // Pre-flight liveness check — answers in <3s whether the configured LLM is
+  // reachable and which models it advertises. Use this before /chat to avoid
+  // making the user wait the full LLM_TIMEOUT_MS for an unreachable backend.
+  if (req.method === 'GET' && (pathname === '/llm/health' || pathname === '/llm-health')) {
+    const cfg = loadLlmConfig();
+    const r = await probeLlm(cfg);
+    return json(r.ok ? 200 : 503, r);
+  }
+
   if (req.method === 'POST' && pathname === '/llm-config') {
     const body = await readBody(req);
     let incoming = {};
@@ -395,13 +492,13 @@ const httpServer = http.createServer(async (req, res) => {
     let payload = {};
     try { payload = JSON.parse(body || '{}'); } catch (_) {}
     const { message, history, llm } = payload;
-    if (!message) return json(400, { error: 'message is required' });
+    if (!message) return json(400, { error: 'message is required', code: ERR.INVALID_REQUEST });
     const cfg = Object.assign({}, loadLlmConfig(), llm || {});
     try {
       const result = await runAgentLoop(message, history, cfg);
       return json(200, result);
     } catch (e) {
-      return json(503, { error: e.message });
+      return json(503, { error: e.message, code: e.code || ERR.LLM_API_ERROR });
     }
   }
 
@@ -414,11 +511,11 @@ const httpServer = http.createServer(async (req, res) => {
       const result = await callBrowser(action, params);
       return json(200, result);
     } catch (e) {
-      return json(503, { error: e.message });
+      return json(503, { error: e.message, code: e.code || ERR.BROWSER_NOT_CONNECTED });
     }
   }
 
-  json(404, { error: 'Not found', path: pathname });
+  json(404, { error: 'Not found', path: pathname, code: ERR.NOT_FOUND });
 });
 
 httpServer.listen(REST_PORT, '127.0.0.1');

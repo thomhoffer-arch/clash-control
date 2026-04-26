@@ -48,4 +48,36 @@ function dbUrl() {
     || null;
 }
 
-module.exports = { cors, rateLimit, clientIp, dbUrl };
+// LLM endpoint guard — combines per-IP rate limiting and request-size caps.
+// Cost protection for /api/nl and /api/title (both spend Gemma quota).
+// Returns true if the request was rejected (and the error response written).
+//
+//   perMin   — max requests per IP per minute (default 20)
+//   maxBytes — max body payload size after JSON parsing (default 16 KB)
+//
+// Vercel's in-memory `rateMap` resets per cold start, so this is best-effort
+// abuse prevention, not strict accounting. Sustained quota drain is still
+// gated by Gemma's own per-key quota and the fallback chain in /api/nl.
+function llmGuard(req, res, opts) {
+  opts = opts || {};
+  var perMin = opts.perMin || 20;
+  var maxBytes = opts.maxBytes || 16384;
+  var ip = clientIp(req);
+  if (rateLimit(ip, perMin)) {
+    res.setHeader('Retry-After', '60');
+    res.status(429).json({ error: 'Too many requests', retryAfter: 60 });
+    return true;
+  }
+  if (req.body) {
+    var bodyStr;
+    try { bodyStr = typeof req.body === 'string' ? req.body : JSON.stringify(req.body); }
+    catch (_) { bodyStr = ''; }
+    if (bodyStr.length > maxBytes) {
+      res.status(413).json({ error: 'Payload too large', maxBytes: maxBytes });
+      return true;
+    }
+  }
+  return false;
+}
+
+module.exports = { cors, rateLimit, clientIp, dbUrl, llmGuard };

@@ -6091,9 +6091,11 @@ function startApp() {
           S.perf.lastTime = now;
           S.perf.drawCalls = renderer.info.render.calls;
           S.perf.tris = renderer.info.render.triangles;
-          var modelGeoCount = 0;
-          S.mg.traverse(function(c){ if(c.geometry) modelGeoCount++; });
-          S.perf.meshCount = modelGeoCount;
+          // Three.js maintains an O(1) counter of resident geometries — use it
+          // instead of S.mg.traverse(), which walked the whole scene graph
+          // every second on the render thread and caused a periodic hitch
+          // during rotation on large models.
+          S.perf.meshCount = renderer.info.memory.geometries;
         }
         if (_walkActive) {
           _walkTick(S);
@@ -6729,11 +6731,16 @@ function startApp() {
       var iv = setInterval(function(){
         var S = state3d.current;
         if(!S.perf) return;
+        // The model walk (totalEls / totalMeshes) is only displayed inside
+        // the perf panel. Skip it when the panel is closed — otherwise we
+        // pay the cost every second even though only the FPS pill is visible.
         var totalEls = 0, totalMeshes = 0;
-        modelsRef.current.forEach(function(m){
-          totalEls += (m.elements||[]).length;
-          totalMeshes += (m.meshes||[]).length;
-        });
+        if(perfOpen) {
+          modelsRef.current.forEach(function(m){
+            totalEls += (m.elements||[]).length;
+            totalMeshes += (m.meshes||[]).length;
+          });
+        }
         setPerfData({
           fps:S.perf.fps, tris:S.perf.tris, drawCalls:S.perf.drawCalls,
           meshCount:S.perf.meshCount, totalEls:totalEls, totalMeshes:totalMeshes,
@@ -6741,7 +6748,7 @@ function startApp() {
         });
       }, 1000);
       return function(){clearInterval(iv);};
-    }, []);
+    }, [perfOpen]);
 
     var fs = useState(''), findQuery=fs[0], setFindQuery=fs[1];
     var fr = useState([]), findResults=fr[0], setFindResults=fr[1];

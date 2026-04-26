@@ -1,7 +1,12 @@
 // ClashControl — Gemma 4 NL proxy with native function calling
 // Receives { command, context } from client, returns { intent, ...params }
 
-var { cors } = require('./_lib');
+var { cors, llmGuard } = require('./_lib');
+
+// Hard cap on the user-provided NL command. Anything longer than this is
+// either a copy-paste mistake or a deliberate abuse attempt — neither
+// produces useful tool routing and both burn Gemma tokens.
+var MAX_COMMAND_CHARS = 1000;
 
 // Gemma 4 tool declarations — one per NL intent
 const TOOLS = [
@@ -625,12 +630,17 @@ function buildSystemPrompt(context) {
 module.exports = async function handler(req, res) {
   if (cors(req, res)) return;
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+  if (llmGuard(req, res, { perMin: 20, maxBytes: 16384 })) return;
 
   var key = process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_KEY;
   if (!key) return res.status(503).json({ error: 'AI not configured' });
 
   var body = req.body;
   if (!body || !body.command) return res.status(400).json({ error: 'Missing command' });
+  if (typeof body.command !== 'string') return res.status(400).json({ error: 'command must be a string' });
+  if (body.command.length > MAX_COMMAND_CHARS) {
+    return res.status(413).json({ error: 'command too long', maxChars: MAX_COMMAND_CHARS });
+  }
 
   // ── Hybrid model routing ─────────────────────────────────────────
   // Most chat commands are simple tool routing ("show open clashes",
