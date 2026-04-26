@@ -87,7 +87,14 @@ Things to be careful about. Do not remove without a good reason — add a note i
 Update this section at the start and end of each session.
 Mark completed items with ~~strikethrough~~ and date, then let the daily sync archive them.
 
-On branch `claude/review-clashcontrol-optimization-QhAYx` (review pass): wiring up data paths that were previously dangling.
+On branch `claude/code-review-refactor-hcMTI` (review/refactor pass): critical
+review of full codebase via parallel subagent audits (index.html first/second
+half + addons/api). Verified findings against source to filter false positives,
+then applied minimal high-confidence fixes only.
+
+- ~~CORS bypass: `api/_lib.js` swapped `startsWith` → exact match (subdomain attack `http://localhost:3000.evil.com` no longer passes)~~ (2026-04-25)
+- ~~Section box face panel material leak: removed unused `facePanelMat` base (only its `.clone()`s were used) — material is now created inline per panel~~ (2026-04-25)
+- ~~Extracted `_clearHlRef` / `_clearHoverRef` helpers; removed 4 copies of identical disposal blocks (hover ref ×2, highlight ref ×2)~~ (2026-04-25)
 
 - ~~BCF export/import round-trips Revit element IDs via `<Labels>` (cc:revitA/B)~~ (2026-04-21)
 - ~~Shared project replay merges remote viewpoints by id~~ (2026-04-21)

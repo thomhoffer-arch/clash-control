@@ -10,7 +10,9 @@ const ALLOWED_ORIGINS = [
 
 function cors(req, res, methods) {
   var origin = req.headers.origin || '';
-  if (ALLOWED_ORIGINS.some(o => origin.startsWith(o))) {
+  // Exact-match required: substring/prefix matching lets attackers craft origins
+  // like http://localhost:3000.evil.com that pass startsWith() checks.
+  if (ALLOWED_ORIGINS.indexOf(origin) !== -1) {
     res.setHeader('Access-Control-Allow-Origin', origin);
   }
   res.setHeader('Access-Control-Allow-Methods', (methods || 'POST') + ', OPTIONS');

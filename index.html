@@ -4957,7 +4957,7 @@ function startApp() {
           lastHoveredMesh = null;
           lastHoverOriginals = null;
         }
-        if(hoverRef.current){scene.remove(hoverRef.current);if(hoverRef.current.geometry)hoverRef.current.geometry.dispose();if(hoverRef.current.material)hoverRef.current.material.dispose();hoverRef.current=null;}
+        _clearHoverRef();
         invalidate();
       }
       S._ghostOthers = ghostOthers;
@@ -5019,12 +5019,21 @@ function startApp() {
         unghostAll();
       };
 
+      function _clearHlRef() {
+        if(!hlRef.current) return;
+        if(hlRef.current.isGroup) hlRef.current.traverse(function(c){if(c.isMesh||c.isLine||c.isLineSegments){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();}});
+        scene.remove(hlRef.current);hlRef.current=null;
+      }
       function _clearHighlightGroups() {
-        if(hlRef.current){
-          if(hlRef.current.isGroup) hlRef.current.traverse(function(c){if(c.isMesh||c.isLine||c.isLineSegments){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();}});
-          scene.remove(hlRef.current);hlRef.current=null;
-        }
+        _clearHlRef();
         if(outlineRef.current){scene.remove(outlineRef.current);outlineRef.current=null;}
+      }
+      function _clearHoverRef() {
+        if(!hoverRef.current) return;
+        scene.remove(hoverRef.current);
+        if(hoverRef.current.geometry) hoverRef.current.geometry.dispose();
+        if(hoverRef.current.material) hoverRef.current.material.dispose();
+        hoverRef.current = null;
       }
       function _findMeshByRef(expressId, modelId) {
         if (expressId == null || !S.mg) return null;
@@ -5471,7 +5480,7 @@ function startApp() {
             lastHoveredMesh.material.needsUpdate = true;
           }
         }
-        if(hoverRef.current){scene.remove(hoverRef.current);if(hoverRef.current.geometry)hoverRef.current.geometry.dispose();if(hoverRef.current.material)hoverRef.current.material.dispose();hoverRef.current=null;}
+        _clearHoverRef();
         if(hitMesh){
           if(hitMesh.isInstancedMesh && hitInstanceId >= 0 && hitMesh.instanceColor){
             var _hOrigColor = new THREE.Color();
@@ -5749,10 +5758,7 @@ function startApp() {
                 if(els[ei].expressId===eid){ found={el:els[ei],model:curModels[mi]}; break; }
               }
             }
-            if(hlRef.current){
-              if(hlRef.current.isGroup) hlRef.current.traverse(function(c){if(c.isMesh||c.isLine||c.isLineSegments){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();}});
-              scene.remove(hlRef.current);hlRef.current=null;
-            }
+            _clearHlRef();
             var clickDiscColor = 0x60a5fa;
             if(found && found.model) {
               var dObj2 = DISC.find(function(x){return x.id===found.model.discipline;});
@@ -5803,11 +5809,7 @@ function startApp() {
             } catch(pickErr) { console.warn('Element pick failed:', pickErr.message||pickErr); }
           }
         } else {
-          if(hlRef.current){
-            if(hlRef.current.isGroup) hlRef.current.traverse(function(c){if(c.isMesh||c.isLine||c.isLineSegments){if(c.geometry)c.geometry.dispose();if(c.material)c.material.dispose();}});
-            scene.remove(hlRef.current);hlRef.current=null;
-          }
-          if(outlineRef.current){scene.remove(outlineRef.current);outlineRef.current=null;}
+          _clearHighlightGroups();
           unghostAll();
           setSelectedEl(null);
         }
@@ -6372,7 +6374,6 @@ function startApp() {
       S.scene.add(wireframe);
       S._sboxHelper=wireframe;
 
-      var facePanelMat=new THREE.MeshBasicMaterial({color:0x3b82f6,transparent:true,opacity:0.06,side:THREE.DoubleSide,depthWrite:false});
       var facePanels=[];
       var faceDefs=[
         {w:hz*2,h:hy*2,pos:axX.clone().multiplyScalar(hx),lookDir:'x'},   // +X face
@@ -6384,7 +6385,7 @@ function startApp() {
       ];
       faceDefs.forEach(function(fd){
         var pg=new THREE.PlaneGeometry(fd.w,fd.h);
-        var pm=new THREE.Mesh(pg,facePanelMat.clone());
+        var pm=new THREE.Mesh(pg,new THREE.MeshBasicMaterial({color:0x3b82f6,transparent:true,opacity:0.06,side:THREE.DoubleSide,depthWrite:false}));
         pm.position.copy(ctr).add(fd.pos);
         if(fd.lookDir==='x'||fd.lookDir==='-x'){
           pm.rotation.y=rot+(fd.lookDir==='x'?Math.PI/2:-Math.PI/2);
