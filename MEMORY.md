@@ -105,6 +105,19 @@ then applied minimal high-confidence fixes only.
 <!-- END:active-work -->
 
 <!-- BEGIN:session-log -->
+### 2026-04-26
+**Summary:** 3 commit(s) landed (no AI summary — set ANTHROPIC_API_KEY secret for richer entries).
+**Changed:** see commits
+**Notable:** —
+
+<details><summary>Commits</summary>
+
+- d942a27 chore: bump version to 4.16.2
+- f37f17d fix: CORS exact-match, face panel material leak, dedupe cleanup blocks
+- f39737c chore: daily memory sync 2026-04-25
+
+</details>
+
 ### 2026-04-25
 **Summary:** 1 commit(s) landed (no AI summary — set ANTHROPIC_API_KEY secret for richer entries).
 **Changed:** see commits
