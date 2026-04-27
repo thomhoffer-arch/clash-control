@@ -105,6 +105,21 @@ then applied minimal high-confidence fixes only.
 <!-- END:active-work -->
 
 <!-- BEGIN:session-log -->
+### 2026-04-27
+**Summary:** 5 commit(s) landed (no AI summary — set ANTHROPIC_API_KEY secret for richer entries).
+**Changed:** see commits
+**Notable:** —
+
+<details><summary>Commits</summary>
+
+- 4cc7120 chore: bump version to 4.16.3
+- 6c36924 perf+sec: kill periodic rotation hitch; rate-limit /api/nl + /api/title
+- 28fa548 feat(bridge): /llm/health probe, error codes, env-var timeouts
+- fdf26c2 chore: daily memory sync 2026-04-26
+- d942a27 chore: bump version to 4.16.2
+
+</details>
+
 ### 2026-04-26
 **Summary:** 3 commit(s) landed (no AI summary — set ANTHROPIC_API_KEY secret for richer entries).
 **Changed:** see commits
