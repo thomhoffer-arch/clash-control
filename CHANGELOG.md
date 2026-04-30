@@ -1,5 +1,8 @@
 # Changelog
 
+## v4.16.5 (2026-04-30)
+- fix: bump geo cache to v4 to invalidate corrupted v3 entries from instancing
+
 ## v4.16.4 (2026-04-30)
 - fix: replace setFromObject(scene) with _elemsBBox() to fix instanced mesh bounds
 
