@@ -1039,6 +1039,7 @@ function startApp() {
 
   function idbDeleteProjectFiles(projectId) {
     return idbGetProjectFiles(projectId).then(function(files){
+      files.forEach(function(f){ idbDeleteGeoCache(f.id); });
       return _openIDB().then(function(db){
         return new Promise(function(resolve, reject){
           var tx = db.transaction(IDB_STORE, 'readwrite');
