@@ -1233,11 +1233,11 @@ function startApp() {
         props: el.props
       };
     });
-    return {v:3, hasPsets:hasPsets, meshData:meshData, elData:elData, storeys:result.storeys, storeyData:result.storeyData, relatedPairs:result.relatedPairs||{}, stats:result.stats};
+    return {v:4, hasPsets:hasPsets, meshData:meshData, elData:elData, storeys:result.storeys, storeyData:result.storeyData, relatedPairs:result.relatedPairs||{}, stats:result.stats};
   }
 
   function _geoDeserialize(cached) {
-    var isV3 = cached.v >= 3;
+    var isV3 = cached.v >= 3; // v3+ uses quantized positions + oct-encoded normals
     var meshByEid = {};
     var meshes = cached.meshData.map(function(md) {
       var geo = new THREE.BufferGeometry();
@@ -7727,7 +7727,7 @@ function startApp() {
         chain = chain.then(function(){
           _setGlobalLoading(true);
           return idbGetGeoCache(entry.id).then(function(cached) {
-            if(cached && cached.v >= 1 && cached.hasPsets) return _geoDeserialize(cached);
+            if(cached && cached.v >= 4 && cached.hasPsets) return _geoDeserialize(cached);
             return loadIFC(entry.buffer, DISC[0].c, function(){})
               .then(function(result) {
                 if (result) idbSaveGeoCache(entry.id, _geoSerialize(result));
