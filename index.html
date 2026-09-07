@@ -1073,7 +1073,8 @@ function startApp() {
     }, 5000);
     detectClashesAsync(s.models, runRules).then(function(result) {
       clearInterval(_wdTimer);
-      if (!_ccCommitDetectionResult(result, d)) return;
+      var _runDs = {coverageModelIds: _ccCoverageModelIds(runRules, s.models)};
+      if (!_ccCommitDetectionResult(result, d, _runDs)) return;
       // Same-discipline 0-clash trap: a federation whose models share a
       // discipline returns 0 because every cross-model pair is skipped by the
       // excludeSameDiscipline default. Don't fail silently — say why + how.
@@ -1810,7 +1811,7 @@ function startApp() {
       case A.UPD_MODEL:   return Object.assign({},s,{models:s.models.map(function(m){return m.id===a.id?Object.assign({},m,a.u):m})});
       case A.TOGGLE_ALL_STOREYS: return Object.assign({},s,{models:s.models.map(function(m){if(m.id!==a.id)return m;return Object.assign({},m,{hiddenStoreys:a.hide?a.storeys.reduce(function(o,st){o[st]=true;return o;},{}):{}}); })});
       case A.SET_CLASHES: /* falls through to MERGE_CLASHES with no prev clashes */
-      case A.MERGE_CLASHES: var _mr=mergeDetectionResults(a.v, a.t===A.MERGE_CLASHES?s.clashes:[]); _mr.clashes=_ccApplyAssignmentRules(_mr.clashes, s.assignmentRules); _gcEvent('clash-detection', _mr.clashes.length+' clashes'); var _st={clashes:_mr.clashes,detecting:false,activeId:null,floors:deriveFloors(_mr.clashes),lastDeltaSummary:_mr.deltaSummary}; var _rhOpen=0; _mr.clashes.forEach(function(c){if(c.status==='open'||c.status==='in_progress')_rhOpen++;}); _st.runHistory=(s.runHistory||[]).concat([{ts:_mr.deltaSummary.ts,total:_mr.clashes.length,open:_rhOpen,newCount:_mr.deltaSummary.newCount,persisting:_mr.deltaSummary.persisting,autoResolved:_mr.deltaSummary.autoResolved}]).slice(-100); if(a.detectionSettings)_st.detectionSettings=a.detectionSettings; if(s.prefs.resetFiltersOnRun!==false)_st.filters=Object.assign({},INIT_FILTERS); /* Default to Grouped only when the user has nothing chosen AND the result is small enough that thousands of sticky-positioned cluster headers won't tax the browser. Never write localStorage here — that's the user-facing CLASH_GROUP_BY dispatch's job. */ if((!Array.isArray(s.clashGroupBy)||s.clashGroupBy.length===0) && _mr.clashes.length>0 && _mr.clashes.length<=2000) { _st.clashGroupBy=['cluster']; }
+      case A.MERGE_CLASHES: var _mr=mergeDetectionResults(a.v, a.t===A.MERGE_CLASHES?s.clashes:[], a.coverageModelIds); _mr.clashes=_ccApplyAssignmentRules(_mr.clashes, s.assignmentRules); _gcEvent('clash-detection', _mr.clashes.length+' clashes'); var _st={clashes:_mr.clashes,detecting:false,activeId:null,floors:deriveFloors(_mr.clashes),lastDeltaSummary:_mr.deltaSummary}; var _rhOpen=0; _mr.clashes.forEach(function(c){if(c.status==='open'||c.status==='in_progress')_rhOpen++;}); _st.runHistory=(s.runHistory||[]).concat([{ts:_mr.deltaSummary.ts,total:_mr.clashes.length,open:_rhOpen,newCount:_mr.deltaSummary.newCount,persisting:_mr.deltaSummary.persisting,autoResolved:_mr.deltaSummary.autoResolved}]).slice(-100); if(a.detectionSettings)_st.detectionSettings=a.detectionSettings; if(s.prefs.resetFiltersOnRun!==false)_st.filters=Object.assign({},INIT_FILTERS); /* Default to Grouped only when the user has nothing chosen AND the result is small enough that thousands of sticky-positioned cluster headers won't tax the browser. Never write localStorage here — that's the user-facing CLASH_GROUP_BY dispatch's job. */ if((!Array.isArray(s.clashGroupBy)||s.clashGroupBy.length===0) && _mr.clashes.length>0 && _mr.clashes.length<=2000) { _st.clashGroupBy=['cluster']; }
         return Object.assign({},s,_st);
       case A.ADD_CLASHES: { /* additive, non-destructive append (does NOT auto-resolve existing clashes like MERGE_CLASHES). Used by the accessibility panel. */
         var _addc=(a.v||[]).filter(Boolean); if(!_addc.length) return s;
@@ -6667,6 +6668,11 @@ function startApp() {
     if (dispatch) {
       var action = {t:A.MERGE_CLASHES, v:result};
       if (detectionSettings !== undefined) action.detectionSettings = detectionSettings;
+      // Run-scope coverage (CLAUDE.md Item 2) — threaded through whichever
+      // of the two existing params the caller used to carry it, so no call
+      // site needs a new positional argument.
+      var _coverage = (detectionSettings && detectionSettings.coverageModelIds) || (opts && opts.coverageModelIds);
+      if (_coverage) action.coverageModelIds = _coverage;
       dispatch(action);
     }
     // V7_RELEASE_PLAN.md P6.4 (safe slice): opt-in cache clear for the
@@ -7775,6 +7781,24 @@ function startApp() {
     return deps;
   }
 
+  // Run-scope coverage (CLAUDE.md Item 2): the set of model ids a specific
+  // detection rule set (modelA/modelB) could actually examine, via
+  // _ccResolveModelScope — the single source of truth for scope resolution,
+  // also consulted by the local-engine adapter. A prior clash whose
+  // modelAId/modelBId aren't both in this set was never in scope for this
+  // run, so mergeDetectionResults must never auto-resolve it just because
+  // it wasn't rediscovered. Deliberately coarse: model membership only, not
+  // excludeSelf/discipline-matrix/hard-vs-soft nuance (see Item 5's
+  // fail-closed philosophy for why over-restricting here would be worse).
+  function _ccCoverageModelIds(rules, models) {
+    try {
+      var set = {};
+      _ccResolveModelScope(models, rules && rules.modelA).forEach(function(m){ set[m.id]=true; });
+      _ccResolveModelScope(models, rules && rules.modelB).forEach(function(m){ set[m.id]=true; });
+      return Object.keys(set);
+    } catch(e) { return null; }
+  }
+
   // Reconciliation carries human decisions between runs.
   // clash-reconciliation-core.js (plain same-origin <script defer>, not an
   // addon). Was reconciliationCoreV2, a flagged migration with a boot-time
@@ -7782,8 +7806,14 @@ function startApp() {
   // regressions from #638 and ff02b09; graduated to the sole implementation
   // after a soak period — see MEMORY.md Architecture Decisions.
   var _ccReconciliationCore = window._ccClashReconciliationCore;
-  function mergeDetectionResults(newClashes, prevClashes) {
-    return _ccReconciliationCore.mergeDetectionResults(newClashes, prevClashes, _ccReconciliationDeps());
+  function mergeDetectionResults(newClashes, prevClashes, coverageModelIds) {
+    var deps = _ccReconciliationDeps();
+    if (Array.isArray(coverageModelIds)) {
+      var covSet = {};
+      coverageModelIds.forEach(function(id){ covSet[id] = true; });
+      deps.coverage = function(c) { return !!(covSet[c.modelAId] && covSet[c.modelBId]); };
+    }
+    return _ccReconciliationCore.mergeDetectionResults(newClashes, prevClashes, deps);
   }
 
 
@@ -11515,10 +11545,12 @@ function startApp() {
           var st = window._ccLatestState;
           if (!st || !st.models || !st.models.length) return Promise.resolve(null);
           var r = Object.assign({}, st.rules, rulesOverride || {});
+          // opts.clearCachesAfter: one-shot run/export flow, drop BVH caches
+          // (V7 P6.4). opts.coverageModelIds: run-scope for reconciliation
+          // (CLAUDE Item 2), so a scoped rulesOverride never auto-resolves a
+          // clash between models it didn't examine.
           return detectClashesAsync(st.models, r).then(function(result){
-            // opts.clearCachesAfter: for a one-shot run-and-export automation
-            // flow, drop the BVH/world-vert caches this run built once the
-            // result is committed — they won't be reused (V7 P6.4).
+            opts = Object.assign({}, opts, {coverageModelIds: _ccCoverageModelIds(r, st.models)});
             _ccCommitDetectionResult(result, window._ccDispatch, undefined, opts);
             return result;
           });
@@ -20662,7 +20694,7 @@ function startApp() {
       if (mA && typeof mA==='string' && mA.indexOf('disc:')===0) discs.push(mA.slice(5));
       if (mB && typeof mB==='string' && mB.indexOf('disc:')===0 && discs.indexOf(mB.slice(5))===-1) discs.push(mB.slice(5));
       if (discs.length===0) discs = ['all'];
-      var ds = { clearance_mm: rules.maxGap > 0 ? rules.maxGap : null, discipline_filters: discs, scope: _ccSummarizeModelScope(s.models) };
+      var ds = { clearance_mm: rules.maxGap > 0 ? rules.maxGap : null, discipline_filters: discs, scope: _ccSummarizeModelScope(s.models), coverageModelIds: _ccCoverageModelIds(rules, s.models) };
       d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
       detectClashesAsync(s.models, rules).then(function(result){ _ccCommitDetectionResult(result, d, ds); });
     }
@@ -20755,7 +20787,7 @@ function startApp() {
       if (mA && mA.indexOf('disc:')===0) discs.push(mA.slice(5));
       if (mB && mB.indexOf('disc:')===0 && discs.indexOf(mB.slice(5))===-1) discs.push(mB.slice(5));
       if (discs.length===0) discs = ['all'];
-      return { clearance_mm: rules.maxGap > 0 ? rules.maxGap : null, discipline_filters: discs, scope: _ccSummarizeModelScope(models) };
+      return { clearance_mm: rules.maxGap > 0 ? rules.maxGap : null, discipline_filters: discs, scope: _ccSummarizeModelScope(models), coverageModelIds: _ccCoverageModelIds(rules, models) };
     }
     function runDetection() {
       if (!canRun) return;
@@ -20835,8 +20867,9 @@ function startApp() {
                 <button onClick=${function(){
                   if(!canRun)return;
                   var merged=Object.assign({},s.rules,sp.rules);
+                  var presetDs={coverageModelIds:_ccCoverageModelIds(merged,s.models)};
                   d({t:A.UPD_RULES,u:sp.rules});d({t:A.DETECTING});d({t:A.TAB,v:'clashes'});
-                  detectClashesAsync(s.models,merged).then(function(result){_ccCommitDetectionResult(result,d);});
+                  detectClashesAsync(s.models,merged).then(function(result){_ccCommitDetectionResult(result,d,presetDs);});
                 }} disabled=${!canRun} title=${_cc_t('run.loadAndRun','Load & Run')}
                   style=${{...S_BTN,fontSize:'0.63rem',padding:'.15rem .25rem',background:'var(--accent-bg)',color:'var(--accent-subtle)',borderRadius:'0',borderLeft:'1px solid var(--border-subtle)'}}>▶</button>
                 <button onClick=${function(){
@@ -32157,8 +32190,9 @@ function startApp() {
         d({t:A.UPD_RULES, u:found.rules});
         if (/run/.test(text) && s.models.length && !s.detecting) {
           var merged = Object.assign({}, s.rules, found.rules);
+          var nlPresetDs = {coverageModelIds: _ccCoverageModelIds(merged, s.models)};
           d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
-          detectClashesAsync(s.models, merged).then(function(result){ _ccCommitDetectionResult(result, d); });
+          detectClashesAsync(s.models, merged).then(function(result){ _ccCommitDetectionResult(result, d, nlPresetDs); });
           return 'Running "' + found.name + '"…';
         }
         return 'Loaded "' + found.name + '". Say "run" to start.';
@@ -32178,7 +32212,8 @@ function startApp() {
       if (!s.models.length) return _offerLoadIFC();
       if (s.detecting) return 'Already on it…';
       d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
-      detectClashesAsync(s.models,s.rules).then(function(result){ _ccCommitDetectionResult(result, d); });
+      var nlRunDs = {coverageModelIds: _ccCoverageModelIds(s.rules, s.models)};
+      detectClashesAsync(s.models,s.rules).then(function(result){ _ccCommitDetectionResult(result, d, nlRunDs); });
       var r2 = s.rules;
       return 'Running detection' + (r2.maxGap ? ' (max gap ' + r2.maxGap + 'mm)' : '') + '…';
     }
@@ -33066,8 +33101,10 @@ function startApp() {
     function executeDetection(rules) {
       d({t:A.UPD_RULES, u:rules});
       if (s.detecting) return;
+      var execMerged = Object.assign({},s.rules,rules);
+      var execDs = {coverageModelIds: _ccCoverageModelIds(execMerged, s.models)};
       d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
-      detectClashesAsync(s.models, Object.assign({},s.rules,rules)).then(function(result){ _ccCommitDetectionResult(result, d); });
+      detectClashesAsync(s.models, execMerged).then(function(result){ _ccCommitDetectionResult(result, d, execDs); });
     }
 
     // ── NL feedback for unmatched commands (training mode only) ─

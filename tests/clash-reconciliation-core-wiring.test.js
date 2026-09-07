@@ -21,7 +21,7 @@ function loadAdapter(candidate) {
   // script-scope order. window._ccClashAssignmentCore is never called here,
   // so it staying undefined in between is harmless.
   const start = source.indexOf('var _ccIdentityCore = window._ccClashIdentityCore;');
-  const end = source.indexOf('\n\n', source.indexOf('function mergeDetectionResults(newClashes, prevClashes)', start));
+  const end = source.indexOf('\n\n', source.indexOf('function mergeDetectionResults(newClashes, prevClashes, coverageModelIds)', start));
   assert.ok(start >= 0 && end > start, 'reconciliation wiring block not found');
   const window = { _ccClashIdentityCore: require('../clash-identity-core'), _ccClashReconciliationCore: candidate };
   const api = new Function('window', source.slice(start, end) + ';return {mergeDetectionResults};')(window);
