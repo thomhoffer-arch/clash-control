@@ -584,9 +584,15 @@ clashcontrol-engine --install</pre>
   // ── Engine communication ──────────────────────────────────────
   //
   // Wire contract (verified against clashcontrol_engine/engine.py on the
-  // Engine repo's main branch, 2026-07-21 — the Engine repo has no /status
-  // capability/protocol-version field to negotiate against, so this is a
-  // hand-verified snapshot, not a live-negotiated contract):
+  // Engine repo's main branch, 2026-07-21, corrected 2026-09-07 — CLAUDE.md
+  // Item 5): the Engine now DOES publish a `/status` capability/protocol-
+  // version field (`PROTOCOL_VERSION` + `CAPABILITIES` in engine.py, added
+  // in a later Engine release than the one this file was last verified
+  // against) — the claim that it had none is stale. This file still does
+  // NOT negotiate against it live; the notes below remain a hand-verified
+  // snapshot. Building real negotiation against `/status` is a real,
+  // tracked gap (it would let this file stop hand-maintaining the snapshot
+  // whenever the Engine's rule-handling changes), not attempted this wave:
   //   - `maxGap`/`minGap` sent TO the engine are millimetres (the engine
   //     itself does `rules.get('maxGap',0)/1000.0` before using them against
   //     metre-scale vertex coordinates — same convention the browser uses).
@@ -872,6 +878,36 @@ clashcontrol-engine --install</pre>
     if (!_sa.ok || !_sb.ok) {
       return {ok:false, reason:'This model scope resolves to something the local engine can’t address (only “all” or a single model).'};
     }
+    // Self-clash policy (CLAUDE.md Item 5): the engine only understands ONE
+    // global `excludeSelf` boolean — sweep.py drops every same-model pair
+    // when it's true, keeps them all when it's false. The browser's own
+    // _sweepAndPrune / _sweepAndPruneWasm resolve a genuinely PER-MODEL
+    // policy (see their inline `selfAllowed` resolution) that can diverge
+    // from a single boolean two ways. Fail closed for both rather than
+    // re-deriving that per-model resolution here a second time (which would
+    // duplicate business logic already flagged as CLAUDE.md-sensitive):
+    //   (i) an effective single-model scope (grpA ∪ grpB collapses to one
+    //       model) forces self-clashes ON regardless of rules.excludeSelf/
+    //       selfClashModels — otherwise "cross-model only" on someone's one
+    //       federated file would report 0 by construction, not by finding.
+    //       Reuse the SAME resolved _sa/_sb above (already computed via the
+    //       one _ccResolveModelScope source of truth) instead of resolving
+    //       scope a second time.
+    //   (ii) rules.selfClashModels names a PARTICULAR subset of models (not
+    //       the literal 'all'/'none'), which the engine's raw
+    //       excludeSelf:false would over-include: every model's
+    //       self-clashes, not just the named one(s).
+    var _scopeIds = {};
+    if (_sa.value === 'all') (models||[]).forEach(function(m){ _scopeIds[m.id]=true; });
+    else _scopeIds[_sa.value] = true;
+    if (_sb.value === 'all') (models||[]).forEach(function(m){ _scopeIds[m.id]=true; });
+    else _scopeIds[_sb.value] = true;
+    if (Object.keys(_scopeIds).length === 1) {
+      return {ok:false, reason:'This run’s scope resolves to a single model, so self-clashes are always included — the local engine’s single excludeSelf setting can’t express that.'};
+    }
+    if (rules.selfClashModels !== undefined && rules.selfClashModels !== 'all' && rules.selfClashModels !== 'none') {
+      return {ok:false, reason:'Self-clashes limited to specific models (selfClashModels) can’t be expressed by the local engine’s single excludeSelf setting.'};
+    }
     return {ok:true, reason:null};
   }
 
@@ -895,7 +931,6 @@ clashcontrol-engine --install</pre>
   // rather than silently under-covering those pairs.
   function _applyClientSideRuleFilters(clashes, rules) {
     rules = rules || {};
-    var excludeSelf = !!rules.excludeSelf;
     var excludeTypes = {};
     (rules.excludeTypes||[]).forEach(function(t){ excludeTypes[t] = true; });
     // excludeTypePairs is canonically an ARRAY of sorted "typeA:typeB" key
@@ -924,7 +959,18 @@ clashcontrol-engine --install</pre>
 
     return clashes.filter(function(cl) {
       if (!cl) return false;
-      if (excludeSelf && cl.selfClash) return false;
+      // excludeSelf is deliberately NOT re-checked here (CLAUDE.md Item 5):
+      // it's the ONE rule field the engine's broad phase (sweep.py) DOES
+      // apply itself, and _localEngineCanHandle now fails closed for every
+      // case where the sent excludeSelf boolean could be a faithful-but-
+      // wrong single-boolean stand-in for a genuinely per-model policy
+      // (effective single-model scope, or a partial selfClashModels). So by
+      // the time a run reaches here, the engine already enforced the
+      // correct, uniform policy — re-checking cl.selfClash against
+      // rules.excludeSelf here would just be double-filtering, and if this
+      // file's send-side logic ever changes to send a corrected-but-
+      // different value than raw rules.excludeSelf, a stale re-check here
+      // would silently re-drop clashes the engine had correctly kept.
       if (excludeTypes[cl.elemAType] || excludeTypes[cl.elemBType]) return false;
       var key = (cl.elemAType && cl.elemBType) ? typePairKey(cl.elemAType, cl.elemBType) : null;
       if (key && excludeTypePairSet[key]) return false;

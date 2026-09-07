@@ -66,8 +66,17 @@ function typeKey(tA, tB) { return tA < tB ? tA + ':' + tB : tB + ':' + tA; }
 // The local pipeline, exactly as addons/local-engine.js runs it.
 function localSurvivors(rules) {
   const kept = [];
+  const excludeSelf = !!rules.excludeSelf;
   CORPUS.forEach((row) => {
     const sameModel = row.ma.id === row.mb.id;
+    // Step 0: the ENGINE's own broad phase (sweep.py) drops every same-model
+    // pair when the sent excludeSelf is true -- simulate that here, since
+    // this CORPUS represents "what the engine already returned" and
+    // excludeSelf is deliberately no longer re-checked client-side
+    // (CLAUDE.md Item 5: _applyClientSideRuleFilters double-filtered what
+    // the engine had already dropped, and would silently re-drop the WRONG
+    // thing if the send-side value ever diverged from a raw passthrough).
+    if (excludeSelf && sameModel) return;
     // Step 1: discipline drop via the SHARED core function (the browser calls
     // the identical matrixSkipsSameDiscipline).
     if (discipline.matrixSkipsSameDiscipline(row.a, row.ma, row.b, row.mb, sameModel, rules)) return;
