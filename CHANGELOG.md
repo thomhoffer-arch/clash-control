@@ -1,5 +1,29 @@
 # Changelog
 
+## v7.4.6 (2026-09-07)
+- fix: local-engine adapter must read stats.incomplete, not just clashes (R4)
+
+## v7.4.5 (2026-09-07)
+- fix: wire the two remaining detection call sites for coverage, fix delta reporting, and tighten over-coverage (R3)
+
+## v7.4.4 (2026-09-07)
+- fix: close four residual bypasses of the detection outcome guard (R2)
+
+## v7.4.3 (2026-09-07)
+- fix: revert the excludeSelf double-filtering removal -- it was based on a false premise (R1)
+
+## v7.4.2 (2026-09-07)
+- fix: remove the unsafe parallel-axis narrow-phase rejection shortcut
+
+## v7.4.1 (2026-09-07)
+- fix: close self-clash parity divergence between the browser and local engine
+
+## v7.4.0 (2026-09-07)
+- fix: reconciliation must be run-scope aware and must never delete records
+
+## v7.3.4 (2026-09-07)
+- fix: make detection outcome guard unconditional (never commit cancelled/failed runs as empty success)
+
 ## v7.3.3 (2026-07-27)
 - i18n: long-tail string retrofit to _cc_t() (#709)
 
