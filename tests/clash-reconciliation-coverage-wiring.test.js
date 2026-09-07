@@ -47,26 +47,33 @@ function loadCoverageHelpers() {
 
 function model(id, name) { return {id, name}; }
 
-test('_ccCoverageModelIds resolves modelA/modelB through the real _ccResolveModelScope', () => {
+test('_ccCoverageModelIds resolves modelA/modelB through the real _ccResolveModelScope, keeping the two sides SEPARATE', () => {
+  // R3 follow-up: this used to return one merged array, which let
+  // mergeDetectionResults' wrapper treat a same-model A-A pair as
+  // "in coverage" for an A-vs-B scoped run just because A appeared
+  // somewhere in the union. Returning {a, b} separately lets the wrapper
+  // check the ACTUAL pair shape a run could form.
   const { _ccCoverageModelIds } = loadCoverageHelpers();
   const models = [model('A', 'Arch'), model('B', 'Struct'), model('C', 'MEP'), model('D', 'Site')];
 
   const scoped = _ccCoverageModelIds({modelA: 'A', modelB: 'B'}, models);
-  assert.deepEqual(scoped.sort(), ['A', 'B']);
+  assert.deepEqual(scoped.a, ['A']);
+  assert.deepEqual(scoped.b, ['B']);
 
   const all = _ccCoverageModelIds({modelA: 'all', modelB: 'all'}, models);
-  assert.deepEqual(all.sort(), ['A', 'B', 'C', 'D']);
+  assert.deepEqual(all.a.sort(), ['A', 'B', 'C', 'D']);
+  assert.deepEqual(all.b.sort(), ['A', 'B', 'C', 'D']);
 
   // C and D are never mentioned by an A-B scoped rule set.
-  assert.equal(scoped.includes('C'), false);
-  assert.equal(scoped.includes('D'), false);
+  assert.equal(scoped.a.includes('C'), false);
+  assert.equal(scoped.b.includes('D'), false);
 });
 
 test('_ccCoverageModelIds never throws on missing rules/models', () => {
   const { _ccCoverageModelIds } = loadCoverageHelpers();
-  assert.deepEqual(_ccCoverageModelIds(null, null), []);
-  assert.deepEqual(_ccCoverageModelIds({}, []), []);
-  assert.deepEqual(_ccCoverageModelIds(undefined, undefined), []);
+  assert.deepEqual(_ccCoverageModelIds(null, null), {a: [], b: []});
+  assert.deepEqual(_ccCoverageModelIds({}, []), {a: [], b: []});
+  assert.deepEqual(_ccCoverageModelIds(undefined, undefined), {a: [], b: []});
 });
 
 // (2) The reconciliation wrapper (same loading pattern as
@@ -81,24 +88,56 @@ function loadReconciliationWrapper(candidateCore) {
   return new Function('window', source.slice(start, end) + ';return {mergeDetectionResults};')(window);
 }
 
-test('mergeDetectionResults wrapper builds options.coverage from coverageModelIds and passes it to the core', () => {
+function capture(candidateCore) {
   let capturedDeps;
   const { mergeDetectionResults } = loadReconciliationWrapper({
     mergeDetectionResults: (next, prev, deps) => { capturedDeps = deps; return {clashes: [], deltaSummary: {}}; },
   });
-  mergeDetectionResults([], [], ['A', 'B']);
-  assert.equal(typeof capturedDeps.coverage, 'function');
-  assert.equal(capturedDeps.coverage({modelAId: 'A', modelBId: 'B'}), true);
-  assert.equal(capturedDeps.coverage({modelAId: 'C', modelBId: 'D'}), false, 'a C-D clash must read as out of coverage for an A-B scoped run');
+  return { mergeDetectionResults, deps: () => capturedDeps };
+}
+
+test('mergeDetectionResults wrapper builds a PRECISE options.coverage from the {a,b} shape', () => {
+  const { mergeDetectionResults, deps } = capture();
+  mergeDetectionResults([], [], {a: ['A'], b: ['B']});
+  assert.equal(typeof deps().coverage, 'function');
+  assert.equal(deps().coverage({modelAId: 'A', modelBId: 'B'}), true, 'A-B cross-model pair matches the A/B grouping');
+  assert.equal(deps().coverage({modelAId: 'B', modelBId: 'A'}), true, 'direction must not matter');
+  assert.equal(deps().coverage({modelAId: 'C', modelBId: 'D'}), false, 'a C-D clash must read as out of coverage for an A-B scoped run');
+});
+
+test('mergeDetectionResults wrapper: a same-model pair is covered ONLY if that model is on BOTH sides (R3 fix)', () => {
+  // This is the exact bug the review caught: for a plain A-vs-B scoped run
+  // (disjoint sides), a same-model A-A self-clash must NOT read as covered
+  // just because A appears somewhere in the combined scope -- this run
+  // never checked A's self-clashes.
+  const { mergeDetectionResults, deps } = capture();
+  mergeDetectionResults([], [], {a: ['A'], b: ['B']});
+  assert.equal(deps().coverage({modelAId: 'A', modelBId: 'A'}), false, 'A-A self-clash is NOT covered by a disjoint A-vs-B run');
+  assert.equal(deps().coverage({modelAId: 'B', modelBId: 'B'}), false, 'B-B self-clash is NOT covered by a disjoint A-vs-B run');
+});
+
+test('mergeDetectionResults wrapper: a same-model pair IS covered when that model is explicitly on both sides', () => {
+  const { mergeDetectionResults, deps } = capture();
+  // An explicit self-clash run (modelA=modelB=A), or an 'all'-vs-'all' run
+  // where every model is on both sides.
+  mergeDetectionResults([], [], {a: ['A'], b: ['A']});
+  assert.equal(deps().coverage({modelAId: 'A', modelBId: 'A'}), true);
+});
+
+test('mergeDetectionResults wrapper: the legacy flat-array shape (multi-rule union) still works, with its known over-coverage caveat', () => {
+  const { mergeDetectionResults, deps } = capture();
+  mergeDetectionResults([], [], ['A', 'B', 'C']);
+  assert.equal(deps().coverage({modelAId: 'A', modelBId: 'B'}), true);
+  // Documented, deliberate over-approximation for this legacy shape only:
+  // A-C reads as covered even though no single rule may have paired them.
+  assert.equal(deps().coverage({modelAId: 'A', modelBId: 'C'}), true);
+  assert.equal(deps().coverage({modelAId: 'A', modelBId: 'Z'}), false);
 });
 
 test('mergeDetectionResults wrapper omits coverage for the legacy 2-arg call shape', () => {
-  let capturedDeps;
-  const { mergeDetectionResults } = loadReconciliationWrapper({
-    mergeDetectionResults: (next, prev, deps) => { capturedDeps = deps; return {clashes: [], deltaSummary: {}}; },
-  });
+  const { mergeDetectionResults, deps } = capture();
   mergeDetectionResults([], []);
-  assert.equal(capturedDeps.coverage, undefined);
+  assert.equal(deps().coverage, undefined);
 });
 
 // (3) The reducer actually threads a.coverageModelIds through, and every
@@ -117,9 +156,33 @@ test('_ccCommitDetectionResult promotes coverageModelIds from either detectionSe
   assert.match(body, /if \(_coverage\) action\.coverageModelIds = _coverage;/);
 });
 
-test('every real detectClashesAsync call site that commits a result builds coverageModelIds via _ccCoverageModelIds first', () => {
-  const calls = [...source.matchAll(/detectClashesAsync\([^\n]+\)\.then\(function\(result\)\{/g)];
-  assert.ok(calls.length >= 7, 'expected the UI, API, NL and bridge detection call sites');
+// R3 follow-up: the original regex here required NO whitespace between
+// `)` and `{` (`function(result)\{`), which silently excluded call sites
+// written as `function(result) {` (with a space) -- window._ccRunDetection
+// and _ccRunDetectionRuleset's per-rule loop, the two sites that were
+// actually unwired for coverage at review time, both use that shape. The
+// `>= 7` count also passed regardless of how many sites the regex actually
+// found, so a shrinking match set (from a stricter-than-intended pattern,
+// or a genuinely new unwired site) would never fail this test. Both fixed:
+// whitespace-tolerant regex, exact count.
+test('detectClashesAsync( occurs exactly 12 times in index.html (1 definition + 11 real call/dispatch sites)', () => {
+  // A change to this count means either a new call site was added (go wire
+  // it for coverage and update the number) or one was removed (update the
+  // number down) -- never bump this number without checking which.
+  const all = [...source.matchAll(/detectClashesAsync\(/g)];
+  assert.equal(all.length, 12);
+});
+
+test('every detectClashesAsync(...).then(function(result)...) call site builds coverageModelIds via _ccCoverageModelIds first', () => {
+  // Whitespace-tolerant: matches both `function(result){` and
+  // `function(result) {`.
+  const calls = [...source.matchAll(/detectClashesAsync\([^\n]+\)\.then\(function\(result\)\s*\{/g)];
+  // This shape covers 10 of the 11 real call sites -- the 11th
+  // (_runSelfPass, inside the NL multi-self-clash path) returns the promise
+  // to its caller instead of chaining .then() itself; that caller's
+  // aggregation point is coverage-wired and locked separately in
+  // tests/detection-direct-dispatch-wiring.test.js.
+  assert.equal(calls.length, 10);
   for (const match of calls) {
     // Look both a little before (opts/ds built ahead of the call) and after
     // (built inline in the .then callback, e.g. the Smart Bridge run path).
@@ -130,6 +193,20 @@ test('every real detectClashesAsync call site that commits a result builds cover
     assert.ok(windowText.includes('_ccCoverageModelIds(') || windowText.includes('_captureDetectionSettings('),
       `no _ccCoverageModelIds(...)/_captureDetectionSettings(...) near byte ${match.index}`);
   }
+});
+
+test('_ccRunDetectionRuleset\'s per-rule loop (the "function(result) {" shape that used to be excluded) is wired for coverage', () => {
+  const idx = source.indexOf("detectClashesAsync(s.models, merged).then(function(result) {");
+  assert.notEqual(idx, -1, 'ruleset per-rule call site not found');
+  const windowText = source.slice(Math.max(0, idx - 400), idx + 400);
+  assert.ok(windowText.includes('_ccCoverageModelIds('), 'ruleset per-rule loop must fold its resolved scope into the coverage union');
+});
+
+test('window._ccRunDetection\'s call site (the other "function(result) {" shape) is wired for coverage', () => {
+  const idx = source.indexOf("detectClashesAsync(s.models, runRules).then(function(result) {");
+  assert.notEqual(idx, -1, 'window._ccRunDetection call site not found');
+  const windowText = source.slice(Math.max(0, idx - 400), idx + 400);
+  assert.ok(windowText.includes('_ccCoverageModelIds('), 'window._ccRunDetection must build coverageModelIds before committing');
 });
 
 test('the shared _captureDetectionSettings helper (used by runDetection + applyAndRun) builds coverageModelIds', () => {

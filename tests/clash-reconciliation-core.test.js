@@ -94,9 +94,18 @@ test('auto-resolve records cap at 200 -- all 205 records survive, only 200 flip 
   assert.equal(out.clashes.filter((c) => c._delta === 'auto_resolved').every((c) => c.status === 'auto_resolved'), true);
   const overflow = out.clashes.filter((c) => c._delta !== 'auto_resolved');
   assert.equal(overflow.length, 5);
-  // Overflow records keep their original status untouched (still 'open').
+  // Overflow records keep their original status untouched (still 'open')
+  // and get their own distinct _delta -- not a stale value carried over
+  // from a prior run's _delta (R3 follow-up: _delta is user-visible,
+  // e.g. index.html's "New this run" badge).
   assert.equal(overflow.every((c) => c.status === 'open'), true);
-  assert.equal(out.deltaSummary.autoResolved, 205);
+  assert.equal(overflow.every((c) => c._delta === 'auto_resolve_capped'), true);
+  // R3 follow-up: autoResolved must report only the records that ACTUALLY
+  // flipped status (200), not 200+5 -- it previously double-counted the
+  // preserved overflow as if they'd been auto-resolved too, when they
+  // stayed open. autoResolvedTruncated is the separate, correct home for
+  // the overflow count.
+  assert.equal(out.deltaSummary.autoResolved, 200);
   assert.equal(out.deltaSummary.autoResolvedTruncated, 5);
 });
 

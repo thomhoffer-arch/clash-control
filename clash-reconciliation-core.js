@@ -113,9 +113,17 @@
       if (arCount >= AUTO_RESOLVE_CAP) {
         // Cap how many auto-resolve per run, but never drop the record --
         // it keeps its prior status (assignee/comments/history intact) and
-        // simply isn't flipped this run. deltaSummary still counts it.
+        // simply isn't flipped this run. deltaSummary reports it via
+        // autoResolvedTruncated, separate from the real autoResolved count
+        // (R3 follow-up: autoResolved used to add arOverflow on top of the
+        // records that actually flipped, over-reporting "205 auto-resolved"
+        // when only 200 did and 5 stayed open). _delta is explicitly set
+        // (not left as whatever stale value `c` carried from a PRIOR run's
+        // _delta, e.g. a leftover 'persisting') so it's never confused with
+        // a fresh not_checked/auto_resolved/persisting/new record --
+        // _delta is user-visible (badges, filters).
         arOverflow++;
-        merged.push(Object.assign({}, c, {_identityKey:key}));
+        merged.push(Object.assign({}, c, {_identityKey:key, _delta:'auto_resolve_capped'}));
         return;
       }
       merged.push(Object.assign({}, c, {_identityKey:key, _delta:'auto_resolved', _lastSeen:now, status:'auto_resolved'}));
@@ -141,7 +149,14 @@
 
     var newCount=0, persisting=0, autoResolved=0;
     merged.forEach(function(c){if(c._delta==='new')newCount++;else if(c._delta==='persisting')persisting++;else if(c._delta==='auto_resolved')autoResolved++;});
-    return {clashes:merged, deltaSummary:{newCount:newCount,persisting:persisting,autoResolved:autoResolved+arOverflow,autoResolvedTruncated:arOverflow||undefined,notChecked:notChecked||undefined,ts:now}};
+    // R3 follow-up: autoResolved used to report autoResolved+arOverflow --
+    // now that overflow is preserved (not dropped), that double-counted:
+    // a 205-prior-open-clash run with the 200-cap in effect would report
+    // "205 auto-resolved" when only 200 actually flipped status and 5
+    // stayed open (_delta:'auto_resolve_capped'). Report them separately;
+    // autoResolvedTruncated already existed as this exact count, it just
+    // wasn't the ONLY place it was reflected.
+    return {clashes:merged, deltaSummary:{newCount:newCount,persisting:persisting,autoResolved:autoResolved,autoResolvedTruncated:arOverflow||undefined,notChecked:notChecked||undefined,ts:now}};
   }
 
   return Object.freeze({

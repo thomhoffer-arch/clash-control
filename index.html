@@ -1183,7 +1183,15 @@ function startApp() {
         maxGap: r.maxGap != null ? r.maxGap : s.rules.maxGap,
         hard: r.hard != null ? !!r.hard : s.rules.hard
       });
-      (_ccCoverageModelIds(merged, s.models) || []).forEach(function(id){ _coverageIds[id] = true; });
+      // _ccCoverageModelIds now returns {a,b} (kept separate for the
+      // precise single-rule check); this multi-rule union accumulator
+      // deliberately flattens both sides into one set, which is the known
+      // over-approximation documented on mergeDetectionResults' wrapper.
+      var _ruleCov = _ccCoverageModelIds(merged, s.models);
+      if (_ruleCov) {
+        (_ruleCov.a||[]).forEach(function(id){ _coverageIds[id] = true; });
+        (_ruleCov.b||[]).forEach(function(id){ _coverageIds[id] = true; });
+      }
       detectClashesAsync(s.models, merged).then(function(result) {
         if (!_ccDetectionResultUsable(result)) {
           clearInterval(_wdTimer);
@@ -7836,21 +7844,27 @@ function startApp() {
     return deps;
   }
 
-  // Run-scope coverage (CLAUDE.md Item 2): the set of model ids a specific
-  // detection rule set (modelA/modelB) could actually examine, via
-  // _ccResolveModelScope — the single source of truth for scope resolution,
-  // also consulted by the local-engine adapter. A prior clash whose
-  // modelAId/modelBId aren't both in this set was never in scope for this
-  // run, so mergeDetectionResults must never auto-resolve it just because
-  // it wasn't rediscovered. Deliberately coarse: model membership only, not
-  // excludeSelf/discipline-matrix/hard-vs-soft nuance (see Item 5's
-  // fail-closed philosophy for why over-restricting here would be worse).
+  // Run-scope coverage (CLAUDE.md Item 2, tightened R3 follow-up): the A-
+  // and B-side model ids a specific detection rule set (modelA/modelB)
+  // could actually examine, via _ccResolveModelScope — the single source
+  // of truth for scope resolution, also consulted by the local-engine
+  // adapter. Returns {a, b} (kept SEPARATE, not merged into one set) so the
+  // reconciliation wrapper below can check whether a prior clash's pair
+  // could actually have been FORMED by this run's A/B grouping, not just
+  // "both endpoints somewhere in the combined scope" — merging into one
+  // set previously meant an A-vs-B scoped run treated a same-model A-A (or
+  // B-B) self-clash as in-coverage and auto-resolved it, even when the run
+  // never checked self-clashes at all. Still deliberately does not
+  // replicate excludeSelf/selfClashModels/selfClashGroup/hard-vs-soft
+  // nuance (see Item 5's fail-closed philosophy for why over-restricting
+  // here would be worse) — see mergeDetectionResults below for exactly
+  // what is and isn't covered by the {a,b} check.
   function _ccCoverageModelIds(rules, models) {
     try {
-      var set = {};
-      _ccResolveModelScope(models, rules && rules.modelA).forEach(function(m){ set[m.id]=true; });
-      _ccResolveModelScope(models, rules && rules.modelB).forEach(function(m){ set[m.id]=true; });
-      return Object.keys(set);
+      var a = {}, b = {};
+      _ccResolveModelScope(models, rules && rules.modelA).forEach(function(m){ a[m.id]=true; });
+      _ccResolveModelScope(models, rules && rules.modelB).forEach(function(m){ b[m.id]=true; });
+      return {a: Object.keys(a), b: Object.keys(b)};
     } catch(e) { return null; }
   }
 
@@ -7863,8 +7877,47 @@ function startApp() {
   var _ccReconciliationCore = window._ccClashReconciliationCore;
   function mergeDetectionResults(newClashes, prevClashes, coverageModelIds) {
     var deps = _ccReconciliationDeps();
-    if (Array.isArray(coverageModelIds)) {
-      var covSet = {};
+    if (coverageModelIds && !Array.isArray(coverageModelIds) && (coverageModelIds.a || coverageModelIds.b)) {
+      // Precise single-rule coverage (the {a,b} shape from
+      // _ccCoverageModelIds — every single-rule call site: RunDetectionModal,
+      // ClashRulesPanel, the public API, saved presets, NL commands,
+      // window._ccRunDetection). A pair is "in coverage" only if it could
+      // actually have been FORMED by this run's A/B grouping:
+      //   - cross-model (modelAId !== modelBId): covered iff one side is in
+      //     the resolved A-set and the other in the resolved B-set, in
+      //     either direction — matching how the browser sweep pairs A
+      //     against B.
+      //   - same-model: covered ONLY if that model is in BOTH the A-set
+      //     and the B-set (true for an explicit self-clash run, or an
+      //     'all'-vs-'all' run) — a plain "Structure vs MEP" run (disjoint
+      //     A/B) never checks structural-vs-structural self-clashes, so
+      //     those must not read as covered just because the model appears
+      //     somewhere in the combined scope.
+      var setA = Object.create(null), setB = Object.create(null);
+      (coverageModelIds.a||[]).forEach(function(id){ setA[id] = true; });
+      (coverageModelIds.b||[]).forEach(function(id){ setB[id] = true; });
+      deps.coverage = function(c) {
+        var aInA = !!setA[c.modelAId], aInB = !!setB[c.modelAId];
+        var bInA = !!setA[c.modelBId], bInB = !!setB[c.modelBId];
+        if (c.modelAId === c.modelBId) return aInA && aInB;
+        return (aInA && bInB) || (aInB && bInA);
+      };
+    } else if (Array.isArray(coverageModelIds)) {
+      // Union coverage for MULTI-RULE aggregation (_ccRunDetectionRuleset,
+      // the NL multi-self-clash path) — a KNOWN, DELIBERATE
+      // over-approximation, not merely "coarse": a pair between two models
+      // that each individually appear somewhere in the combined scope, but
+      // were never actually paired by any SINGLE constituent rule (e.g.
+      // rule 1 checks A vs B, rule 2 checks C vs D — this treats A vs D as
+      // "covered" too, even though neither rule ever compared them), reads
+      // as in-coverage and can still be auto-resolved. A fully precise fix
+      // needs each rule's (A,B) pair tracked and checked individually
+      // instead of one merged set — a real, larger change (touching every
+      // aggregation call site and the wire shape between them), not done
+      // in this pass. The common single-rule call sites above get the
+      // precise {a,b} check; only these two multi-rule aggregation paths
+      // still carry this residual over-coverage risk.
+      var covSet = Object.create(null);
       coverageModelIds.forEach(function(id){ covSet[id] = true; });
       deps.coverage = function(c) { return !!(covSet[c.modelAId] && covSet[c.modelBId]); };
     }
@@ -20225,6 +20278,7 @@ function startApp() {
         ${delta.newCount > 0 && CHIP('New', delta.newCount, 'var(--accent-bg)', 'var(--accent)')}
         ${delta.persisting > 0 && CHIP('Unchanged', delta.persisting, 'var(--tag-bg)', 'var(--text-secondary)')}
         ${delta.autoResolved > 0 && CHIP('Auto-res', delta.autoResolved, '#0f172a', '#64748b')}
+        ${delta.autoResolvedTruncated > 0 && CHIP('Capped', delta.autoResolvedTruncated, '#78350f', '#fcd34d')}
         <${_RunTrendSparkline} history=${props.history}/>
       </div>`}
     </div>`;
