@@ -26,13 +26,13 @@ function sliceFrom(needle, span) {
 }
 
 test('_ccCommitDetectionResult takes an opts param and clears caches only when opts.clearCachesAfter is set', () => {
-  const body = sliceFrom('function _ccCommitDetectionResult(result, dispatch, detectionSettings, opts) {', 2000);
+  const body = sliceFrom('function _ccCommitDetectionResult(result, dispatch, detectionSettings, opts) {', 3200);
   assert.match(body, /if \(opts && opts\.clearCachesAfter\) \{/);
   assert.match(body, /_flushGeoCache\(st\.models\)/);
 });
 
 test('the cache-clear step is guarded so a missing _flushGeoCache or empty state never throws', () => {
-  const body = sliceFrom('function _ccCommitDetectionResult(result, dispatch, detectionSettings, opts) {', 2000);
+  const body = sliceFrom('function _ccCommitDetectionResult(result, dispatch, detectionSettings, opts) {', 3200);
   assert.match(body, /typeof _flushGeoCache === 'function' && st && st\.models/);
   assert.match(body, /try \{[\s\S]*?catch\(e\) \{\}/);
 });

@@ -138,6 +138,18 @@ test('default config (concurrencyV2 OFF): a genuinely complete run with zero cla
 
   assert.equal(result._ccOutcome, 'complete');
   assert.equal(harness.context._ccDetectionResultUsable(result), true);
+  // Guard-mechanism check, not just the outcome this scenario happens to
+  // produce: a happy-path run alone can't tell a real generation-matching
+  // guard apart from a broken one that merely returns true unconditionally
+  // (exactly what the pre-fix code did whenever concurrencyV2 was off) --
+  // every assertion above this line would also pass under that broken
+  // guard, since this scenario never disagrees with it. Prove the check
+  // actually depends on generation-matching by re-tagging a COPY of this
+  // same result with a generation that can no longer be the live one and
+  // confirming it's rejected.
+  const staleClone = harness.context._ccTagDetectionResult(result.slice(), result._ccGeneration + 999, 'complete');
+  assert.equal(harness.context._ccDetectionResultUsable(staleClone), false,
+    '_ccDetectionResultUsable must depend on real generation-matching, not return true unconditionally');
   assert.equal(harness.context._ccCommitDetectionResult(result, harness.dispatch), true);
   assert.equal(harness.dispatches.length, 1);
   assert.equal(harness.dispatches[0].t, 'MERGE_CLASHES');
@@ -150,6 +162,12 @@ test('default config (concurrencyV2 OFF): a genuinely complete run with real cla
   const result = await harness.context.detectClashesAsync([{ id: 'm' }], {});
 
   assert.equal(result._ccOutcome, 'complete');
+  // Same guard-mechanism check as the zero-clash test above -- see its
+  // comment. Also re-tags with an explicit non-'complete' outcome to prove
+  // the guard reads _ccSuppressed/outcome, not just generation.
+  const staleClone = harness.context._ccTagDetectionResult(result.slice(), result._ccGeneration, 'failed');
+  assert.equal(harness.context._ccDetectionResultUsable(staleClone), false,
+    '_ccDetectionResultUsable must reject a non-complete outcome even with a matching generation');
   assert.equal(harness.context._ccCommitDetectionResult(result, harness.dispatch), true);
   assert.equal(harness.dispatches.length, 1);
   assert.equal(harness.dispatches[0].v[0].id, 'real-clash');
@@ -190,4 +208,40 @@ test('a stale (superseded) generation cannot commit even with concurrencyV2 OFF'
   assert.equal(harness.context._ccCommitDetectionResult(secondResult, harness.dispatch), true);
   assert.equal(harness.dispatches.length, 1);
   assert.equal(harness.dispatches[0].v[0].id, 'second-run-clash');
+});
+
+// ── R2 follow-up: _detectClashesCore's chunk-loop catch, not just
+// _browserDetect's ──────────────────────────────────────────────────────
+// _browserDetect's own try/catch (tested above via the stubbed-core
+// harness) only wraps the SYNCHRONOUS first call into _detectClashesCore.
+// Once the real core's chunk loop yields via setTimeout(_runChunk, 0) --
+// which is where detection spends nearly all its time on a real model --
+// a later chunk's exception lands in _runChunk's OWN catch instead, a
+// completely separate code path this file's stubbed-core harness cannot
+// reach (the harness deliberately never loads the real, ~3000-line
+// _detectClashesCore -- see loadHarness's doc comment). Verified
+// structurally instead: the real source's chunk-loop catch must surface
+// the failure and tag its result 'failed', not just resolve as if the
+// partial-progress scan were a clean, complete result (which is what it
+// did before this fix -- `resolveAsync(_finalize())` with no tagging).
+test('_detectClashesCore chunk-loop exception handler surfaces failure and tags "failed" (not a silent partial completion)', () => {
+  const runChunkStart = source.indexOf('function _runChunk() {');
+  assert.notEqual(runChunkStart, -1, '_runChunk not found');
+  const runChunkEnd = source.indexOf('\n    _runChunk();', runChunkStart);
+  assert.notEqual(runChunkEnd, -1, '_runChunk end not found');
+  const body = source.slice(runChunkStart, runChunkEnd);
+
+  // Must not regress to the pre-fix shape: a bare
+  // "resolveAsync(_finalize())" as the ENTIRE catch body (no failure
+  // surfacing, no outcome tag).
+  assert.doesNotMatch(body, /catch\(e\) \{ console\.error\('Detection chunk error:', e\); resolveAsync\(_finalize\(\)\); \}/);
+  // Must surface the failure the same way _browserDetect's catch does
+  // (shared helper -- see _ccSurfaceDetectionFailure above _browserDetect).
+  assert.match(body, /_ccSurfaceDetectionFailure\(e\)/);
+  // Must tag whatever it resolves with as 'failed', using the chunk loop's
+  // own generation snapshot (_myGen), so the commit guard blocks it.
+  assert.match(body, /_ccTagDetectionResult\(.*_myGen,\s*'failed'\)/);
+  // _finalize() is still called (best-effort, itself guarded) so its
+  // training-data/profiling side effects aren't skipped by this fix.
+  assert.match(body, /_finalize\(\)/);
 });

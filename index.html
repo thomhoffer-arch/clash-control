@@ -1152,18 +1152,28 @@ function startApp() {
       }
     }, 5000);
     var byKey = {}; // identityKey → clash (first rule that finds a pair wins)
+    var _coverageIds = {}; // union of every rule's resolved model scope (CLAUDE.md Item 2/R3)
     var ri = 0;
     function runNext() {
       if (ri >= rules.length) {
         clearInterval(_wdTimer);
         var union = Object.keys(byKey).map(function(k){ return byKey[k]; });
-        classifyClashes(union);
-        d({t:'MERGE_CLASHES', v:union});
-        try {
-          var _open = 0; union.forEach(function(c){ var st=c.status||'open'; if(st!=='resolved'&&st!=='expected'&&st!=='closed') _open++; });
-          window.dispatchEvent(new CustomEvent('cc-detection-complete', { detail: {
-            ok:true, total:union.length, open:_open, ruleset:true, rules:rules.length, ts:Date.now() }}));
-        } catch(e) {}
+        // CLAUDE.md Item 1 (R2 follow-up): this used to dispatch
+        // MERGE_CLASHES directly. Every constituent rule's result was
+        // already usability-checked below before ever reaching here, but
+        // routing through the guarded commit also wires run-scope coverage
+        // (Item 2/R3) — the union of every rule's resolved modelA/modelB —
+        // so a ruleset scoped to A-B/C-D pairs can't auto-resolve a prior
+        // clash in a model none of its rules ever touched.
+        var tagged = _ccTagDetectionResult(union, _ccDetectGeneration, 'complete');
+        var committed = _ccCommitDetectionResult(tagged, d, {coverageModelIds: Object.keys(_coverageIds)});
+        if (committed) {
+          try {
+            var _open = 0; union.forEach(function(c){ var st=c.status||'open'; if(st!=='resolved'&&st!=='expected'&&st!=='closed') _open++; });
+            window.dispatchEvent(new CustomEvent('cc-detection-complete', { detail: {
+              ok:true, total:union.length, open:_open, ruleset:true, rules:rules.length, ts:Date.now() }}));
+          } catch(e) {}
+        }
         return;
       }
       var r = rules[ri++];
@@ -1173,9 +1183,18 @@ function startApp() {
         maxGap: r.maxGap != null ? r.maxGap : s.rules.maxGap,
         hard: r.hard != null ? !!r.hard : s.rules.hard
       });
+      (_ccCoverageModelIds(merged, s.models) || []).forEach(function(id){ _coverageIds[id] = true; });
       detectClashesAsync(s.models, merged).then(function(result) {
         if (!_ccDetectionResultUsable(result)) {
           clearInterval(_wdTimer);
+          // Surface a terminal event so an orchestrator awaiting this
+          // ruleset's completion doesn't hang forever on a cancelled/
+          // stale/failed sub-run (CLAUDE.md Item 1, R2 follow-up).
+          try {
+            window.dispatchEvent(new CustomEvent('cc-detection-complete', { detail: {
+              ok:false, error:'Ruleset detection did not complete (' + ((result && result._ccOutcome) || 'unknown') + ')',
+              outcome:(result && result._ccOutcome) || null, ruleset:true, ts:Date.now() }}));
+          } catch(e) {}
           return;
         }
         (result || []).forEach(function(c) {
@@ -6662,6 +6681,24 @@ function startApp() {
     if (!_ccDetectionResultUsable(result)) {
       try { window._ccSafetyMigrations.record({migration:'concurrencyV2', outcome:'stale-write-blocked',
         reason:result && result._ccSuppressed || 'stale-generation'}); } catch(e) {}
+      // CLAUDE.md Item 1 (R2 follow-up): a cancelled run used to leave every
+      // detectClashesAsync call site silent — no MERGE_CLASHES (correct, it
+      // never completed) but also no cc-detection-complete, so an
+      // orchestrator (get_status polling, or a Smart Bridge tool call
+      // awaiting the event) would hang indefinitely. 'failed' is deliberately
+      // excluded here: _browserDetect's own catch already dispatches this
+      // event the moment the exception happens. 'stale-generation' and
+      // 'already-running' are also excluded: a DIFFERENT, newer run is the
+      // one actually in flight and will report its own completion — an
+      // extra ok:false here for the superseded run would be misleading, not
+      // helpful.
+      if (result && result._ccOutcome === 'cancelled') {
+        try {
+          window.dispatchEvent(new CustomEvent('cc-detection-complete', { detail: {
+            ok:false, cancelled:true, outcome:'cancelled', ts:Date.now()
+          }}));
+        } catch(e) {}
+      }
       return false;
     }
     classifyClashes(result);
@@ -6832,6 +6869,35 @@ function startApp() {
     return [];
   }
   window._ccResolveModelScope = _ccResolveModelScope;
+  // A thrown exception mid-run must never be reported as a genuinely
+  // complete result — see CLAUDE.md Item 1 / MEMORY.md. Several
+  // detectClashesAsync call sites have no .catch() of their own (they rely
+  // on MERGE_CLASHES, dispatched via _ccCommitDetectionResult, to clear
+  // `detecting`), so surface the failure here directly rather than relying
+  // on a caller: stash window._ccLastDetectError (already read elsewhere by
+  // get_status for the Smart Bridge orchestrator), stop the spinner, ping
+  // any orchestrator awaiting cc-detection-complete, and toast — the same
+  // signals _ccRunDetection's own .catch() gives for errors outside this
+  // file's try blocks. Shared by _browserDetect's own catch AND
+  // _detectClashesCore's chunk-loop catch (R2 follow-up) — the two used to
+  // disagree: only the former surfaced a failure, the latter (which is
+  // where detection spends nearly all its time, so the likelier crash
+  // site) just quietly finished with whatever partial clashes it had.
+  function _ccSurfaceDetectionFailure(e) {
+    console.error('Clash detection failed:', e);
+    try {
+      window._ccLastDetectError = { message: (e && e.message) || String(e), ts: Date.now(),
+        stack: (e && e.stack) ? String(e.stack).slice(0, 4000) : null };
+    } catch(e2) {}
+    try {
+      if (window._ccDispatch) window._ccDispatch({t:'STOP_DETECT'});
+      window.dispatchEvent(new CustomEvent('cc-detection-complete', { detail: {
+        ok:false, error:(window._ccLastDetectError && window._ccLastDetectError.message) || 'Detection failed', ts: Date.now()
+      }}));
+      if (window._ccToast) window._ccToast('Detection failed: ' + ((window._ccLastDetectError && window._ccLastDetectError.message) || 'unknown error'));
+    } catch(e3) {}
+  }
+
   function _browserDetect(models, rules, onProgress, gen) {
     return _preExtractGLBGeometry(models).then(function() {
       return new Promise(function(resolve, reject) {
@@ -6845,28 +6911,7 @@ function startApp() {
           });
           if (result !== undefined) resolve(result);
         } catch(e) {
-          // A thrown exception mid-run must never be reported as a
-          // genuinely complete (empty) result — see CLAUDE.md Item 1 /
-          // MEMORY.md. Several detectClashesAsync call sites have no
-          // .catch() of their own (they rely on MERGE_CLASHES, dispatched
-          // via _ccCommitDetectionResult, to clear `detecting`), so surface
-          // the failure here directly rather than relying on a caller: stash
-          // window._ccLastDetectError (already read elsewhere by get_status
-          // for the Smart Bridge orchestrator), stop the spinner, and toast
-          // — the same signals _ccRunDetection's own .catch() gives for
-          // errors that occur outside this try block.
-          console.error('Clash detection failed:', e);
-          try {
-            window._ccLastDetectError = { message: (e && e.message) || String(e), ts: Date.now(),
-              stack: (e && e.stack) ? String(e.stack).slice(0, 4000) : null };
-          } catch(e2) {}
-          try {
-            if (window._ccDispatch) window._ccDispatch({t:'STOP_DETECT'});
-            window.dispatchEvent(new CustomEvent('cc-detection-complete', { detail: {
-              ok:false, error:(window._ccLastDetectError && window._ccLastDetectError.message) || 'Detection failed', ts: Date.now()
-            }}));
-            if (window._ccToast) window._ccToast('Detection failed: ' + ((window._ccLastDetectError && window._ccLastDetectError.message) || 'unknown error'));
-          } catch(e3) {}
+          _ccSurfaceDetectionFailure(e);
           resolve(_ccTagDetectionResult([], gen, 'failed'));
         }
       });
@@ -7670,7 +7715,25 @@ function startApp() {
         _phase('Classifying results');
         resolveAsync(_finalize());
       }
-      } catch(e) { console.error('Detection chunk error:', e); resolveAsync(_finalize()); }
+      } catch(e) {
+        // CLAUDE.md Item 1 (R2 follow-up): _browserDetect's own try/catch
+        // only wraps the SYNCHRONOUS first call into this core — once
+        // setTimeout(_runChunk, 0) above yields, a throw in a later chunk
+        // lands here instead, in a completely separate microtask/macrotask
+        // from that outer try. This is the likelier crash site (detection
+        // spends nearly all its time inside this chunk loop), and it used
+        // to call _finalize() and resolve as if the run had genuinely
+        // completed — silently committing whatever PARTIAL clashes had
+        // accumulated so far as the full truth, with every untested
+        // remaining candidate simply never checked. _finalize() is still
+        // called, best-effort, so its training-data/profiling side effects
+        // aren't skipped, but the returned array is tagged 'failed'
+        // regardless so the commit guard blocks it.
+        var _partial;
+        try { _partial = _finalize(); } catch(e2) { _partial = clashes; }
+        _ccSurfaceDetectionFailure(e);
+        resolveAsync(_ccTagDetectionResult(Array.isArray(_partial) ? _partial : [], _myGen, 'failed'));
+      }
     }
     _runChunk();
     return undefined; // signal async path taken
@@ -32726,10 +32789,23 @@ function startApp() {
         }
         multiRun.then(function(results){
           if (!results) return;
+          // CLAUDE.md Item 1 (R2/R3 follow-up): this used to dispatch
+          // MERGE_CLASHES directly, with no usability check at the shipped
+          // default (the check a few lines up only runs when concurrencyV2
+          // is enabled) and no run-scope coverage — a cancelled/failed pass
+          // among these self-clash-on-model-X/Y/Z runs would silently
+          // auto-resolve every prior clash in every OTHER model. Route
+          // through the same guarded commit every other detection path
+          // uses, tagging the combined result with the first non-'complete'
+          // outcome found (if any) so a bad pass blocks the whole commit.
+          var badOutcome = null;
+          results.forEach(function(r){
+            if (!badOutcome && !_ccDetectionResultUsable(r)) badOutcome = (r && r._ccOutcome) || 'stale-generation';
+          });
           var allClashes = [];
           results.forEach(function(r){allClashes=allClashes.concat(r);});
-          if (_ccConcurrencyV2Enabled()) classifyClashes(allClashes);
-          d({t:A.MERGE_CLASHES, v:allClashes});
+          var tagged = _ccTagDetectionResult(allClashes, _ccDetectGeneration, badOutcome || 'complete');
+          _ccCommitDetectionResult(tagged, d, {coverageModelIds: multiSelf.map(function(p){return p.id;})});
         });
         return;
       }
