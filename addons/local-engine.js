@@ -1052,6 +1052,27 @@ clashcontrol-engine --install</pre>
         console.log('%c[Engine] ' + result.stats.elementCount + ' elements, ' + result.stats.candidatePairs + ' candidates, ' +
           result.stats.clashCount + ' clashes, ' + result.stats.duration_ms + 'ms (' + result.stats.threads + ' threads)', 'color:#60a5fa');
       }
+      // CLAUDE.md Items 1/3 (R4 follow-up): the engine's worker-failure
+      // accounting (Item 3: stats.completed/failed/incomplete/sampleError)
+      // existed on the wire but nothing on this side ever read it. A run
+      // where every candidate pair failed came back as
+      // {clashes:[], stats:{incomplete:true, failed:N}} -- indistinguishable
+      // from a genuine "checked everything, found nothing" result, which
+      // this adapter would return as-is, detectClashesAsync would tag
+      // 'complete', and mergeDetectionResults would auto-resolve every
+      // prior open clash in this run's scope. That is exactly the
+      // failure-becomes-empty-success data-loss class Item 1 exists to
+      // prevent, still fully live on this path. Returning null here routes
+      // through the SAME fallback detectClashesAsync already uses for an
+      // engine error (result.error) or a lost race (stale generation) two
+      // lines above/below: it re-runs the SAME rules on the browser engine
+      // instead of silently trusting a partial local result.
+      if (result.stats && result.stats.incomplete) {
+        console.warn('[Engine] Local run incomplete: ' + (result.stats.failed || 0) + ' of ' +
+          (result.stats.candidatePairs || 0) + ' candidate pair(s) failed narrow-phase — falling back to the browser engine rather than risk a silently-partial result.' +
+          (result.stats.sampleError ? (' Sample error: ' + result.stats.sampleError) : ''));
+        return null;
+      }
       // Build lookup maps keyed by (modelId, expressId). The engine's
       // response annotates each clash with the originating model ids
       // when available; fall back to "search all models" for backward

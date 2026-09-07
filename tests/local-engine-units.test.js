@@ -378,3 +378,92 @@ test('local-engine capability gate: a multi-model-subset scope routes to the bro
   const cap = api.localEngineCanHandle({modelA: 'disc:mep', modelB: 'all'}, [{id: 'a'}, {id: 'b'}]);
   assert.equal(cap.ok, false);
 });
+
+// ── _detectOnLocalEngine reads stats.incomplete (CLAUDE.md Items 1/3, R4) ──
+// The engine advertises stats.completed/failed/incomplete/sampleError
+// (Item 3), but nothing on this side ever read it -- a run where every
+// candidate pair failed narrow-phase came back as
+// {clashes:[], stats:{incomplete:true}}, indistinguishable from a genuine
+// "checked everything, found nothing" result. detectClashesAsync would tag
+// that 'complete' and mergeDetectionResults would auto-resolve every prior
+// open clash in scope: the exact failure-becomes-empty-success class Item 1
+// exists to prevent, still fully live on the local-engine path.
+function loadDetectOnLocalEngine() {
+  // Starts at _applyClientSideRuleFilters, not _detectOnLocalEngine itself
+  // -- the latter calls the former directly (`return
+  // _applyClientSideRuleFilters(mapped, rules);`), and without it every
+  // invocation throws a ReferenceError, caught by _detectOnLocalEngine's
+  // own .catch(), which ALSO returns null -- silently making every test
+  // below pass for the wrong reason. The two functions are contiguous in
+  // the file (same as loadApi() above relies on).
+  const start = source.indexOf('function _applyClientSideRuleFilters(clashes, rules) {');
+  const end = source.indexOf('\n\n  window._checkLocalEngine', start);
+  assert.notEqual(start, -1, '_applyClientSideRuleFilters not found');
+  assert.notEqual(end, -1, '_detectOnLocalEngine end not found');
+  const block = source.slice(start, end);
+  return new Function('window', 'fetch', 'WebSocket', 'Event', 'CustomEvent', 'console',
+    '_serializeForLocalEngine', '_localEngineUrl', '_localEngineWsUrl', `
+    ${block}
+    return _detectOnLocalEngine;
+  `);
+}
+
+function fakeFetch(jsonBody) {
+  return function() { return Promise.resolve({ json: () => Promise.resolve(jsonBody) }); };
+}
+
+function noopWindow() {
+  const events = [];
+  return { win: { dispatchEvent(e) { events.push(e); } }, events };
+}
+
+test('_detectOnLocalEngine returns null (triggering the browser-engine fallback) when stats.incomplete is true', async () => {
+  const factory = loadDetectOnLocalEngine();
+  const { win } = noopWindow();
+  const detectOnLocalEngine = factory(
+    win,
+    fakeFetch({ clashes: [], stats: { elementCount: 4, candidatePairs: 3, clashCount: 0, duration_ms: 5, threads: 1, completed: 0, failed: 3, incomplete: true, sampleError: 'ValueError: synthetic' } }),
+    function FakeWebSocket() { this.close = () => {}; },
+    function FakeEvent(type) { this.type = type; },
+    function FakeCustomEvent(type, init) { this.type = type; this.detail = init && init.detail; },
+    console,
+    () => ({ elements: [], rules: {} }),
+    'http://fake', 'ws://fake'
+  );
+  const result = await detectOnLocalEngine([{ id: 'm', elements: [] }], {}, null);
+  assert.equal(result, null, 'an incomplete engine run must fall back to the browser engine, not return its partial clashes as a success');
+});
+
+test('_detectOnLocalEngine still returns the clash array normally when the run genuinely completed', async () => {
+  const factory = loadDetectOnLocalEngine();
+  const { win } = noopWindow();
+  const detectOnLocalEngine = factory(
+    win,
+    fakeFetch({ clashes: [], stats: { elementCount: 4, candidatePairs: 3, clashCount: 0, duration_ms: 5, threads: 1, completed: 3, failed: 0, incomplete: false } }),
+    function FakeWebSocket() { this.close = () => {}; },
+    function FakeEvent(type) { this.type = type; },
+    function FakeCustomEvent(type, init) { this.type = type; this.detail = init && init.detail; },
+    console,
+    () => ({ elements: [], rules: {} }),
+    'http://fake', 'ws://fake'
+  );
+  const result = await detectOnLocalEngine([{ id: 'm', elements: [] }], {}, null);
+  assert.deepEqual(result, [], 'a genuinely complete zero-clash run must still return normally, not fall back needlessly');
+});
+
+test('_detectOnLocalEngine treats a missing stats.incomplete (older/absent field) as complete -- back-compat with pre-Item-3 engine builds', async () => {
+  const factory = loadDetectOnLocalEngine();
+  const { win } = noopWindow();
+  const detectOnLocalEngine = factory(
+    win,
+    fakeFetch({ clashes: [], stats: { elementCount: 0, candidatePairs: 0, clashCount: 0, duration_ms: 1, threads: 1 } }),
+    function FakeWebSocket() { this.close = () => {}; },
+    function FakeEvent(type) { this.type = type; },
+    function FakeCustomEvent(type, init) { this.type = type; this.detail = init && init.detail; },
+    console,
+    () => ({ elements: [], rules: {} }),
+    'http://fake', 'ws://fake'
+  );
+  const result = await detectOnLocalEngine([{ id: 'm', elements: [] }], {}, null);
+  assert.deepEqual(result, []);
+});
