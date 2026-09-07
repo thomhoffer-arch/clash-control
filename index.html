@@ -7237,32 +7237,24 @@ function startApp() {
         return;
       }
 
-      // ── Parallel axis rejection (IFC-based, zero false negatives) ──
-      var pA = eA.props, pB = eB.props;
-      var axisA = pA && pA.axis, axisB = pB && pB.axis;
-      if (axisA && axisB) {
-        var dot = axisA[0]*axisB[0] + axisA[1]*axisB[1] + axisA[2]*axisB[2];
-        if (Math.abs(dot) > 0.95) {
-          var cA = bA.getCenter(_tmpCtrA), cB = bB.getCenter(_tmpCtrB);
-          var ccx=cB.x-cA.x, ccy=cB.y-cA.y, ccz=cB.z-cA.z;
-          var ccLen = Math.sqrt(ccx*ccx+ccy*ccy+ccz*ccz);
-          if (ccLen > 1e-6) {
-            ccx/=ccLen; ccy/=ccLen; ccz/=ccLen;
-            var ccDot = Math.abs(ccx*axisA[0]+ccy*axisA[1]+ccz*axisA[2]);
-            if (ccDot > 0.85) {
-              var perpDist = ccLen * Math.sqrt(1 - ccDot*ccDot);
-              var szA = bA.getSize(_tmpSizeA), szB = bB.getSize(_tmpSizeB);
-              var dimsA = [szA.x,szA.y,szA.z].sort(function(a,b){return a-b;});
-              var dimsB = [szB.x,szB.y,szB.z].sort(function(a,b){return a-b;});
-              var radA = (dimsA[0]+dimsA[1])/4; // avg of two shortest / 2
-              var radB = (dimsB[0]+dimsB[1])/4;
-              if (perpDist > radA + radB) {
-                return; // continue to next candidate
-              }
-            }
-          }
-        }
-      }
+      // NOTE (CLAUDE.md Item 6): a "parallel axis rejection (IFC-based, zero
+      // false negatives)" narrow-phase shortcut used to live here — deleted
+      // 2026-09-07. The "zero false negatives" claim was false: it bounded
+      // the two elements' combined cross-section radius as
+      // (d1+d2)/4 where the true circumscribed-cross-section radius for two
+      // parallel cylinders is 0.5*sqrt(d1²+d2²) (0.55m vs 1.005m for the
+      // counterexample below — a real 0.1 m³ overlap was rejected before the
+      // intersection kernel ever ran), AND it omitted the clearance margin
+      // entirely, so it also produced false negatives on soft/clearance runs
+      // even for cases where the radius formula IS exact (perfect
+      // cylinders). Counterexample (both axis [1,0,0]):
+      //   A: [-5,-1,-0.1] to [5,1,0.1]     B: [3,0.75,-0.1] to [13,2.75,0.1]
+      // Not repaired in this wave — a corrected bound needs a fixture
+      // proving it conservative against an exhaustive reference (Wave 2).
+      // Removing it means more pairs reach the real intersection kernel
+      // below for long/thin parallel elements (beams, pipes, ducts) that
+      // previously short-circuited here — expect more narrow-phase work on
+      // models heavy with those, not a correctness regression.
 
       // ── L1+L2: BVH dual-tree + Möller tri-tri ──────────────────
       var pairGapM = maxGapM;
