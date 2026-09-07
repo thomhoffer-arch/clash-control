@@ -64,19 +64,24 @@ function pairId(row) { return row.a.expressId + '_' + row.b.expressId; }
 function typeKey(tA, tB) { return tA < tB ? tA + ':' + tB : tB + ':' + tA; }
 
 // The local pipeline, exactly as addons/local-engine.js runs it.
+//
+// CORRECTED 2026-09-07 (post-review): a prior version of this function
+// inserted a fake "Step 0" here claiming the engine's own broad phase
+// (sweep.py) already drops same-model pairs when excludeSelf is sent true.
+// That was verified FALSE (see the correction comment in
+// addons/local-engine.js's _applyClientSideRuleFilters) -- sweep.py has no
+// same-MODEL concept for the shipped default scope, only a same-ELEMENT
+// (i, i) diagonal drop. Because that fake step reproduced EXACTLY the
+// filter _applyClientSideRuleFilters used to have removed, this suite --
+// whose entire job is catching browser-vs-local drift -- passed identically
+// whether or not the real filter was present, and stayed blind to the
+// regression it exists to catch. Restored to the real two-step pipeline;
+// confirmed this suite now actually depends on the real filter being
+// present (fails if it's removed again).
 function localSurvivors(rules) {
   const kept = [];
-  const excludeSelf = !!rules.excludeSelf;
   CORPUS.forEach((row) => {
     const sameModel = row.ma.id === row.mb.id;
-    // Step 0: the ENGINE's own broad phase (sweep.py) drops every same-model
-    // pair when the sent excludeSelf is true -- simulate that here, since
-    // this CORPUS represents "what the engine already returned" and
-    // excludeSelf is deliberately no longer re-checked client-side
-    // (CLAUDE.md Item 5: _applyClientSideRuleFilters double-filtered what
-    // the engine had already dropped, and would silently re-drop the WRONG
-    // thing if the send-side value ever diverged from a raw passthrough).
-    if (excludeSelf && sameModel) return;
     // Step 1: discipline drop via the SHARED core function (the browser calls
     // the identical matrixSkipsSameDiscipline).
     if (discipline.matrixSkipsSameDiscipline(row.a, row.ma, row.b, row.mb, sameModel, rules)) return;

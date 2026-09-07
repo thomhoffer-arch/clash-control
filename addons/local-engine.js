@@ -878,35 +878,45 @@ clashcontrol-engine --install</pre>
     if (!_sa.ok || !_sb.ok) {
       return {ok:false, reason:'This model scope resolves to something the local engine can’t address (only “all” or a single model).'};
     }
-    // Self-clash policy (CLAUDE.md Item 5): the engine only understands ONE
-    // global `excludeSelf` boolean — sweep.py drops every same-model pair
-    // when it's true, keeps them all when it's false. The browser's own
-    // _sweepAndPrune / _sweepAndPruneWasm resolve a genuinely PER-MODEL
-    // policy (see their inline `selfAllowed` resolution) that can diverge
-    // from a single boolean two ways. Fail closed for both rather than
-    // re-deriving that per-model resolution here a second time (which would
-    // duplicate business logic already flagged as CLAUDE.md-sensitive):
+    // Self-clash policy (CLAUDE.md Item 5, corrected 2026-09-07): the ADAPTER
+    // (not the engine — verified false, see the correction comment in
+    // _applyClientSideRuleFilters above) enforces "cross-model only" using a
+    // single `rules.excludeSelf` boolean checked against each returned
+    // clash's `selfClash` flag. That single boolean can only ever express a
+    // uniform yes/no for the WHOLE run. The browser's own _sweepAndPrune /
+    // _sweepAndPruneWasm resolve a genuinely PER-MODEL policy (see their
+    // inline `selfAllowed` resolution) that can need a different answer per
+    // model — fail closed rather than re-deriving that per-model resolution
+    // here a second time (which would duplicate business logic already
+    // flagged as CLAUDE.md-sensitive):
     //   (i) an effective single-model scope (grpA ∪ grpB collapses to one
     //       model) forces self-clashes ON regardless of rules.excludeSelf/
-    //       selfClashModels — otherwise "cross-model only" on someone's one
-    //       federated file would report 0 by construction, not by finding.
-    //       Reuse the SAME resolved _sa/_sb above (already computed via the
-    //       one _ccResolveModelScope source of truth) instead of resolving
-    //       scope a second time.
+    //       selfClashModels/selfClashGroup — otherwise "cross-model only" on
+    //       someone's one federated file would report 0 by construction, not
+    //       by finding. Reuse the SAME resolved _sa/_sb above (already
+    //       computed via the one _ccResolveModelScope source of truth)
+    //       instead of resolving scope a second time.
     //   (ii) rules.selfClashModels names a PARTICULAR subset of models (not
-    //       the literal 'all'/'none'), which the engine's raw
+    //       the literal 'all'/'none'), which the client filter's single
     //       excludeSelf:false would over-include: every model's
     //       self-clashes, not just the named one(s).
+    //   (iii) rules.selfClashGroup is 'a' or 'b' (index.html _sweepAndPrune:
+    //       self-clashes allowed only for models in that specific side of
+    //       the scope) — same over-inclusion risk as (ii) once there is more
+    //       than one model in play.
     var _scopeIds = {};
     if (_sa.value === 'all') (models||[]).forEach(function(m){ _scopeIds[m.id]=true; });
     else _scopeIds[_sa.value] = true;
     if (_sb.value === 'all') (models||[]).forEach(function(m){ _scopeIds[m.id]=true; });
     else _scopeIds[_sb.value] = true;
     if (Object.keys(_scopeIds).length === 1) {
-      return {ok:false, reason:'This run’s scope resolves to a single model, so self-clashes are always included — the local engine’s single excludeSelf setting can’t express that.'};
+      return {ok:false, reason:'This run’s scope resolves to a single model, so self-clashes are always included — the local engine adapter’s single excludeSelf check can’t express that.'};
     }
     if (rules.selfClashModels !== undefined && rules.selfClashModels !== 'all' && rules.selfClashModels !== 'none') {
-      return {ok:false, reason:'Self-clashes limited to specific models (selfClashModels) can’t be expressed by the local engine’s single excludeSelf setting.'};
+      return {ok:false, reason:'Self-clashes limited to specific models (selfClashModels) can’t be expressed by the local engine adapter’s single excludeSelf check.'};
+    }
+    if (rules.selfClashGroup === 'a' || rules.selfClashGroup === 'b') {
+      return {ok:false, reason:'Self-clashes limited to one side of the scope (selfClashGroup) can’t be expressed by the local engine adapter’s single excludeSelf check.'};
     }
     return {ok:true, reason:null};
   }
@@ -931,6 +941,7 @@ clashcontrol-engine --install</pre>
   // rather than silently under-covering those pairs.
   function _applyClientSideRuleFilters(clashes, rules) {
     rules = rules || {};
+    var excludeSelf = !!rules.excludeSelf;
     var excludeTypes = {};
     (rules.excludeTypes||[]).forEach(function(t){ excludeTypes[t] = true; });
     // excludeTypePairs is canonically an ARRAY of sorted "typeA:typeB" key
@@ -959,18 +970,24 @@ clashcontrol-engine --install</pre>
 
     return clashes.filter(function(cl) {
       if (!cl) return false;
-      // excludeSelf is deliberately NOT re-checked here (CLAUDE.md Item 5):
-      // it's the ONE rule field the engine's broad phase (sweep.py) DOES
-      // apply itself, and _localEngineCanHandle now fails closed for every
-      // case where the sent excludeSelf boolean could be a faithful-but-
-      // wrong single-boolean stand-in for a genuinely per-model policy
-      // (effective single-model scope, or a partial selfClashModels). So by
-      // the time a run reaches here, the engine already enforced the
-      // correct, uniform policy — re-checking cl.selfClash against
-      // rules.excludeSelf here would just be double-filtering, and if this
-      // file's send-side logic ever changes to send a corrected-but-
-      // different value than raw rules.excludeSelf, a stale re-check here
-      // would silently re-drop clashes the engine had correctly kept.
+      // CORRECTED 2026-09-07 (post-review): a prior version of this comment
+      // claimed the engine's broad phase (sweep.py) already drops same-model
+      // pairs, so this check was "double-filtering" and could be removed.
+      // That was verified FALSE by running the real sweep_and_prune: for the
+      // shipped default (modelA/modelB both 'all'), engine.py sets
+      // elements_a = elements_b = all_elements (the SAME list object), so
+      // sweep.py's `_same_id_sets` short-circuits true and the `same_set`
+      // branch runs — which only dedupes unordered pairs and drops an
+      // element against ITSELF (i, i); it has no same-MODEL concept and
+      // never inspects rules.excludeSelf at all in that branch. Reproduced:
+      // excludeSelf:true and excludeSelf:false returned byte-identical
+      // candidate sets, same-model pairs included both times. This check is
+      // the ONLY place "cross-model only" is ever enforced on the local
+      // engine path — removing it (as a prior version of this file did)
+      // leaked self-clashes on every default-scope run once the local
+      // engine was active. cl.selfClash is set in _clashFromEngineResult
+      // from sameModel, independent of anything sweep.py decided.
+      if (excludeSelf && cl.selfClash) return false;
       if (excludeTypes[cl.elemAType] || excludeTypes[cl.elemBType]) return false;
       var key = (cl.elemAType && cl.elemBType) ? typePairKey(cl.elemAType, cl.elemBType) : null;
       if (key && excludeTypePairSet[key]) return false;

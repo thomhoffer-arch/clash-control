@@ -123,21 +123,20 @@ test('local-engine capability gate: allows a plain hard/soft ruleset with no uns
   assert.equal(cap.ok, true);
 });
 
-test('local-engine client-side filters: excludeSelf is NOT re-checked here (CLAUDE.md Item 5) -- that is the engine\'s (sweep.py) job now', () => {
-  // Previously this filter re-dropped cl.selfClash === true when
-  // rules.excludeSelf was true -- pure redundancy when the engine already
-  // applies excludeSelf in its own broad phase, and a latent "double-drop"
-  // hazard the moment the two layers could ever see a differently-derived
-  // excludeSelf value. _localEngineCanHandle now fails closed for every
-  // case where a per-model self-clash policy can't be expressed as the one
-  // raw excludeSelf boolean sent to the engine (effective single-model
-  // scope, or a partial selfClashModels) -- so by the time a run reaches
-  // this filter, the engine's own drop is trusted to already be correct.
+test('local-engine client-side filters: excludeSelf drops self-clashes the engine still returned', () => {
+  // CORRECTED 2026-09-07 (post-review): a prior version of this file
+  // removed this check on the theory that the engine's broad phase
+  // (sweep.py) already drops same-model pairs. That was verified FALSE by
+  // running the real sweep_and_prune against the shipped default scope
+  // (modelA/modelB both 'all', so engine.py sends elements_a is elements_b
+  // -- sweep.py's same_set branch only drops an element against itself,
+  // never a same-MODEL pair). This client-side check is the ONLY place
+  // "cross-model only" is ever enforced on the local engine path.
   const api = loadApi();
   const selfClash = {selfClash: true, elemAType: 'IfcWall', elemBType: 'IfcWall', type: 'hard', distance: -5};
   const otherClash = {selfClash: false, elemAType: 'IfcWall', elemBType: 'IfcPipeSegment', type: 'hard', distance: -5};
   const out = api.applyClientSideRuleFilters([selfClash, otherClash], {excludeSelf: true});
-  assert.deepEqual(out, [selfClash, otherClash]);
+  assert.deepEqual(out, [otherClash]);
 });
 
 test('local-engine client-side filters: excludeTypes drops clashes touching an excluded type', () => {
@@ -308,6 +307,22 @@ test('local-engine capability gate: a plain cross-model run (2+ models, no selfC
   const models = [{id: 'mA'}, {id: 'mB'}];
   assert.equal(api.localEngineCanHandle({modelA: 'all', modelB: 'all', excludeSelf: true}, models).ok, true);
   assert.equal(api.localEngineCanHandle({modelA: 'all', modelB: 'all', excludeSelf: false}, models).ok, true);
+});
+
+test('local-engine capability gate: selfClashGroup "a"/"b" with 2+ models routes to the browser engine', () => {
+  // rules.selfClashGroup ('a'/'b', resolved per-model at index.html
+  // _sweepAndPrune's `scg === 'a' && inA[cur.m.id]`) is reachable via the NL
+  // converse flow and is equally per-model / inexpressible as one boolean.
+  const api = loadApi();
+  const models = [{id: 'mA'}, {id: 'mB'}];
+  assert.equal(api.localEngineCanHandle({modelA: 'all', modelB: 'all', selfClashGroup: 'a'}, models).ok, false);
+  assert.equal(api.localEngineCanHandle({modelA: 'all', modelB: 'all', selfClashGroup: 'b'}, models).ok, false);
+});
+
+test('local-engine capability gate: selfClashGroup "both" is expressible as one boolean and is let through', () => {
+  const api = loadApi();
+  const models = [{id: 'mA'}, {id: 'mB'}];
+  assert.equal(api.localEngineCanHandle({modelA: 'all', modelB: 'all', excludeSelf: false, selfClashGroup: 'both'}, models).ok, true);
 });
 
 // ── Model-scope normalization (V7_RELEASE_PLAN P0.1) ───────────────────────
