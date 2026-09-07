@@ -6626,19 +6626,35 @@ function startApp() {
     return !!(window._ccSafetyMigrations &&
       window._ccSafetyMigrations.isEnabled('concurrencyV2'));
   }
-  function _ccTagDetectionResult(result, generation, suppressed) {
+  // outcome: 'complete' (default — a genuinely finished run, hard zero
+  // clashes included) | 'cancelled' | 'stale-generation' | 'already-running'
+  // | 'failed'. Anything other than 'complete' is stamped onto the legacy
+  // `_ccSuppressed` field too (kept for back-compat with existing readers)
+  // and must never be committed — see _ccDetectionResultUsable below.
+  function _ccTagDetectionResult(result, generation, outcome) {
     var value = Array.isArray(result) ? result : [];
+    var suppressed = (outcome && outcome !== 'complete') ? outcome : null;
     try {
       Object.defineProperty(value, '_ccGeneration', {value:generation, configurable:true});
+      Object.defineProperty(value, '_ccOutcome', {value:(outcome || 'complete'), configurable:true});
       if (suppressed) Object.defineProperty(value, '_ccSuppressed', {value:suppressed, configurable:true});
     } catch(e) {
       value._ccGeneration = generation;
+      value._ccOutcome = outcome || 'complete';
       if (suppressed) value._ccSuppressed = suppressed;
     }
     return value;
   }
+  // Unconditional — regardless of the concurrencyV2 migration flag. A run
+  // that did not genuinely finish (cancelled, superseded by a newer run,
+  // already-running, or a thrown exception) must never be treated as a
+  // valid — possibly empty — result. This used to early-return `true`
+  // whenever concurrencyV2 was disabled, and since that migration flag is
+  // `defaultEnabled:false`, the guard was effectively a no-op in production:
+  // cancelling a run (or a crash mid-run) would commit MERGE_CLASHES with an
+  // empty array, auto-resolving up to 200 clashes and permanently deleting
+  // any beyond 200. See CLAUDE.md Item 1 / MEMORY.md.
   function _ccDetectionResultUsable(result) {
-    if (!_ccConcurrencyV2Enabled()) return true;
     return !!(result && !result._ccSuppressed && result._ccGeneration === _ccDetectGeneration);
   }
   function _ccCommitDetectionResult(result, dispatch, detectionSettings, opts) {
@@ -6709,15 +6725,34 @@ function startApp() {
     } else {
       work = _browserDetect(models, rules, onProgress, gen);
     }
-    if (!coordinated) return work;
-    return work.then(function(result) {
-      var current = _ccDetectionCoordinator.isCurrent(token) && gen === _ccDetectGeneration;
-      _ccDetectionCoordinator.finish(token);
-      return _ccTagDetectionResult(result, gen, current ? null : 'stale-generation');
-    }, function(error) {
-      _ccDetectionCoordinator.finish(token);
-      throw error;
-    });
+    // Always resolve to a definitively outcome-tagged result — regardless of
+    // the concurrencyV2 migration flag. Before this fix, the normalization
+    // below (and the coordinator's stale-generation check) only ran when a
+    // user had opted into concurrencyV2 (defaultEnabled:false, i.e. never in
+    // production), so a cancelled or superseded run's plain `[]` looked
+    // exactly like a genuinely complete, zero-clash run to every caller.
+    // See CLAUDE.md Item 1 / MEMORY.md.
+    function _normalizeDetectionResult(result) {
+      if (coordinated) {
+        var current = _ccDetectionCoordinator.isCurrent(token) && gen === _ccDetectGeneration;
+        _ccDetectionCoordinator.finish(token);
+        if (!current) return _ccTagDetectionResult(result, gen, 'stale-generation');
+      } else if (gen !== _ccDetectGeneration) {
+        return _ccTagDetectionResult(result, gen, _detectCancelled ? 'cancelled' : 'stale-generation');
+      }
+      // Preserve a definitive non-'complete' outcome _browserDetect already
+      // stamped (e.g. 'failed' from a thrown exception, or 'cancelled' from
+      // a mid-run stop) instead of overwriting it with 'complete'.
+      var outcome = (result && result._ccOutcome && result._ccOutcome !== 'complete') ? result._ccOutcome : 'complete';
+      return _ccTagDetectionResult(result, gen, outcome);
+    }
+    if (coordinated) {
+      return work.then(_normalizeDetectionResult, function(error) {
+        _ccDetectionCoordinator.finish(token);
+        throw error;
+      });
+    }
+    return work.then(_normalizeDetectionResult);
   }
 
   var _detectCancelled = false;
@@ -6794,15 +6829,39 @@ function startApp() {
   function _browserDetect(models, rules, onProgress, gen) {
     return _preExtractGLBGeometry(models).then(function() {
       return new Promise(function(resolve, reject) {
-        if (gen !== _ccDetectGeneration) { resolve([]); return; }
+        if (gen !== _ccDetectGeneration) {
+          resolve(_ccTagDetectionResult([], gen, _detectCancelled ? 'cancelled' : 'stale-generation'));
+          return;
+        }
         try {
           var result = _detectClashesCore(models, rules, onProgress, function(r) {
-            resolve(gen === _ccDetectGeneration ? r : []);
+            resolve(gen === _ccDetectGeneration ? r : _ccTagDetectionResult([], gen, _detectCancelled ? 'cancelled' : 'stale-generation'));
           });
           if (result !== undefined) resolve(result);
         } catch(e) {
+          // A thrown exception mid-run must never be reported as a
+          // genuinely complete (empty) result — see CLAUDE.md Item 1 /
+          // MEMORY.md. Several detectClashesAsync call sites have no
+          // .catch() of their own (they rely on MERGE_CLASHES, dispatched
+          // via _ccCommitDetectionResult, to clear `detecting`), so surface
+          // the failure here directly rather than relying on a caller: stash
+          // window._ccLastDetectError (already read elsewhere by get_status
+          // for the Smart Bridge orchestrator), stop the spinner, and toast
+          // — the same signals _ccRunDetection's own .catch() gives for
+          // errors that occur outside this try block.
           console.error('Clash detection failed:', e);
-          resolve([]);
+          try {
+            window._ccLastDetectError = { message: (e && e.message) || String(e), ts: Date.now(),
+              stack: (e && e.stack) ? String(e.stack).slice(0, 4000) : null };
+          } catch(e2) {}
+          try {
+            if (window._ccDispatch) window._ccDispatch({t:'STOP_DETECT'});
+            window.dispatchEvent(new CustomEvent('cc-detection-complete', { detail: {
+              ok:false, error:(window._ccLastDetectError && window._ccLastDetectError.message) || 'Detection failed', ts: Date.now()
+            }}));
+            if (window._ccToast) window._ccToast('Detection failed: ' + ((window._ccLastDetectError && window._ccLastDetectError.message) || 'unknown error'));
+          } catch(e3) {}
+          resolve(_ccTagDetectionResult([], gen, 'failed'));
         }
       });
     }).then(function(result) {
@@ -7580,7 +7639,7 @@ function startApp() {
     var chunkIdx = 0;
     var _myGen = _ccDetectGeneration; // snapshot generation at start
     function _runChunk() {
-      if (_myGen !== _ccDetectGeneration) { resolveAsync([]); return; } // cancelled by newer detection
+      if (_myGen !== _ccDetectGeneration) { resolveAsync(_ccTagDetectionResult([], _myGen, _detectCancelled ? 'cancelled' : 'stale-generation')); return; } // no longer the live generation — either cancelled or superseded by a newer run
       try {
       var end = Math.min(chunkIdx + _DETECT_CHUNK_SIZE, totalCandidates);
       var _chunkEls = {};
