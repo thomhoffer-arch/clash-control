@@ -26,19 +26,19 @@ function sliceFrom(needle, span) {
 }
 
 test('_ccCommitDetectionResult takes an opts param and clears caches only when opts.clearCachesAfter is set', () => {
-  const body = sliceFrom('function _ccCommitDetectionResult(result, dispatch, detectionSettings, opts) {', 1400);
+  const body = sliceFrom('function _ccCommitDetectionResult(result, dispatch, detectionSettings, opts) {', 3200);
   assert.match(body, /if \(opts && opts\.clearCachesAfter\) \{/);
   assert.match(body, /_flushGeoCache\(st\.models\)/);
 });
 
 test('the cache-clear step is guarded so a missing _flushGeoCache or empty state never throws', () => {
-  const body = sliceFrom('function _ccCommitDetectionResult(result, dispatch, detectionSettings, opts) {', 1400);
+  const body = sliceFrom('function _ccCommitDetectionResult(result, dispatch, detectionSettings, opts) {', 3200);
   assert.match(body, /typeof _flushGeoCache === 'function' && st && st\.models/);
   assert.match(body, /try \{[\s\S]*?catch\(e\) \{\}/);
 });
 
 test('the public ClashControl.runDetection() API accepts an opts param and forwards it to commit', () => {
-  const body = sliceFrom('runDetection:     function(rulesOverride, opts){', 700);
+  const body = sliceFrom('runDetection:     function(rulesOverride, opts){', 1000);
   assert.match(body, /_ccCommitDetectionResult\(result, window\._ccDispatch, undefined, opts\)/);
 });
 

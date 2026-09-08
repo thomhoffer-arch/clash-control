@@ -20,7 +20,7 @@ function deps(extra) {
 }
 
 test('reconciliation core is immutable and keeps the established cap', () => {
-  assert.equal(core.contractVersion, 1);
+  assert.equal(core.contractVersion, 2);
   assert.equal(core.autoResolveCap, 200);
   assert.equal(Object.isFrozen(core), true);
   assert.equal(typeof core.mergeDetectionResults, 'function');
@@ -84,12 +84,54 @@ test('cached identity keys are ignored and recomputed after an identity migratio
   assert.equal(out.clashes[0]._delta, 'persisting');
 });
 
-test('auto-resolve records cap at 200 while the summary counts all overflow', () => {
+test('auto-resolve records cap at 200 -- all 205 records survive, only 200 flip to auto_resolved', () => {
   const prev = Array.from({length:205}, (_, i) => clash('p'+i,'a'+i,'b'+i,[i,0,0],{number:i+1}));
   const out = core.mergeDetectionResults([], prev, deps());
-  assert.equal(out.clashes.length, 200);
-  assert.equal(out.deltaSummary.autoResolved, 205);
+  // Capping how many auto-resolve per run is fine; deleting the record --
+  // assignee/status/comments/history -- is not. CLAUDE.md Item 2.
+  assert.equal(out.clashes.length, 205);
+  assert.equal(out.clashes.filter((c) => c._delta === 'auto_resolved').length, 200);
+  assert.equal(out.clashes.filter((c) => c._delta === 'auto_resolved').every((c) => c.status === 'auto_resolved'), true);
+  const overflow = out.clashes.filter((c) => c._delta !== 'auto_resolved');
+  assert.equal(overflow.length, 5);
+  // Overflow records keep their original status untouched (still 'open')
+  // and get their own distinct _delta -- not a stale value carried over
+  // from a prior run's _delta (R3 follow-up: _delta is user-visible,
+  // e.g. index.html's "New this run" badge).
+  assert.equal(overflow.every((c) => c.status === 'open'), true);
+  assert.equal(overflow.every((c) => c._delta === 'auto_resolve_capped'), true);
+  // R3 follow-up: autoResolved must report only the records that ACTUALLY
+  // flipped status (200), not 200+5 -- it previously double-counted the
+  // preserved overflow as if they'd been auto-resolved too, when they
+  // stayed open. autoResolvedTruncated is the separate, correct home for
+  // the overflow count.
+  assert.equal(out.deltaSummary.autoResolved, 200);
   assert.equal(out.deltaSummary.autoResolvedTruncated, 5);
+});
+
+test('a prior open clash outside this run\'s coverage is preserved untouched, not auto-resolved', () => {
+  const inScope = clash('ab-clash', 'modelA-e1', 'modelB-e1', [0,0,0], {number:1, modelAId:'A', modelBId:'B'});
+  const outOfScope = clash('cd-clash', 'modelC-e1', 'modelD-e1', [5,0,0], {number:2, modelAId:'C', modelBId:'D'});
+  // A run scoped to models A/B: coverage only knows about A and B.
+  const coverage = (c) => c.modelAId === 'A' || c.modelAId === 'B' || c.modelBId === 'A' || c.modelBId === 'B';
+  const out = core.mergeDetectionResults([], [inScope, outOfScope], deps({coverage}));
+
+  const ab = out.clashes.find((c) => c.id === 'ab-clash');
+  const cd = out.clashes.find((c) => c.id === 'cd-clash');
+  assert.equal(out.clashes.length, 2, 'no record disappears just because it fell outside this run\'s scope');
+  assert.equal(ab._delta, 'auto_resolved');
+  assert.equal(ab.status, 'auto_resolved');
+  assert.equal(cd._delta, 'not_checked');
+  assert.equal(cd.status, 'open', 'a clash this run never looked at must keep its prior status, not flip to auto_resolved');
+  assert.equal(out.deltaSummary.notChecked, 1);
+});
+
+test('options.coverage absent preserves legacy behaviour (everything treated as in-scope)', () => {
+  const prev = clash('legacy', 'a', 'b', [0,0,0], {number:1});
+  const out = core.mergeDetectionResults([], [prev], deps());
+  assert.equal(out.clashes.length, 1);
+  assert.equal(out.clashes[0]._delta, 'auto_resolved');
+  assert.equal(out.deltaSummary.notChecked, undefined);
 });
 
 test('stable numbers are reused and new clashes fill the lowest gaps', () => {

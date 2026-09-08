@@ -124,6 +124,14 @@ test('local-engine capability gate: allows a plain hard/soft ruleset with no uns
 });
 
 test('local-engine client-side filters: excludeSelf drops self-clashes the engine still returned', () => {
+  // CORRECTED 2026-09-07 (post-review): a prior version of this file
+  // removed this check on the theory that the engine's broad phase
+  // (sweep.py) already drops same-model pairs. That was verified FALSE by
+  // running the real sweep_and_prune against the shipped default scope
+  // (modelA/modelB both 'all', so engine.py sends elements_a is elements_b
+  // -- sweep.py's same_set branch only drops an element against itself,
+  // never a same-MODEL pair). This client-side check is the ONLY place
+  // "cross-model only" is ever enforced on the local engine path.
   const api = loadApi();
   const selfClash = {selfClash: true, elemAType: 'IfcWall', elemBType: 'IfcWall', type: 'hard', distance: -5};
   const otherClash = {selfClash: false, elemAType: 'IfcWall', elemBType: 'IfcPipeSegment', type: 'hard', distance: -5};
@@ -257,6 +265,66 @@ test('local-engine capability gate: allows a per-pair tolerance narrower than th
   assert.equal(cap.ok, true);
 });
 
+// ── Self-clash policy divergence (CLAUDE.md Item 5) ─────────────────────────
+// The engine understands exactly one global excludeSelf boolean. The browser's
+// _sweepAndPrune/_sweepAndPruneWasm resolve a genuinely per-model policy that
+// can diverge from that single boolean two ways -- both must fail closed
+// rather than silently return a different result set on the local engine.
+test('local-engine capability gate: an effective single-model scope routes to the browser engine (self-clashes are always included there)', () => {
+  const api = loadApi();
+  const models = [{id: 'only'}];
+  // 'all' vs 'all' with a single loaded model: the browser's own
+  // _sweepAndPrune ALWAYS allows self-clashes here regardless of
+  // rules.excludeSelf (otherwise "cross-model only" on one federated file
+  // would report 0 by construction) -- the engine has no such override.
+  assert.equal(api.localEngineCanHandle({modelA: 'all', modelB: 'all', excludeSelf: true}, models).ok, false);
+  // True regardless of the nominal excludeSelf value -- it's the SCOPE that
+  // makes this inexpressible, not which boolean was requested.
+  assert.equal(api.localEngineCanHandle({modelA: 'all', modelB: 'all', excludeSelf: false}, models).ok, false);
+});
+
+test('local-engine capability gate: selfClashModels naming a specific subset routes to the browser engine', () => {
+  const api = loadApi();
+  const models = [{id: 'mA'}, {id: 'mB'}];
+  // index.html sets excludeSelf:false whenever selfClashModels is a non-empty
+  // array (see the UI wiring near A.UPD_RULES) -- sent raw, the engine would
+  // include EVERY model's self-clashes, not just the named one(s).
+  const cap = api.localEngineCanHandle({modelA: 'all', modelB: 'all', excludeSelf: false, selfClashModels: ['mA']}, models);
+  assert.equal(cap.ok, false);
+  const capSingleId = api.localEngineCanHandle({modelA: 'all', modelB: 'all', excludeSelf: false, selfClashModels: 'mA'}, models);
+  assert.equal(capSingleId.ok, false);
+});
+
+test('local-engine capability gate: selfClashModels "all"/"none" ARE expressible as one boolean and are let through', () => {
+  const api = loadApi();
+  const models = [{id: 'mA'}, {id: 'mB'}];
+  assert.equal(api.localEngineCanHandle({modelA: 'all', modelB: 'all', excludeSelf: false, selfClashModels: 'all'}, models).ok, true);
+  assert.equal(api.localEngineCanHandle({modelA: 'all', modelB: 'all', excludeSelf: true, selfClashModels: 'none'}, models).ok, true);
+});
+
+test('local-engine capability gate: a plain cross-model run (2+ models, no selfClashModels) is still allowed -- the fix must not be over-conservative', () => {
+  const api = loadApi();
+  const models = [{id: 'mA'}, {id: 'mB'}];
+  assert.equal(api.localEngineCanHandle({modelA: 'all', modelB: 'all', excludeSelf: true}, models).ok, true);
+  assert.equal(api.localEngineCanHandle({modelA: 'all', modelB: 'all', excludeSelf: false}, models).ok, true);
+});
+
+test('local-engine capability gate: selfClashGroup "a"/"b" with 2+ models routes to the browser engine', () => {
+  // rules.selfClashGroup ('a'/'b', resolved per-model at index.html
+  // _sweepAndPrune's `scg === 'a' && inA[cur.m.id]`) is reachable via the NL
+  // converse flow and is equally per-model / inexpressible as one boolean.
+  const api = loadApi();
+  const models = [{id: 'mA'}, {id: 'mB'}];
+  assert.equal(api.localEngineCanHandle({modelA: 'all', modelB: 'all', selfClashGroup: 'a'}, models).ok, false);
+  assert.equal(api.localEngineCanHandle({modelA: 'all', modelB: 'all', selfClashGroup: 'b'}, models).ok, false);
+});
+
+test('local-engine capability gate: selfClashGroup "both" is expressible as one boolean and is let through', () => {
+  const api = loadApi();
+  const models = [{id: 'mA'}, {id: 'mB'}];
+  assert.equal(api.localEngineCanHandle({modelA: 'all', modelB: 'all', excludeSelf: false, selfClashGroup: 'both'}, models).ok, true);
+});
+
 // ── Model-scope normalization (V7_RELEASE_PLAN P0.1) ───────────────────────
 // The engine matches modelA/modelB by exact id (or 'all'); the browser resolves
 // arrays/disc:/tag:/names/substrings. Normalize to 'all' | single-id, or fail
@@ -295,6 +363,13 @@ test('local-engine scope: a non-"all" selector with no resolver available fails 
   assert.equal(api.normalizeModelScope(models, 'M1', null).ok, false);
 });
 
+// ── Wire-contract comment honesty (CLAUDE.md Item 5) ────────────────────────
+test('the wire-contract comment no longer claims the Engine has no /status capability field', () => {
+  assert.doesNotMatch(source, /has no \/status/i);
+  assert.match(source, /PROTOCOL_VERSION/);
+  assert.match(source, /CAPABILITIES/);
+});
+
 test('local-engine capability gate: a multi-model-subset scope routes to the browser engine', () => {
   const api = loadApi();
   // No window._ccResolveModelScope in node → a non-'all' scope can't be verified
@@ -302,4 +377,93 @@ test('local-engine capability gate: a multi-model-subset scope routes to the bro
   // conservative fallback).
   const cap = api.localEngineCanHandle({modelA: 'disc:mep', modelB: 'all'}, [{id: 'a'}, {id: 'b'}]);
   assert.equal(cap.ok, false);
+});
+
+// ── _detectOnLocalEngine reads stats.incomplete (CLAUDE.md Items 1/3, R4) ──
+// The engine advertises stats.completed/failed/incomplete/sampleError
+// (Item 3), but nothing on this side ever read it -- a run where every
+// candidate pair failed narrow-phase came back as
+// {clashes:[], stats:{incomplete:true}}, indistinguishable from a genuine
+// "checked everything, found nothing" result. detectClashesAsync would tag
+// that 'complete' and mergeDetectionResults would auto-resolve every prior
+// open clash in scope: the exact failure-becomes-empty-success class Item 1
+// exists to prevent, still fully live on the local-engine path.
+function loadDetectOnLocalEngine() {
+  // Starts at _applyClientSideRuleFilters, not _detectOnLocalEngine itself
+  // -- the latter calls the former directly (`return
+  // _applyClientSideRuleFilters(mapped, rules);`), and without it every
+  // invocation throws a ReferenceError, caught by _detectOnLocalEngine's
+  // own .catch(), which ALSO returns null -- silently making every test
+  // below pass for the wrong reason. The two functions are contiguous in
+  // the file (same as loadApi() above relies on).
+  const start = source.indexOf('function _applyClientSideRuleFilters(clashes, rules) {');
+  const end = source.indexOf('\n\n  window._checkLocalEngine', start);
+  assert.notEqual(start, -1, '_applyClientSideRuleFilters not found');
+  assert.notEqual(end, -1, '_detectOnLocalEngine end not found');
+  const block = source.slice(start, end);
+  return new Function('window', 'fetch', 'WebSocket', 'Event', 'CustomEvent', 'console',
+    '_serializeForLocalEngine', '_localEngineUrl', '_localEngineWsUrl', `
+    ${block}
+    return _detectOnLocalEngine;
+  `);
+}
+
+function fakeFetch(jsonBody) {
+  return function() { return Promise.resolve({ json: () => Promise.resolve(jsonBody) }); };
+}
+
+function noopWindow() {
+  const events = [];
+  return { win: { dispatchEvent(e) { events.push(e); } }, events };
+}
+
+test('_detectOnLocalEngine returns null (triggering the browser-engine fallback) when stats.incomplete is true', async () => {
+  const factory = loadDetectOnLocalEngine();
+  const { win } = noopWindow();
+  const detectOnLocalEngine = factory(
+    win,
+    fakeFetch({ clashes: [], stats: { elementCount: 4, candidatePairs: 3, clashCount: 0, duration_ms: 5, threads: 1, completed: 0, failed: 3, incomplete: true, sampleError: 'ValueError: synthetic' } }),
+    function FakeWebSocket() { this.close = () => {}; },
+    function FakeEvent(type) { this.type = type; },
+    function FakeCustomEvent(type, init) { this.type = type; this.detail = init && init.detail; },
+    console,
+    () => ({ elements: [], rules: {} }),
+    'http://fake', 'ws://fake'
+  );
+  const result = await detectOnLocalEngine([{ id: 'm', elements: [] }], {}, null);
+  assert.equal(result, null, 'an incomplete engine run must fall back to the browser engine, not return its partial clashes as a success');
+});
+
+test('_detectOnLocalEngine still returns the clash array normally when the run genuinely completed', async () => {
+  const factory = loadDetectOnLocalEngine();
+  const { win } = noopWindow();
+  const detectOnLocalEngine = factory(
+    win,
+    fakeFetch({ clashes: [], stats: { elementCount: 4, candidatePairs: 3, clashCount: 0, duration_ms: 5, threads: 1, completed: 3, failed: 0, incomplete: false } }),
+    function FakeWebSocket() { this.close = () => {}; },
+    function FakeEvent(type) { this.type = type; },
+    function FakeCustomEvent(type, init) { this.type = type; this.detail = init && init.detail; },
+    console,
+    () => ({ elements: [], rules: {} }),
+    'http://fake', 'ws://fake'
+  );
+  const result = await detectOnLocalEngine([{ id: 'm', elements: [] }], {}, null);
+  assert.deepEqual(result, [], 'a genuinely complete zero-clash run must still return normally, not fall back needlessly');
+});
+
+test('_detectOnLocalEngine treats a missing stats.incomplete (older/absent field) as complete -- back-compat with pre-Item-3 engine builds', async () => {
+  const factory = loadDetectOnLocalEngine();
+  const { win } = noopWindow();
+  const detectOnLocalEngine = factory(
+    win,
+    fakeFetch({ clashes: [], stats: { elementCount: 0, candidatePairs: 0, clashCount: 0, duration_ms: 1, threads: 1 } }),
+    function FakeWebSocket() { this.close = () => {}; },
+    function FakeEvent(type) { this.type = type; },
+    function FakeCustomEvent(type, init) { this.type = type; this.detail = init && init.detail; },
+    console,
+    () => ({ elements: [], rules: {} }),
+    'http://fake', 'ws://fake'
+  );
+  const result = await detectOnLocalEngine([{ id: 'm', elements: [] }], {}, null);
+  assert.deepEqual(result, []);
 });

@@ -584,9 +584,15 @@ clashcontrol-engine --install</pre>
   // ── Engine communication ──────────────────────────────────────
   //
   // Wire contract (verified against clashcontrol_engine/engine.py on the
-  // Engine repo's main branch, 2026-07-21 — the Engine repo has no /status
-  // capability/protocol-version field to negotiate against, so this is a
-  // hand-verified snapshot, not a live-negotiated contract):
+  // Engine repo's main branch, 2026-07-21, corrected 2026-09-07 — CLAUDE.md
+  // Item 5): the Engine now DOES publish a `/status` capability/protocol-
+  // version field (`PROTOCOL_VERSION` + `CAPABILITIES` in engine.py, added
+  // in a later Engine release than the one this file was last verified
+  // against) — the claim that it had none is stale. This file still does
+  // NOT negotiate against it live; the notes below remain a hand-verified
+  // snapshot. Building real negotiation against `/status` is a real,
+  // tracked gap (it would let this file stop hand-maintaining the snapshot
+  // whenever the Engine's rule-handling changes), not attempted this wave:
   //   - `maxGap`/`minGap` sent TO the engine are millimetres (the engine
   //     itself does `rules.get('maxGap',0)/1000.0` before using them against
   //     metre-scale vertex coordinates — same convention the browser uses).
@@ -872,6 +878,46 @@ clashcontrol-engine --install</pre>
     if (!_sa.ok || !_sb.ok) {
       return {ok:false, reason:'This model scope resolves to something the local engine can’t address (only “all” or a single model).'};
     }
+    // Self-clash policy (CLAUDE.md Item 5, corrected 2026-09-07): the ADAPTER
+    // (not the engine — verified false, see the correction comment in
+    // _applyClientSideRuleFilters above) enforces "cross-model only" using a
+    // single `rules.excludeSelf` boolean checked against each returned
+    // clash's `selfClash` flag. That single boolean can only ever express a
+    // uniform yes/no for the WHOLE run. The browser's own _sweepAndPrune /
+    // _sweepAndPruneWasm resolve a genuinely PER-MODEL policy (see their
+    // inline `selfAllowed` resolution) that can need a different answer per
+    // model — fail closed rather than re-deriving that per-model resolution
+    // here a second time (which would duplicate business logic already
+    // flagged as CLAUDE.md-sensitive):
+    //   (i) an effective single-model scope (grpA ∪ grpB collapses to one
+    //       model) forces self-clashes ON regardless of rules.excludeSelf/
+    //       selfClashModels/selfClashGroup — otherwise "cross-model only" on
+    //       someone's one federated file would report 0 by construction, not
+    //       by finding. Reuse the SAME resolved _sa/_sb above (already
+    //       computed via the one _ccResolveModelScope source of truth)
+    //       instead of resolving scope a second time.
+    //   (ii) rules.selfClashModels names a PARTICULAR subset of models (not
+    //       the literal 'all'/'none'), which the client filter's single
+    //       excludeSelf:false would over-include: every model's
+    //       self-clashes, not just the named one(s).
+    //   (iii) rules.selfClashGroup is 'a' or 'b' (index.html _sweepAndPrune:
+    //       self-clashes allowed only for models in that specific side of
+    //       the scope) — same over-inclusion risk as (ii) once there is more
+    //       than one model in play.
+    var _scopeIds = {};
+    if (_sa.value === 'all') (models||[]).forEach(function(m){ _scopeIds[m.id]=true; });
+    else _scopeIds[_sa.value] = true;
+    if (_sb.value === 'all') (models||[]).forEach(function(m){ _scopeIds[m.id]=true; });
+    else _scopeIds[_sb.value] = true;
+    if (Object.keys(_scopeIds).length === 1) {
+      return {ok:false, reason:'This run’s scope resolves to a single model, so self-clashes are always included — the local engine adapter’s single excludeSelf check can’t express that.'};
+    }
+    if (rules.selfClashModels !== undefined && rules.selfClashModels !== 'all' && rules.selfClashModels !== 'none') {
+      return {ok:false, reason:'Self-clashes limited to specific models (selfClashModels) can’t be expressed by the local engine adapter’s single excludeSelf check.'};
+    }
+    if (rules.selfClashGroup === 'a' || rules.selfClashGroup === 'b') {
+      return {ok:false, reason:'Self-clashes limited to one side of the scope (selfClashGroup) can’t be expressed by the local engine adapter’s single excludeSelf check.'};
+    }
     return {ok:true, reason:null};
   }
 
@@ -924,6 +970,23 @@ clashcontrol-engine --install</pre>
 
     return clashes.filter(function(cl) {
       if (!cl) return false;
+      // CORRECTED 2026-09-07 (post-review): a prior version of this comment
+      // claimed the engine's broad phase (sweep.py) already drops same-model
+      // pairs, so this check was "double-filtering" and could be removed.
+      // That was verified FALSE by running the real sweep_and_prune: for the
+      // shipped default (modelA/modelB both 'all'), engine.py sets
+      // elements_a = elements_b = all_elements (the SAME list object), so
+      // sweep.py's `_same_id_sets` short-circuits true and the `same_set`
+      // branch runs — which only dedupes unordered pairs and drops an
+      // element against ITSELF (i, i); it has no same-MODEL concept and
+      // never inspects rules.excludeSelf at all in that branch. Reproduced:
+      // excludeSelf:true and excludeSelf:false returned byte-identical
+      // candidate sets, same-model pairs included both times. This check is
+      // the ONLY place "cross-model only" is ever enforced on the local
+      // engine path — removing it (as a prior version of this file did)
+      // leaked self-clashes on every default-scope run once the local
+      // engine was active. cl.selfClash is set in _clashFromEngineResult
+      // from sameModel, independent of anything sweep.py decided.
       if (excludeSelf && cl.selfClash) return false;
       if (excludeTypes[cl.elemAType] || excludeTypes[cl.elemBType]) return false;
       var key = (cl.elemAType && cl.elemBType) ? typePairKey(cl.elemAType, cl.elemBType) : null;
@@ -988,6 +1051,27 @@ clashcontrol-engine --install</pre>
       if (result.stats) {
         console.log('%c[Engine] ' + result.stats.elementCount + ' elements, ' + result.stats.candidatePairs + ' candidates, ' +
           result.stats.clashCount + ' clashes, ' + result.stats.duration_ms + 'ms (' + result.stats.threads + ' threads)', 'color:#60a5fa');
+      }
+      // CLAUDE.md Items 1/3 (R4 follow-up): the engine's worker-failure
+      // accounting (Item 3: stats.completed/failed/incomplete/sampleError)
+      // existed on the wire but nothing on this side ever read it. A run
+      // where every candidate pair failed came back as
+      // {clashes:[], stats:{incomplete:true, failed:N}} -- indistinguishable
+      // from a genuine "checked everything, found nothing" result, which
+      // this adapter would return as-is, detectClashesAsync would tag
+      // 'complete', and mergeDetectionResults would auto-resolve every
+      // prior open clash in this run's scope. That is exactly the
+      // failure-becomes-empty-success data-loss class Item 1 exists to
+      // prevent, still fully live on this path. Returning null here routes
+      // through the SAME fallback detectClashesAsync already uses for an
+      // engine error (result.error) or a lost race (stale generation) two
+      // lines above/below: it re-runs the SAME rules on the browser engine
+      // instead of silently trusting a partial local result.
+      if (result.stats && result.stats.incomplete) {
+        console.warn('[Engine] Local run incomplete: ' + (result.stats.failed || 0) + ' of ' +
+          (result.stats.candidatePairs || 0) + ' candidate pair(s) failed narrow-phase — falling back to the browser engine rather than risk a silently-partial result.' +
+          (result.stats.sampleError ? (' Sample error: ' + result.stats.sampleError) : ''));
+        return null;
       }
       // Build lookup maps keyed by (modelId, expressId). The engine's
       // response annotates each clash with the originating model ids

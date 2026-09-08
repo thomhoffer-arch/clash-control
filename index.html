@@ -683,7 +683,7 @@ window.onload = function() {
 
 function startApp() {
   // ── Version (auto-updated by pre-commit hook) ──
-  var CC_VERSION = {v:'7.3.3',hash:'b4ff2d5',date:'2026-07-27T09:26:34Z'};
+  var CC_VERSION = {v:'7.4.6',hash:'bebd89a',date:'2026-09-07T16:45:04Z'};
   window.CC_VERSION = CC_VERSION;
 
   window._ccSetSRGBOutput = function(renderer) {
@@ -1073,7 +1073,8 @@ function startApp() {
     }, 5000);
     detectClashesAsync(s.models, runRules).then(function(result) {
       clearInterval(_wdTimer);
-      if (!_ccCommitDetectionResult(result, d)) return;
+      var _runDs = {coverageModelIds: _ccCoverageModelIds(runRules, s.models)};
+      if (!_ccCommitDetectionResult(result, d, _runDs)) return;
       // Same-discipline 0-clash trap: a federation whose models share a
       // discipline returns 0 because every cross-model pair is skipped by the
       // excludeSameDiscipline default. Don't fail silently — say why + how.
@@ -1151,18 +1152,28 @@ function startApp() {
       }
     }, 5000);
     var byKey = {}; // identityKey → clash (first rule that finds a pair wins)
+    var _coverageIds = {}; // union of every rule's resolved model scope (CLAUDE.md Item 2/R3)
     var ri = 0;
     function runNext() {
       if (ri >= rules.length) {
         clearInterval(_wdTimer);
         var union = Object.keys(byKey).map(function(k){ return byKey[k]; });
-        classifyClashes(union);
-        d({t:'MERGE_CLASHES', v:union});
-        try {
-          var _open = 0; union.forEach(function(c){ var st=c.status||'open'; if(st!=='resolved'&&st!=='expected'&&st!=='closed') _open++; });
-          window.dispatchEvent(new CustomEvent('cc-detection-complete', { detail: {
-            ok:true, total:union.length, open:_open, ruleset:true, rules:rules.length, ts:Date.now() }}));
-        } catch(e) {}
+        // CLAUDE.md Item 1 (R2 follow-up): this used to dispatch
+        // MERGE_CLASHES directly. Every constituent rule's result was
+        // already usability-checked below before ever reaching here, but
+        // routing through the guarded commit also wires run-scope coverage
+        // (Item 2/R3) — the union of every rule's resolved modelA/modelB —
+        // so a ruleset scoped to A-B/C-D pairs can't auto-resolve a prior
+        // clash in a model none of its rules ever touched.
+        var tagged = _ccTagDetectionResult(union, _ccDetectGeneration, 'complete');
+        var committed = _ccCommitDetectionResult(tagged, d, {coverageModelIds: Object.keys(_coverageIds)});
+        if (committed) {
+          try {
+            var _open = 0; union.forEach(function(c){ var st=c.status||'open'; if(st!=='resolved'&&st!=='expected'&&st!=='closed') _open++; });
+            window.dispatchEvent(new CustomEvent('cc-detection-complete', { detail: {
+              ok:true, total:union.length, open:_open, ruleset:true, rules:rules.length, ts:Date.now() }}));
+          } catch(e) {}
+        }
         return;
       }
       var r = rules[ri++];
@@ -1172,9 +1183,26 @@ function startApp() {
         maxGap: r.maxGap != null ? r.maxGap : s.rules.maxGap,
         hard: r.hard != null ? !!r.hard : s.rules.hard
       });
+      // _ccCoverageModelIds now returns {a,b} (kept separate for the
+      // precise single-rule check); this multi-rule union accumulator
+      // deliberately flattens both sides into one set, which is the known
+      // over-approximation documented on mergeDetectionResults' wrapper.
+      var _ruleCov = _ccCoverageModelIds(merged, s.models);
+      if (_ruleCov) {
+        (_ruleCov.a||[]).forEach(function(id){ _coverageIds[id] = true; });
+        (_ruleCov.b||[]).forEach(function(id){ _coverageIds[id] = true; });
+      }
       detectClashesAsync(s.models, merged).then(function(result) {
         if (!_ccDetectionResultUsable(result)) {
           clearInterval(_wdTimer);
+          // Surface a terminal event so an orchestrator awaiting this
+          // ruleset's completion doesn't hang forever on a cancelled/
+          // stale/failed sub-run (CLAUDE.md Item 1, R2 follow-up).
+          try {
+            window.dispatchEvent(new CustomEvent('cc-detection-complete', { detail: {
+              ok:false, error:'Ruleset detection did not complete (' + ((result && result._ccOutcome) || 'unknown') + ')',
+              outcome:(result && result._ccOutcome) || null, ruleset:true, ts:Date.now() }}));
+          } catch(e) {}
           return;
         }
         (result || []).forEach(function(c) {
@@ -1810,7 +1838,7 @@ function startApp() {
       case A.UPD_MODEL:   return Object.assign({},s,{models:s.models.map(function(m){return m.id===a.id?Object.assign({},m,a.u):m})});
       case A.TOGGLE_ALL_STOREYS: return Object.assign({},s,{models:s.models.map(function(m){if(m.id!==a.id)return m;return Object.assign({},m,{hiddenStoreys:a.hide?a.storeys.reduce(function(o,st){o[st]=true;return o;},{}):{}}); })});
       case A.SET_CLASHES: /* falls through to MERGE_CLASHES with no prev clashes */
-      case A.MERGE_CLASHES: var _mr=mergeDetectionResults(a.v, a.t===A.MERGE_CLASHES?s.clashes:[]); _mr.clashes=_ccApplyAssignmentRules(_mr.clashes, s.assignmentRules); _gcEvent('clash-detection', _mr.clashes.length+' clashes'); var _st={clashes:_mr.clashes,detecting:false,activeId:null,floors:deriveFloors(_mr.clashes),lastDeltaSummary:_mr.deltaSummary}; var _rhOpen=0; _mr.clashes.forEach(function(c){if(c.status==='open'||c.status==='in_progress')_rhOpen++;}); _st.runHistory=(s.runHistory||[]).concat([{ts:_mr.deltaSummary.ts,total:_mr.clashes.length,open:_rhOpen,newCount:_mr.deltaSummary.newCount,persisting:_mr.deltaSummary.persisting,autoResolved:_mr.deltaSummary.autoResolved}]).slice(-100); if(a.detectionSettings)_st.detectionSettings=a.detectionSettings; if(s.prefs.resetFiltersOnRun!==false)_st.filters=Object.assign({},INIT_FILTERS); /* Default to Grouped only when the user has nothing chosen AND the result is small enough that thousands of sticky-positioned cluster headers won't tax the browser. Never write localStorage here — that's the user-facing CLASH_GROUP_BY dispatch's job. */ if((!Array.isArray(s.clashGroupBy)||s.clashGroupBy.length===0) && _mr.clashes.length>0 && _mr.clashes.length<=2000) { _st.clashGroupBy=['cluster']; }
+      case A.MERGE_CLASHES: var _mr=mergeDetectionResults(a.v, a.t===A.MERGE_CLASHES?s.clashes:[], a.coverageModelIds); _mr.clashes=_ccApplyAssignmentRules(_mr.clashes, s.assignmentRules); _gcEvent('clash-detection', _mr.clashes.length+' clashes'); var _st={clashes:_mr.clashes,detecting:false,activeId:null,floors:deriveFloors(_mr.clashes),lastDeltaSummary:_mr.deltaSummary}; var _rhOpen=0; _mr.clashes.forEach(function(c){if(c.status==='open'||c.status==='in_progress')_rhOpen++;}); _st.runHistory=(s.runHistory||[]).concat([{ts:_mr.deltaSummary.ts,total:_mr.clashes.length,open:_rhOpen,newCount:_mr.deltaSummary.newCount,persisting:_mr.deltaSummary.persisting,autoResolved:_mr.deltaSummary.autoResolved}]).slice(-100); if(a.detectionSettings)_st.detectionSettings=a.detectionSettings; if(s.prefs.resetFiltersOnRun!==false)_st.filters=Object.assign({},INIT_FILTERS); /* Default to Grouped only when the user has nothing chosen AND the result is small enough that thousands of sticky-positioned cluster headers won't tax the browser. Never write localStorage here — that's the user-facing CLASH_GROUP_BY dispatch's job. */ if((!Array.isArray(s.clashGroupBy)||s.clashGroupBy.length===0) && _mr.clashes.length>0 && _mr.clashes.length<=2000) { _st.clashGroupBy=['cluster']; }
         return Object.assign({},s,_st);
       case A.ADD_CLASHES: { /* additive, non-destructive append (does NOT auto-resolve existing clashes like MERGE_CLASHES). Used by the accessibility panel. */
         var _addc=(a.v||[]).filter(Boolean); if(!_addc.length) return s;
@@ -6626,31 +6654,70 @@ function startApp() {
     return !!(window._ccSafetyMigrations &&
       window._ccSafetyMigrations.isEnabled('concurrencyV2'));
   }
-  function _ccTagDetectionResult(result, generation, suppressed) {
+  // outcome: 'complete' (default — a genuinely finished run, hard zero
+  // clashes included) | 'cancelled' | 'stale-generation' | 'already-running'
+  // | 'failed'. Anything other than 'complete' is stamped onto the legacy
+  // `_ccSuppressed` field too (kept for back-compat with existing readers)
+  // and must never be committed — see _ccDetectionResultUsable below.
+  function _ccTagDetectionResult(result, generation, outcome) {
     var value = Array.isArray(result) ? result : [];
+    var suppressed = (outcome && outcome !== 'complete') ? outcome : null;
     try {
       Object.defineProperty(value, '_ccGeneration', {value:generation, configurable:true});
+      Object.defineProperty(value, '_ccOutcome', {value:(outcome || 'complete'), configurable:true});
       if (suppressed) Object.defineProperty(value, '_ccSuppressed', {value:suppressed, configurable:true});
     } catch(e) {
       value._ccGeneration = generation;
+      value._ccOutcome = outcome || 'complete';
       if (suppressed) value._ccSuppressed = suppressed;
     }
     return value;
   }
+  // Unconditional — regardless of the concurrencyV2 migration flag. A run
+  // that did not genuinely finish (cancelled, superseded by a newer run,
+  // already-running, or a thrown exception) must never be treated as a
+  // valid — possibly empty — result. This used to early-return `true`
+  // whenever concurrencyV2 was disabled, and since that migration flag is
+  // `defaultEnabled:false`, the guard was effectively a no-op in production:
+  // cancelling a run (or a crash mid-run) would commit MERGE_CLASHES with an
+  // empty array, auto-resolving up to 200 clashes and permanently deleting
+  // any beyond 200. See CLAUDE.md Item 1 / MEMORY.md.
   function _ccDetectionResultUsable(result) {
-    if (!_ccConcurrencyV2Enabled()) return true;
     return !!(result && !result._ccSuppressed && result._ccGeneration === _ccDetectGeneration);
   }
   function _ccCommitDetectionResult(result, dispatch, detectionSettings, opts) {
     if (!_ccDetectionResultUsable(result)) {
       try { window._ccSafetyMigrations.record({migration:'concurrencyV2', outcome:'stale-write-blocked',
         reason:result && result._ccSuppressed || 'stale-generation'}); } catch(e) {}
+      // CLAUDE.md Item 1 (R2 follow-up): a cancelled run used to leave every
+      // detectClashesAsync call site silent — no MERGE_CLASHES (correct, it
+      // never completed) but also no cc-detection-complete, so an
+      // orchestrator (get_status polling, or a Smart Bridge tool call
+      // awaiting the event) would hang indefinitely. 'failed' is deliberately
+      // excluded here: _browserDetect's own catch already dispatches this
+      // event the moment the exception happens. 'stale-generation' and
+      // 'already-running' are also excluded: a DIFFERENT, newer run is the
+      // one actually in flight and will report its own completion — an
+      // extra ok:false here for the superseded run would be misleading, not
+      // helpful.
+      if (result && result._ccOutcome === 'cancelled') {
+        try {
+          window.dispatchEvent(new CustomEvent('cc-detection-complete', { detail: {
+            ok:false, cancelled:true, outcome:'cancelled', ts:Date.now()
+          }}));
+        } catch(e) {}
+      }
       return false;
     }
     classifyClashes(result);
     if (dispatch) {
       var action = {t:A.MERGE_CLASHES, v:result};
       if (detectionSettings !== undefined) action.detectionSettings = detectionSettings;
+      // Run-scope coverage (CLAUDE.md Item 2) — threaded through whichever
+      // of the two existing params the caller used to carry it, so no call
+      // site needs a new positional argument.
+      var _coverage = (detectionSettings && detectionSettings.coverageModelIds) || (opts && opts.coverageModelIds);
+      if (_coverage) action.coverageModelIds = _coverage;
       dispatch(action);
     }
     // V7_RELEASE_PLAN.md P6.4 (safe slice): opt-in cache clear for the
@@ -6709,15 +6776,34 @@ function startApp() {
     } else {
       work = _browserDetect(models, rules, onProgress, gen);
     }
-    if (!coordinated) return work;
-    return work.then(function(result) {
-      var current = _ccDetectionCoordinator.isCurrent(token) && gen === _ccDetectGeneration;
-      _ccDetectionCoordinator.finish(token);
-      return _ccTagDetectionResult(result, gen, current ? null : 'stale-generation');
-    }, function(error) {
-      _ccDetectionCoordinator.finish(token);
-      throw error;
-    });
+    // Always resolve to a definitively outcome-tagged result — regardless of
+    // the concurrencyV2 migration flag. Before this fix, the normalization
+    // below (and the coordinator's stale-generation check) only ran when a
+    // user had opted into concurrencyV2 (defaultEnabled:false, i.e. never in
+    // production), so a cancelled or superseded run's plain `[]` looked
+    // exactly like a genuinely complete, zero-clash run to every caller.
+    // See CLAUDE.md Item 1 / MEMORY.md.
+    function _normalizeDetectionResult(result) {
+      if (coordinated) {
+        var current = _ccDetectionCoordinator.isCurrent(token) && gen === _ccDetectGeneration;
+        _ccDetectionCoordinator.finish(token);
+        if (!current) return _ccTagDetectionResult(result, gen, 'stale-generation');
+      } else if (gen !== _ccDetectGeneration) {
+        return _ccTagDetectionResult(result, gen, _detectCancelled ? 'cancelled' : 'stale-generation');
+      }
+      // Preserve a definitive non-'complete' outcome _browserDetect already
+      // stamped (e.g. 'failed' from a thrown exception, or 'cancelled' from
+      // a mid-run stop) instead of overwriting it with 'complete'.
+      var outcome = (result && result._ccOutcome && result._ccOutcome !== 'complete') ? result._ccOutcome : 'complete';
+      return _ccTagDetectionResult(result, gen, outcome);
+    }
+    if (coordinated) {
+      return work.then(_normalizeDetectionResult, function(error) {
+        _ccDetectionCoordinator.finish(token);
+        throw error;
+      });
+    }
+    return work.then(_normalizeDetectionResult);
   }
 
   var _detectCancelled = false;
@@ -6791,18 +6877,50 @@ function startApp() {
     return [];
   }
   window._ccResolveModelScope = _ccResolveModelScope;
+  // A thrown exception mid-run must never be reported as a genuinely
+  // complete result — see CLAUDE.md Item 1 / MEMORY.md. Several
+  // detectClashesAsync call sites have no .catch() of their own (they rely
+  // on MERGE_CLASHES, dispatched via _ccCommitDetectionResult, to clear
+  // `detecting`), so surface the failure here directly rather than relying
+  // on a caller: stash window._ccLastDetectError (already read elsewhere by
+  // get_status for the Smart Bridge orchestrator), stop the spinner, ping
+  // any orchestrator awaiting cc-detection-complete, and toast — the same
+  // signals _ccRunDetection's own .catch() gives for errors outside this
+  // file's try blocks. Shared by _browserDetect's own catch AND
+  // _detectClashesCore's chunk-loop catch (R2 follow-up) — the two used to
+  // disagree: only the former surfaced a failure, the latter (which is
+  // where detection spends nearly all its time, so the likelier crash
+  // site) just quietly finished with whatever partial clashes it had.
+  function _ccSurfaceDetectionFailure(e) {
+    console.error('Clash detection failed:', e);
+    try {
+      window._ccLastDetectError = { message: (e && e.message) || String(e), ts: Date.now(),
+        stack: (e && e.stack) ? String(e.stack).slice(0, 4000) : null };
+    } catch(e2) {}
+    try {
+      if (window._ccDispatch) window._ccDispatch({t:'STOP_DETECT'});
+      window.dispatchEvent(new CustomEvent('cc-detection-complete', { detail: {
+        ok:false, error:(window._ccLastDetectError && window._ccLastDetectError.message) || 'Detection failed', ts: Date.now()
+      }}));
+      if (window._ccToast) window._ccToast('Detection failed: ' + ((window._ccLastDetectError && window._ccLastDetectError.message) || 'unknown error'));
+    } catch(e3) {}
+  }
+
   function _browserDetect(models, rules, onProgress, gen) {
     return _preExtractGLBGeometry(models).then(function() {
       return new Promise(function(resolve, reject) {
-        if (gen !== _ccDetectGeneration) { resolve([]); return; }
+        if (gen !== _ccDetectGeneration) {
+          resolve(_ccTagDetectionResult([], gen, _detectCancelled ? 'cancelled' : 'stale-generation'));
+          return;
+        }
         try {
           var result = _detectClashesCore(models, rules, onProgress, function(r) {
-            resolve(gen === _ccDetectGeneration ? r : []);
+            resolve(gen === _ccDetectGeneration ? r : _ccTagDetectionResult([], gen, _detectCancelled ? 'cancelled' : 'stale-generation'));
           });
           if (result !== undefined) resolve(result);
         } catch(e) {
-          console.error('Clash detection failed:', e);
-          resolve([]);
+          _ccSurfaceDetectionFailure(e);
+          resolve(_ccTagDetectionResult([], gen, 'failed'));
         }
       });
     }).then(function(result) {
@@ -7172,32 +7290,24 @@ function startApp() {
         return;
       }
 
-      // ── Parallel axis rejection (IFC-based, zero false negatives) ──
-      var pA = eA.props, pB = eB.props;
-      var axisA = pA && pA.axis, axisB = pB && pB.axis;
-      if (axisA && axisB) {
-        var dot = axisA[0]*axisB[0] + axisA[1]*axisB[1] + axisA[2]*axisB[2];
-        if (Math.abs(dot) > 0.95) {
-          var cA = bA.getCenter(_tmpCtrA), cB = bB.getCenter(_tmpCtrB);
-          var ccx=cB.x-cA.x, ccy=cB.y-cA.y, ccz=cB.z-cA.z;
-          var ccLen = Math.sqrt(ccx*ccx+ccy*ccy+ccz*ccz);
-          if (ccLen > 1e-6) {
-            ccx/=ccLen; ccy/=ccLen; ccz/=ccLen;
-            var ccDot = Math.abs(ccx*axisA[0]+ccy*axisA[1]+ccz*axisA[2]);
-            if (ccDot > 0.85) {
-              var perpDist = ccLen * Math.sqrt(1 - ccDot*ccDot);
-              var szA = bA.getSize(_tmpSizeA), szB = bB.getSize(_tmpSizeB);
-              var dimsA = [szA.x,szA.y,szA.z].sort(function(a,b){return a-b;});
-              var dimsB = [szB.x,szB.y,szB.z].sort(function(a,b){return a-b;});
-              var radA = (dimsA[0]+dimsA[1])/4; // avg of two shortest / 2
-              var radB = (dimsB[0]+dimsB[1])/4;
-              if (perpDist > radA + radB) {
-                return; // continue to next candidate
-              }
-            }
-          }
-        }
-      }
+      // NOTE (CLAUDE.md Item 6): a "parallel axis rejection (IFC-based, zero
+      // false negatives)" narrow-phase shortcut used to live here — deleted
+      // 2026-09-07. The "zero false negatives" claim was false: it bounded
+      // the two elements' combined cross-section radius as
+      // (d1+d2)/4 where the true circumscribed-cross-section radius for two
+      // parallel cylinders is 0.5*sqrt(d1²+d2²) (0.55m vs 1.005m for the
+      // counterexample below — a real 0.1 m³ overlap was rejected before the
+      // intersection kernel ever ran), AND it omitted the clearance margin
+      // entirely, so it also produced false negatives on soft/clearance runs
+      // even for cases where the radius formula IS exact (perfect
+      // cylinders). Counterexample (both axis [1,0,0]):
+      //   A: [-5,-1,-0.1] to [5,1,0.1]     B: [3,0.75,-0.1] to [13,2.75,0.1]
+      // Not repaired in this wave — a corrected bound needs a fixture
+      // proving it conservative against an exhaustive reference (Wave 2).
+      // Removing it means more pairs reach the real intersection kernel
+      // below for long/thin parallel elements (beams, pipes, ducts) that
+      // previously short-circuited here — expect more narrow-phase work on
+      // models heavy with those, not a correctness regression.
 
       // ── L1+L2: BVH dual-tree + Möller tri-tri ──────────────────
       var pairGapM = maxGapM;
@@ -7580,7 +7690,7 @@ function startApp() {
     var chunkIdx = 0;
     var _myGen = _ccDetectGeneration; // snapshot generation at start
     function _runChunk() {
-      if (_myGen !== _ccDetectGeneration) { resolveAsync([]); return; } // cancelled by newer detection
+      if (_myGen !== _ccDetectGeneration) { resolveAsync(_ccTagDetectionResult([], _myGen, _detectCancelled ? 'cancelled' : 'stale-generation')); return; } // no longer the live generation — either cancelled or superseded by a newer run
       try {
       var end = Math.min(chunkIdx + _DETECT_CHUNK_SIZE, totalCandidates);
       var _chunkEls = {};
@@ -7613,7 +7723,25 @@ function startApp() {
         _phase('Classifying results');
         resolveAsync(_finalize());
       }
-      } catch(e) { console.error('Detection chunk error:', e); resolveAsync(_finalize()); }
+      } catch(e) {
+        // CLAUDE.md Item 1 (R2 follow-up): _browserDetect's own try/catch
+        // only wraps the SYNCHRONOUS first call into this core — once
+        // setTimeout(_runChunk, 0) above yields, a throw in a later chunk
+        // lands here instead, in a completely separate microtask/macrotask
+        // from that outer try. This is the likelier crash site (detection
+        // spends nearly all its time inside this chunk loop), and it used
+        // to call _finalize() and resolve as if the run had genuinely
+        // completed — silently committing whatever PARTIAL clashes had
+        // accumulated so far as the full truth, with every untested
+        // remaining candidate simply never checked. _finalize() is still
+        // called, best-effort, so its training-data/profiling side effects
+        // aren't skipped, but the returned array is tagged 'failed'
+        // regardless so the commit guard blocks it.
+        var _partial;
+        try { _partial = _finalize(); } catch(e2) { _partial = clashes; }
+        _ccSurfaceDetectionFailure(e);
+        resolveAsync(_ccTagDetectionResult(Array.isArray(_partial) ? _partial : [], _myGen, 'failed'));
+      }
     }
     _runChunk();
     return undefined; // signal async path taken
@@ -7716,6 +7844,30 @@ function startApp() {
     return deps;
   }
 
+  // Run-scope coverage (CLAUDE.md Item 2, tightened R3 follow-up): the A-
+  // and B-side model ids a specific detection rule set (modelA/modelB)
+  // could actually examine, via _ccResolveModelScope — the single source
+  // of truth for scope resolution, also consulted by the local-engine
+  // adapter. Returns {a, b} (kept SEPARATE, not merged into one set) so the
+  // reconciliation wrapper below can check whether a prior clash's pair
+  // could actually have been FORMED by this run's A/B grouping, not just
+  // "both endpoints somewhere in the combined scope" — merging into one
+  // set previously meant an A-vs-B scoped run treated a same-model A-A (or
+  // B-B) self-clash as in-coverage and auto-resolved it, even when the run
+  // never checked self-clashes at all. Still deliberately does not
+  // replicate excludeSelf/selfClashModels/selfClashGroup/hard-vs-soft
+  // nuance (see Item 5's fail-closed philosophy for why over-restricting
+  // here would be worse) — see mergeDetectionResults below for exactly
+  // what is and isn't covered by the {a,b} check.
+  function _ccCoverageModelIds(rules, models) {
+    try {
+      var a = {}, b = {};
+      _ccResolveModelScope(models, rules && rules.modelA).forEach(function(m){ a[m.id]=true; });
+      _ccResolveModelScope(models, rules && rules.modelB).forEach(function(m){ b[m.id]=true; });
+      return {a: Object.keys(a), b: Object.keys(b)};
+    } catch(e) { return null; }
+  }
+
   // Reconciliation carries human decisions between runs.
   // clash-reconciliation-core.js (plain same-origin <script defer>, not an
   // addon). Was reconciliationCoreV2, a flagged migration with a boot-time
@@ -7723,8 +7875,53 @@ function startApp() {
   // regressions from #638 and ff02b09; graduated to the sole implementation
   // after a soak period — see MEMORY.md Architecture Decisions.
   var _ccReconciliationCore = window._ccClashReconciliationCore;
-  function mergeDetectionResults(newClashes, prevClashes) {
-    return _ccReconciliationCore.mergeDetectionResults(newClashes, prevClashes, _ccReconciliationDeps());
+  function mergeDetectionResults(newClashes, prevClashes, coverageModelIds) {
+    var deps = _ccReconciliationDeps();
+    if (coverageModelIds && !Array.isArray(coverageModelIds) && (coverageModelIds.a || coverageModelIds.b)) {
+      // Precise single-rule coverage (the {a,b} shape from
+      // _ccCoverageModelIds — every single-rule call site: RunDetectionModal,
+      // ClashRulesPanel, the public API, saved presets, NL commands,
+      // window._ccRunDetection). A pair is "in coverage" only if it could
+      // actually have been FORMED by this run's A/B grouping:
+      //   - cross-model (modelAId !== modelBId): covered iff one side is in
+      //     the resolved A-set and the other in the resolved B-set, in
+      //     either direction — matching how the browser sweep pairs A
+      //     against B.
+      //   - same-model: covered ONLY if that model is in BOTH the A-set
+      //     and the B-set (true for an explicit self-clash run, or an
+      //     'all'-vs-'all' run) — a plain "Structure vs MEP" run (disjoint
+      //     A/B) never checks structural-vs-structural self-clashes, so
+      //     those must not read as covered just because the model appears
+      //     somewhere in the combined scope.
+      var setA = Object.create(null), setB = Object.create(null);
+      (coverageModelIds.a||[]).forEach(function(id){ setA[id] = true; });
+      (coverageModelIds.b||[]).forEach(function(id){ setB[id] = true; });
+      deps.coverage = function(c) {
+        var aInA = !!setA[c.modelAId], aInB = !!setB[c.modelAId];
+        var bInA = !!setA[c.modelBId], bInB = !!setB[c.modelBId];
+        if (c.modelAId === c.modelBId) return aInA && aInB;
+        return (aInA && bInB) || (aInB && bInA);
+      };
+    } else if (Array.isArray(coverageModelIds)) {
+      // Union coverage for MULTI-RULE aggregation (_ccRunDetectionRuleset,
+      // the NL multi-self-clash path) — a KNOWN, DELIBERATE
+      // over-approximation, not merely "coarse": a pair between two models
+      // that each individually appear somewhere in the combined scope, but
+      // were never actually paired by any SINGLE constituent rule (e.g.
+      // rule 1 checks A vs B, rule 2 checks C vs D — this treats A vs D as
+      // "covered" too, even though neither rule ever compared them), reads
+      // as in-coverage and can still be auto-resolved. A fully precise fix
+      // needs each rule's (A,B) pair tracked and checked individually
+      // instead of one merged set — a real, larger change (touching every
+      // aggregation call site and the wire shape between them), not done
+      // in this pass. The common single-rule call sites above get the
+      // precise {a,b} check; only these two multi-rule aggregation paths
+      // still carry this residual over-coverage risk.
+      var covSet = Object.create(null);
+      coverageModelIds.forEach(function(id){ covSet[id] = true; });
+      deps.coverage = function(c) { return !!(covSet[c.modelAId] && covSet[c.modelBId]); };
+    }
+    return _ccReconciliationCore.mergeDetectionResults(newClashes, prevClashes, deps);
   }
 
 
@@ -11456,10 +11653,12 @@ function startApp() {
           var st = window._ccLatestState;
           if (!st || !st.models || !st.models.length) return Promise.resolve(null);
           var r = Object.assign({}, st.rules, rulesOverride || {});
+          // opts.clearCachesAfter: one-shot run/export flow, drop BVH caches
+          // (V7 P6.4). opts.coverageModelIds: run-scope for reconciliation
+          // (CLAUDE Item 2), so a scoped rulesOverride never auto-resolves a
+          // clash between models it didn't examine.
           return detectClashesAsync(st.models, r).then(function(result){
-            // opts.clearCachesAfter: for a one-shot run-and-export automation
-            // flow, drop the BVH/world-vert caches this run built once the
-            // result is committed — they won't be reused (V7 P6.4).
+            opts = Object.assign({}, opts, {coverageModelIds: _ccCoverageModelIds(r, st.models)});
             _ccCommitDetectionResult(result, window._ccDispatch, undefined, opts);
             return result;
           });
@@ -20079,6 +20278,7 @@ function startApp() {
         ${delta.newCount > 0 && CHIP('New', delta.newCount, 'var(--accent-bg)', 'var(--accent)')}
         ${delta.persisting > 0 && CHIP('Unchanged', delta.persisting, 'var(--tag-bg)', 'var(--text-secondary)')}
         ${delta.autoResolved > 0 && CHIP('Auto-res', delta.autoResolved, '#0f172a', '#64748b')}
+        ${delta.autoResolvedTruncated > 0 && CHIP('Capped', delta.autoResolvedTruncated, '#78350f', '#fcd34d')}
         <${_RunTrendSparkline} history=${props.history}/>
       </div>`}
     </div>`;
@@ -20603,7 +20803,7 @@ function startApp() {
       if (mA && typeof mA==='string' && mA.indexOf('disc:')===0) discs.push(mA.slice(5));
       if (mB && typeof mB==='string' && mB.indexOf('disc:')===0 && discs.indexOf(mB.slice(5))===-1) discs.push(mB.slice(5));
       if (discs.length===0) discs = ['all'];
-      var ds = { clearance_mm: rules.maxGap > 0 ? rules.maxGap : null, discipline_filters: discs, scope: _ccSummarizeModelScope(s.models) };
+      var ds = { clearance_mm: rules.maxGap > 0 ? rules.maxGap : null, discipline_filters: discs, scope: _ccSummarizeModelScope(s.models), coverageModelIds: _ccCoverageModelIds(rules, s.models) };
       d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
       detectClashesAsync(s.models, rules).then(function(result){ _ccCommitDetectionResult(result, d, ds); });
     }
@@ -20696,7 +20896,7 @@ function startApp() {
       if (mA && mA.indexOf('disc:')===0) discs.push(mA.slice(5));
       if (mB && mB.indexOf('disc:')===0 && discs.indexOf(mB.slice(5))===-1) discs.push(mB.slice(5));
       if (discs.length===0) discs = ['all'];
-      return { clearance_mm: rules.maxGap > 0 ? rules.maxGap : null, discipline_filters: discs, scope: _ccSummarizeModelScope(models) };
+      return { clearance_mm: rules.maxGap > 0 ? rules.maxGap : null, discipline_filters: discs, scope: _ccSummarizeModelScope(models), coverageModelIds: _ccCoverageModelIds(rules, models) };
     }
     function runDetection() {
       if (!canRun) return;
@@ -20776,8 +20976,9 @@ function startApp() {
                 <button onClick=${function(){
                   if(!canRun)return;
                   var merged=Object.assign({},s.rules,sp.rules);
+                  var presetDs={coverageModelIds:_ccCoverageModelIds(merged,s.models)};
                   d({t:A.UPD_RULES,u:sp.rules});d({t:A.DETECTING});d({t:A.TAB,v:'clashes'});
-                  detectClashesAsync(s.models,merged).then(function(result){_ccCommitDetectionResult(result,d);});
+                  detectClashesAsync(s.models,merged).then(function(result){_ccCommitDetectionResult(result,d,presetDs);});
                 }} disabled=${!canRun} title=${_cc_t('run.loadAndRun','Load & Run')}
                   style=${{...S_BTN,fontSize:'0.63rem',padding:'.15rem .25rem',background:'var(--accent-bg)',color:'var(--accent-subtle)',borderRadius:'0',borderLeft:'1px solid var(--border-subtle)'}}>▶</button>
                 <button onClick=${function(){
@@ -32098,8 +32299,9 @@ function startApp() {
         d({t:A.UPD_RULES, u:found.rules});
         if (/run/.test(text) && s.models.length && !s.detecting) {
           var merged = Object.assign({}, s.rules, found.rules);
+          var nlPresetDs = {coverageModelIds: _ccCoverageModelIds(merged, s.models)};
           d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
-          detectClashesAsync(s.models, merged).then(function(result){ _ccCommitDetectionResult(result, d); });
+          detectClashesAsync(s.models, merged).then(function(result){ _ccCommitDetectionResult(result, d, nlPresetDs); });
           return 'Running "' + found.name + '"…';
         }
         return 'Loaded "' + found.name + '". Say "run" to start.';
@@ -32119,7 +32321,8 @@ function startApp() {
       if (!s.models.length) return _offerLoadIFC();
       if (s.detecting) return 'Already on it…';
       d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
-      detectClashesAsync(s.models,s.rules).then(function(result){ _ccCommitDetectionResult(result, d); });
+      var nlRunDs = {coverageModelIds: _ccCoverageModelIds(s.rules, s.models)};
+      detectClashesAsync(s.models,s.rules).then(function(result){ _ccCommitDetectionResult(result, d, nlRunDs); });
       var r2 = s.rules;
       return 'Running detection' + (r2.maxGap ? ' (max gap ' + r2.maxGap + 'mm)' : '') + '…';
     }
@@ -32640,10 +32843,23 @@ function startApp() {
         }
         multiRun.then(function(results){
           if (!results) return;
+          // CLAUDE.md Item 1 (R2/R3 follow-up): this used to dispatch
+          // MERGE_CLASHES directly, with no usability check at the shipped
+          // default (the check a few lines up only runs when concurrencyV2
+          // is enabled) and no run-scope coverage — a cancelled/failed pass
+          // among these self-clash-on-model-X/Y/Z runs would silently
+          // auto-resolve every prior clash in every OTHER model. Route
+          // through the same guarded commit every other detection path
+          // uses, tagging the combined result with the first non-'complete'
+          // outcome found (if any) so a bad pass blocks the whole commit.
+          var badOutcome = null;
+          results.forEach(function(r){
+            if (!badOutcome && !_ccDetectionResultUsable(r)) badOutcome = (r && r._ccOutcome) || 'stale-generation';
+          });
           var allClashes = [];
           results.forEach(function(r){allClashes=allClashes.concat(r);});
-          if (_ccConcurrencyV2Enabled()) classifyClashes(allClashes);
-          d({t:A.MERGE_CLASHES, v:allClashes});
+          var tagged = _ccTagDetectionResult(allClashes, _ccDetectGeneration, badOutcome || 'complete');
+          _ccCommitDetectionResult(tagged, d, {coverageModelIds: multiSelf.map(function(p){return p.id;})});
         });
         return;
       }
@@ -33007,8 +33223,10 @@ function startApp() {
     function executeDetection(rules) {
       d({t:A.UPD_RULES, u:rules});
       if (s.detecting) return;
+      var execMerged = Object.assign({},s.rules,rules);
+      var execDs = {coverageModelIds: _ccCoverageModelIds(execMerged, s.models)};
       d({t:A.DETECTING}); d({t:A.TAB,v:'clashes'});
-      detectClashesAsync(s.models, Object.assign({},s.rules,rules)).then(function(result){ _ccCommitDetectionResult(result, d); });
+      detectClashesAsync(s.models, execMerged).then(function(result){ _ccCommitDetectionResult(result, d, execDs); });
     }
 
     // ── NL feedback for unmatched commands (training mode only) ─
