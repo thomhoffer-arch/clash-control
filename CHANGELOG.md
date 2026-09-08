@@ -1,5 +1,8 @@
 # Changelog
 
+## v7.5.0 (2026-09-08)
+- Fix detection data-loss bugs, close browser/local-engine rule parity gaps, remove an unsafe geometry shortcut (#711)
+
 ## v7.4.6 (2026-09-07)
 - fix: local-engine adapter must read stats.incomplete, not just clashes (R4)
 
