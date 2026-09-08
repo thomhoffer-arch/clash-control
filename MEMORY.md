@@ -10,7 +10,7 @@
 <!-- BEGIN:project-state -->
 ## Project State
 
-**Version:** 7.3.3 (2026-07-27) — daily-sync was silently crashing on MEMORY.md's own prose (see Known Issues); this line was stale for a month as a direct result, now corrected by hand.
+**Version:** 7.5.0 (2026-09-08) — daily-sync was silently crashing on MEMORY.md's own prose (see Known Issues); this line was stale for a month as a direct result, now corrected by hand.
 
 **Live features (all working):**
 - Mesh-based clash detection engine: AABB broad-phase + BVH tri-tri narrow-phase (Möller–Trumbore), optional `_ccWasmIntersect`/`_ccWasmMinDist` WASM accelerators; default clash matrix (skips same-discipline pairs, per-element classification, never skips same-model self-clashes) + N×N matrix UI; rules (discipline filters, clearance, group-by); soft/clearance via spatial-hash vertex distance; hard clashes now report a **real (approximate) penetration depth** (`_estimatePenetrationDepthM` — vertex-inside-mesh ray-parity + true closest-point-on-surface, MTD-style, browser only so far) instead of the old tri-pair SAT chord length; optional escalation to `local-engine.js` for the **same** tri-tri+BVH algorithm at native speed (Numba JIT + multiprocess + scipy KD-tree) — not solid boolean ops, and the Python side doesn't have the new depth estimator yet either (see Known Issues / Active Work)
@@ -2300,6 +2300,19 @@ recorded as fully explained — a genuinely separate, much smaller follow-up if 
 <!-- END:active-work -->
 
 <!-- BEGIN:session-log -->
+### 2026-09-08
+**Summary:** 3 commit(s) landed (no AI summary — set ANTHROPIC_API_KEY secret for richer entries).
+**Changed:** see commits
+**Notable:** —
+
+<details><summary>Commits</summary>
+
+- 271f5a8 chore: bump version to 7.5.0
+- 0ac3972 Fix detection data-loss bugs, close browser/local-engine rule parity gaps, remove an unsafe geometry shortcut (#711)
+- 57c68f9 chore: daily memory sync 2026-09-07
+
+</details>
+
 ### 2026-09-07
 **Summary:** 1 commit(s) landed (no AI summary — set ANTHROPIC_API_KEY secret for richer entries).
 **Changed:** see commits
@@ -3128,130 +3141,12 @@ recorded as fully explained — a genuinely separate, much smaller follow-up if 
 - 616ad35 chore: daily memory sync 2026-07-09
 
 </details>
-
-### 2026-07-09
-**Summary:** 111 commit(s) landed (no AI summary — set ANTHROPIC_API_KEY secret for richer entries).
-**Changed:** see commits
-**Notable:** —
-
-<details><summary>Commits</summary>
-
-- c395cc8 chore: bump version to 5.21.16
-- 2a262d7 fix: dead public API, clash-engine parity, shared-project data loss, daily-sync crash (#676)
-- 3b5bece chore: bump version to 5.21.15
-- d659ae4 fix(walk): delay entry animation until rendered style is applied
-- 436823c fix(walk): don't force rendered style on walk entry
-- 86b0a4d chore: bump version to 5.21.14
-- c0dd744 fix(materials): stricter glass threshold for multi-material mesh groups
-- 48505b1 chore: bump version to 5.21.13
-- 61fedec fix: array-safe material dispose for multi-material meshes
-- 3b40f0d fix(walk): re-entry spawns at orbit target position, not model centre
-- 80984f8 chore: bump version to 5.21.12
-- 6ad7831 fix: per-group materials for multi-material curtain walls
-- b860bbd fix: drop unreachable [::1] bridge host — use 127.0.0.1 only
-- ffc6a32 chore: bump version to 5.21.11
-- 3d0cf52 feat: restore walk mode + position across a hard refresh
-- d94ba11 fix: multi-material meshes render grey + [::1] CSP block
-- 7f4310d chore: bump version to 5.21.10
-- eb6dbd0 fix: curtain panel glass renders opaque grey from Revit Bridge
-- b9b7e1b chore: bump version to 5.21.9
-- f857db5 fix: resolve prefsRef scope error breaking scroll zoom
-- 20d6a0c chore: bump version to 5.21.8
-- 2f5c0f7 feat: scroll zoom speed slider, orbit-around-selected, glass detection fix
-- 6554e6e fix: walk mode pointer-lock race, material undefined warnings, collision toggle label
-- 2e34cc6 chore: bump version to 5.21.7
-- 307cbe7 feat: support per-face-group materials in Revit Bridge mesh builder
-- 05260d2 chore: bump version to 5.21.6
-- 917596e fix: use explicit [::1] ports in CSP — Chrome rejects IPv6 wildcard (#664)
-- 207d300 fix: use explicit [::1] ports in CSP to work around Chrome IPv6 wildcard bug
-- 480c320 chore: bump version to 5.21.5
-- 8a1aa9d fix: add [::1] IPv6 loopback origins to CSP connect-src (#663)
-- 08e170f ci(smart-bridge): auto-bump patch and release on server file changes
-- da8bbd3 fix(smart-bridge-server): bind to both 127.0.0.1 and [::1] loopback interfaces
-- 9e1bf42 docs(CONNECTOR_PROTOCOL): recommend dual-loopback binding, not 0.0.0.0/::
-- 77ee052 chore: bump version to 5.21.4
-- 7466511 fix(smart-bridge): IPv4/IPv6 loopback fallback + Smart Bridge API docs
-- 568281b chore: bump version to 5.21.3
-- 16c17d4 fix(revit-bridge): IPv4/IPv6 loopback fallback + SW cache bust + CONNECTOR_PROTOCOL.md
-- 9aca443 fix(revit-bridge): use 127.0.0.1 instead of localhost for WS connection
-- 05eae26 fix(revit-bridge): dismiss loading modal when WS connect times out
-- b67be1c feat(smart-bridge): expose full IFC property sets via get_element_properties
-- 86aec4f chore: bump version to 5.21.2
-- b1d6ef7 fix: section-plane zoom stop and gizmo handle size
-- 02ea128 fix: section-plane zoom and gizmo handle size
-- 4f665c1 chore: bump version to 5.21.1
-- d163dde fix: zoom-to-cursor no longer zooms out over off-centre geometry
-- 7e55bb3 fix: zoom-to-cursor no longer zooms out over off-centre geometry
-- 112c44b Fix zoom-to-cursor lateral jump when hovering over off-centre geometry
-- 6a4db9c Revit Bridge: handshake timeout, connect debounce, live pull progress (#651)
-- b4452bb Fix Revit Bridge runaway reconnect loop on connector dropout (#650)
-- 16e141a chore: bump version to 5.21.0
-- e0dc9a5 Measure coexists with the section plane + zoom-toward-cursor (#649)
-- 94277e8 chore: bump version to 5.20.35
-- 51619a7 Tour rewrite, discipline auto-detect, viewer drag/box fixes, friendlier errors (#648)
-- 8108978 chore: bump version to 5.20.34
-- c462568 Loam API enrichment (get_data_quality) + SEO tour & comparison pages (#647)
-- a12ad5f chore: bump version to 5.20.33
-- e38caec BCF import: carry referenced IfcGUIDs onto issues (#646)
-- 17251e1 chore: bump version to 5.20.32
-- 041e2ef Expose BCF import to the LLM + wire BCF export (#645)
-- b56d878 chore: bump version to 5.20.31
-- 1022573 Rooms, structural grids & levels via the Revit bridge + issue element keys (#644)
-- db2f282 chore: bump version to 5.20.30
-- 7f7d19c Revit bridge: Connector update prompt + promoted-issue in-app navigation (#643)
-- f64c986 chore: bump version to 5.20.29
-- a710925 Cross-discipline ruleset detection + clash→issue promotion with element link (#642)
-- c673286 Broaden classification extraction (NL-SfB) + close last AI auto-resolve hole (#641)
-- b9f43a8 chore: bump version to 5.20.28
-- c7cf855 Scoped detection resolves models by name + ping orchestrator on run completion (#640)
-- db1ad9a chore: bump version to 5.20.27
-- 410a353 ingest_detection_feedback: stop suppressing pairs that ate real clashes (#639)
-- 5322277 Orchestrator integration fixes: get_status ingest/freshness, no auto-resolve, discipline scoping (#637)
-- 23c7f98 chore: bump version to 5.20.26
-- 36246b0 Reconcile clashes across runs by stable identity (#638)
-- 2d567c7 chore: bump version to 5.20.25
-- f7835bf Fix detection instant-0 regression + one-click Revit live link + faster 82k pull (#636)
-- 7fd2d25 feat(detection): cancel_detection tool — reset a wedged/stuck run from the MCP side (no browser restart) (#635)
-- 03a2e78 chore: bump version to 5.20.24
-- 9d06240 fix(detection): live progress in get_status, reject concurrent runs, 90s stall watchdog (no eternal detecting:true), clear stale type-pair memo on bridge runs (instant-0 fix) (#634)
-- ed679e5 chore: bump version to 5.20.23
-- 2d288da feat: surface last detection error via get_status.lastDetectionError (message+stack) so the orchestrator can report failures without console access (#633)
-- 6bc27a0 chore: bump version to 5.20.22
-- 1b5fafa Scoped sync: exclude heavy models from the live Revit sync (skip on receive + persist + re-include) (#632)
-- 1108df1 feat(clash-status): add reversible 'expected' (suppressed/by-design) status — distinct from resolved, excluded from open count, re-openable; tools route by-design here not resolved (#631)
-- 7f67c60 chore: bump version to 5.20.21
-- 81e8748 Host-aware detection for Revit-keyed relatedPairs + throttle reconnect loading indicator (#630)
-- e749dd9 chore: bump version to 5.20.20
-- 4481f69 Live-test fixes: clash metadata (type/name/storey), uniqueId join key, discipline tagging, classification shape (#629)
-- 7ecc093 feat(smart-bridge): emit connective-spine MUST keys (source, projectKey, sourceLocalId) on clash/issue/element tools (#628)
-- 30dae2d Phase 2 CC helpers: get_element_by_guid + resync (#627)
-- 91c53ae chore: bump Smart Bridge _releaseTag to bridge-v0.3.3
-- 668c632 Smart Bridge: Claude Desktop attach fix + live-link restore + CC↔PDRA join groundwork (#626)
-- 0bb3fa8 chore: bump Smart Bridge _releaseTag to bridge-v0.3.2
-- cc3b3d6 Smart Bridge: make "drive ClashControl from Claude Desktop" actually work (#625)
-- bcd4754 chore: bump version to 5.20.19
-- 9c8b4df Start-screen Revit live-link option + Smart Bridge rejection fix (#624)
-- 7e0b7dd chore: bump version to 5.20.18
-- d80121c CRS-aware geo-placement — reproject IFC4 projected coordinates to lat/lon (#623)
-- 2421ca1 chore: bump version to 5.20.17
-- 9b23c60 IDS 1.0 execution engine — run imported .ids files against loaded models (#622)
-- 38a3e50 chore: bump version to 5.20.16
-- ed2fe18 smart-bridge: bulk-by-default inputs for mutating tools (cut agent round-trips)
-- 58ef9e4 Relabel deviation heatmap as first-pass proximity (don't imply measured deviation)
-- b93d883 docs: add AS_BUILT_DEVIATION.md — point-cloud-vs-BIM deviation scope
-- b6d6b4d 3D world context: auto-seat on the model floor (height auto-snap)
-- 4909b55 3D world context: live vertical height nudge
-- 8f0f769 chore: daily memory sync 2026-06-11
-- d8797ba chore: bump version to 5.20.15
-- 16bffc1 Geo align nudge + site clearing for the 3D world context (#620)
-- 2bc3b62 Fix 3D Tiles: register glTF decoders (meshopt/Draco/KTX2) — PDOK tiles failed to parse (#619)
-- 4a30a52 fix(tiles): cc-render-frame gate — tiles.update() never ran, root tileset never loaded (#617)
-- 3ee4a9d fix(tiles): set _ccHasFrameListener — cc-render-frame is gated and never fired, so tiles.update() never ran
-
-</details>
 <!-- END:session-log -->
 
 <!-- BEGIN:cleanup-log -->
+### 2026-09-08 — pruned session entry 2026-07-09
+**Reason:** Entry is older than 60 days.
+
 ### 2026-08-11 — pruned session entry 2026-06-11
 **Reason:** Entry is older than 60 days.
 
